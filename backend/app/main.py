@@ -1192,7 +1192,6 @@ async def get_failed_logins(
                 if r[0] in blocked_set and blocked_set[r[0]].blocked_at
                 else None
             ),
-            "blocked_status": blocked_set[r[0]].sync_status if r[0] in blocked_set else None,
         }
         for r in rows
     ]

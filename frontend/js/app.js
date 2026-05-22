@@ -299,7 +299,7 @@ async function updateFailedLogins() {
         tbody.innerHTML = items.map(l => {
             const isBlockable = isPublicIpClient(l.source_ip);
             const blockedTitle = l.blocked
-                ? `IP ist auf der Firewall geblockt${l.blocked_at ? ' seit ' + formatTime(l.blocked_at) : ''}${l.blocked_status ? ' (' + l.blocked_status + ')' : ''}`
+                ? `IP steht auf der Blocklist${l.blocked_at ? ' seit ' + formatTime(l.blocked_at) : ''}`
                 : '';
             const blockedBadge = l.blocked
                 ? ` <span class="blocked-badge" title="${escapeHtml(blockedTitle)}">BLOCKED</span>`
