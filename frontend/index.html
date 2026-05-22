@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Security Dashboard</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <header>
+        <h1><span>WAR</span>ROOM Security Dashboard</h1>
+        <div class="header-actions">
+            <span class="status-dot" id="statusDot"></span>
+            <select id="timeRange">
+                <option value="1">24 Stunden</option>
+                <option value="7" selected>7 Tage</option>
+                <option value="30">30 Tage</option>
+                <option value="90">90 Tage</option>
+            </select>
+            <button onclick="refreshAll()">Aktualisieren</button>
+            <button onclick="triggerCollection()">Daten sammeln</button>
+            <button onclick="showFirewallModal()">+ Firewall</button>
+            <a href="/netflow.html" class="admin-link" title="NetFlow-Auswertungen">📊 NetFlow</a>
+            <a href="/admin.html" class="admin-link" title="Admin-Einstellungen">⚙ Admin</a>
+        </div>
+    </header>
+
+    <main>
+        <!-- Stats -->
+        <section class="stats-grid">
+            <div class="stat-card critical">
+                <div class="label">Alarme Gesamt</div>
+                <div class="value" id="totalAlerts">-</div>
+                <div class="sub"><span id="alerts24h">-</span> in 24h</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="label">Events Gesamt</div>
+                <div class="value" id="totalEvents">-</div>
+                <div class="sub"><span id="events24h">-</span> in 24h</div>
+            </div>
+            <div class="stat-card info">
+                <div class="label">Detections Gesamt</div>
+                <div class="value" id="totalDetections">-</div>
+                <div class="sub"><span id="detections24h">-</span> in 24h</div>
+            </div>
+            <div class="stat-card success">
+                <div class="label">Firewall Logs</div>
+                <div class="value" id="totalFwLogs">-</div>
+                <div class="sub"><span id="fwLogs24h">-</span> in 24h</div>
+            </div>
+            <div class="stat-card critical">
+                <div class="label">High/Critical (7d)</div>
+                <div class="value" id="highSeverity">-</div>
+                <div class="sub">erfordert Aufmerksamkeit</div>
+            </div>
+            <div class="stat-card success" id="healthCard">
+                <div class="label">Sophos Health Score</div>
+                <div class="value" id="healthScore">-</div>
+                <div class="sub" id="healthScoreSub">Wird geladen…</div>
+            </div>
+            <div class="stat-card info" id="devicesCard">
+                <div class="label">Endpoints</div>
+                <div class="value" id="devicesTotal">-</div>
+                <div class="sub" id="devicesSub">- isoliert</div>
+            </div>
+            <div class="stat-card warning" id="wafCard">
+                <div class="label">WAF Detections</div>
+                <div class="value" id="wafTotal">-</div>
+                <div class="sub" id="wafSub">- in 24h</div>
+            </div>
+            <div class="stat-card critical" id="ipsCard">
+                <div class="label">IPS Detections</div>
+                <div class="value" id="ipsTotal">-</div>
+                <div class="sub" id="ipsSub">- in 24h</div>
+            </div>
+        </section>
+
+        <!-- World Map -->
+        <section class="map-section">
+            <div class="map-card">
+                <h3>Angriffskarte - Quellen &amp; Ziele</h3>
+                <div id="attack-map"></div>
+            </div>
+        </section>
+
+        <!-- Charts -->
+        <section class="charts-grid">
+            <div class="chart-card">
+                <h3>Timeline - Alerts / Events / Detections</h3>
+                <canvas id="timelineChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Alarme nach Schweregrad</h3>
+                <canvas id="severityChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Alarm-Kategorien</h3>
+                <canvas id="categoriesChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Top Angreifer IPs</h3>
+                <canvas id="attackersChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Firewall Charts -->
+        <section class="charts-grid">
+            <div class="chart-card">
+                <h3>Alarme pro Firewall</h3>
+                <canvas id="fwAlertsChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Events nach Kategorie</h3>
+                <canvas id="fwGroupChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Failed Login Attempts -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Fehlgeschlagene Login-Versuche</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="failedLoginsTable" placeholder="Filter (IP, User, Land…)">
+                    <select id="failedLoginsDays" onchange="updateFailedLogins()">
+                        <option value="1">24 Stunden</option>
+                        <option value="7" selected>7 Tage</option>
+                        <option value="30">30 Tage</option>
+                        <option value="90">90 Tage</option>
+                    </select>
+                    <button id="failedLoginsBlockAll" class="primary" onclick="blockAllFailedLogins()">Alle blocken</button>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Quell-IP</th>
+                                <th>Land</th>
+                                <th>Letzte 24h</th>
+                                <th>Gesamt</th>
+                                <th>User-Namen</th>
+                                <th>Komponente</th>
+                                <th>Letzter Versuch</th>
+                                <th>Letzte Nachricht</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="failedLoginsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- WAF Detections -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>WAF - Web Application Firewall</h3>
+                <div class="waf-summary" id="wafSummary"></div>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="wafTable" placeholder="Filter (IP, Host, URL, Reason…)">
+                    <select id="wafDays" onchange="updateWafWidget()">
+                        <option value="1">24 Stunden</option>
+                        <option value="7" selected>7 Tage</option>
+                        <option value="30">30 Tage</option>
+                        <option value="90">90 Tage</option>
+                    </select>
+                    <label class="checkbox-inline">
+                        <input type="checkbox" id="wafIncludeAllowed" onchange="updateWafWidget()">
+                        Auch erlaubte Requests anzeigen
+                    </label>
+                    <button id="wafBlockAll" class="primary" onclick="blockAllWaf()">Alle IPs blocken</button>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Quell-IP</th>
+                                <th>Land</th>
+                                <th>Host</th>
+                                <th>Methode</th>
+                                <th>Pfad</th>
+                                <th>HTTP-Status</th>
+                                <th>Grund / Attack</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wafTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- IPS Detections -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>IPS - Intrusion Prevention</h3>
+                <div class="waf-summary" id="ipsSummary"></div>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="ipsTable" placeholder="Filter (IP, Signatur, Kategorie…)">
+                    <select id="ipsDays" onchange="updateIpsWidget()">
+                        <option value="1">24 Stunden</option>
+                        <option value="7" selected>7 Tage</option>
+                        <option value="30">30 Tage</option>
+                        <option value="90">90 Tage</option>
+                    </select>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Quell-IP</th>
+                                <th>Land</th>
+                                <th>Ziel</th>
+                                <th>Proto</th>
+                                <th>Signatur</th>
+                                <th>Kategorie</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ipsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Firewall Syslog Table (full width) -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Firewall Security Logs (Syslog)</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="fwLogsTable" placeholder="Filter (IP, Typ, Threat, Firewall…)">
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Typ</th>
+                                <th>Firewall</th>
+                                <th>Quell-IP</th>
+                                <th>Ziel-IP</th>
+                                <th>Aktion</th>
+                                <th>Threat / Nachricht</th>
+                                <th>Land</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fwLogsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Firewall Events Table (Central API) -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Sophos Central Events</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="eventsTable" placeholder="Filter (Device, Typ, Gruppe, Beschreibung…)">
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Device</th>
+                                <th>Typ</th>
+                                <th>Gruppe</th>
+                                <th>Beschreibung</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Blocked IPs (IOC Feed) -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Geblockte IPs (IOC Feed)</h3>
+                <p class="admin-hint">
+                    Die Liste wird live unter <code id="iocFeedUrlDashboard">/ioc_IP</code> als TXT bereitgestellt
+                    (Header <code>X-API-Key</code> erforderlich). Jede Änderung ist sofort über die URL abrufbar.
+                </p>
+                <div class="filter-row">
+                    <input type="text" id="blockIpInput" placeholder="IP-Adresse (z.B. 203.0.113.1)">
+                    <input type="text" id="blockCommentInput" placeholder="Kommentar (optional)">
+                    <button class="primary" onclick="blockIpManual()">IP blocken</button>
+                </div>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="blockedIpsTable" placeholder="Liste filtern (IP, Kommentar…)">
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP</th>
+                                <th>Kommentar</th>
+                                <th>Geblockt</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="blockedIpsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Devices (Endpoints) -->
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Endpoints (Sophos Central)</h3>
+                <div class="filter-row">
+                    <input type="text" id="deviceSearch" placeholder="Hostname suchen…" oninput="debouncedReloadDevices()">
+                    <select id="deviceHealth" onchange="updateDevicesTable()">
+                        <option value="">Alle Health-States</option>
+                        <option value="good">good</option>
+                        <option value="suspicious">suspicious</option>
+                        <option value="bad">bad</option>
+                    </select>
+                    <select id="deviceIsolation" onchange="updateDevicesTable()">
+                        <option value="">Alle Isolation-States</option>
+                        <option value="notIsolated">notIsolated</option>
+                        <option value="isolated">isolated</option>
+                    </select>
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Hostname</th>
+                                <th>OS</th>
+                                <th>IP</th>
+                                <th>Letzter Kontakt</th>
+                                <th>Health</th>
+                                <th>Isolation</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devicesTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Alerts & Detections Tables -->
+        <section class="tables-grid">
+            <div class="table-card">
+                <h3>Letzte Alarme</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="alertsTable" placeholder="Filter (Typ, Beschreibung, Quelle…)">
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Typ</th>
+                                <th>Beschreibung</th>
+                                <th>Quelle</th>
+                                <th>Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alertsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="table-card">
+                <h3>Letzte Detections</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="detectionsTable" placeholder="Filter (Typ, Beschreibung, Gerät…)">
+                </div>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Zeit</th>
+                                <th>Schwere</th>
+                                <th>Typ</th>
+                                <th>Beschreibung</th>
+                                <th>Geraet</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detectionsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- OSINT-Check Modal -->
+    <div class="modal-overlay" id="osintModal">
+        <div class="modal alert-detail-modal">
+            <div class="alert-detail-header">
+                <h3 id="osintModalTitle">OSINT-Check</h3>
+                <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            </div>
+            <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+            <div class="modal-actions">
+                <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
+                <button onclick="closeOsint()">Schliessen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Detail Modal -->
+    <div class="modal-overlay" id="alertDetailModal">
+        <div class="modal alert-detail-modal">
+            <div class="alert-detail-header">
+                <h3>Alarm-Details</h3>
+                <button class="modal-close" onclick="closeAlertDetail()" title="Schliessen">×</button>
+            </div>
+            <div id="alertDetailBody" class="alert-detail-body">Wird geladen…</div>
+            <div class="modal-actions">
+                <button onclick="closeAlertDetail()">Schliessen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firewall Location Modal -->
+    <div class="modal-overlay" id="fwModal">
+        <div class="modal">
+            <h3>Firewall-Standort hinzufuegen</h3>
+            <label>Name</label>
+            <input type="text" id="fwName" placeholder="z.B. HQ Firewall">
+            <label>IP-Adresse</label>
+            <input type="text" id="fwIp" placeholder="203.0.113.1">
+            <label>Breitengrad (Lat)</label>
+            <input type="number" id="fwLat" step="0.0001" placeholder="51.1657">
+            <label>Laengengrad (Lon)</label>
+            <input type="number" id="fwLon" step="0.0001" placeholder="10.4515">
+            <label>Land</label>
+            <input type="text" id="fwCountry" placeholder="DE">
+            <label>Stadt</label>
+            <input type="text" id="fwCity" placeholder="Frankfurt">
+            <div class="modal-actions">
+                <button onclick="hideFirewallModal()">Abbrechen</button>
+                <button class="primary" onclick="addFirewall()">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="/js/osint.js"></script>
+    <script src="/js/map.js"></script>
+    <script src="/js/charts.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

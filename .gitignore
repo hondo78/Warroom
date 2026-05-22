@@ -1,0 +1,32 @@
+# Secrets / local config
+.env
+.env.local
+
+# Claude Code (local agent state)
+.claude/
+CLAUDE.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# GeoIP databases (large, downloaded separately from MaxMind)
+geoip/*.mmdb
+geoip/*.tar.gz
+geoip/*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docker volumes / runtime data
+postgres_data/
+*.log

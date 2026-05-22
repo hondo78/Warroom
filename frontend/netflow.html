@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - NetFlow</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <header>
+        <h1><span>WAR</span>ROOM NetFlow</h1>
+        <div class="header-actions">
+            <select id="nfFirewall">
+                <option value="all">Alle Firewalls</option>
+            </select>
+            <select id="nfDays">
+                <option value="1" selected>24 Stunden</option>
+                <option value="7">7 Tage</option>
+                <option value="30">30 Tage</option>
+            </select>
+            <button onclick="netflowRefresh()">Aktualisieren</button>
+            <a href="/" class="back-link">← Dashboard</a>
+        </div>
+    </header>
+
+    <main>
+        <section class="stats-grid">
+            <div class="stat-card info">
+                <div class="label">Volumen</div>
+                <div class="value" id="nfBytes">-</div>
+                <div class="sub" id="nfBytesRate">- /s</div>
+            </div>
+            <div class="stat-card success">
+                <div class="label">Flows</div>
+                <div class="value" id="nfFlows">-</div>
+                <div class="sub" id="nfFlowsRate">- /min</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="label">Pakete</div>
+                <div class="value" id="nfPackets">-</div>
+                <div class="sub">gesamt</div>
+            </div>
+            <div class="stat-card info">
+                <div class="label">Source-IPs</div>
+                <div class="value" id="nfSources">-</div>
+                <div class="sub">eindeutig</div>
+            </div>
+            <div class="stat-card info">
+                <div class="label">Destinations</div>
+                <div class="value" id="nfDests">-</div>
+                <div class="sub">eindeutig</div>
+            </div>
+        </section>
+
+        <section class="map-section">
+            <div class="chart-card">
+                <h3>Bandbreite (Bytes über Zeit)</h3>
+                <canvas id="nfTimelineChart"></canvas>
+            </div>
+        </section>
+
+        <section class="charts-grid">
+            <div class="chart-card">
+                <h3>Top-Talker (Source-IPs nach Bytes)</h3>
+                <canvas id="nfTalkersChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Top-Destinationen nach Bytes</h3>
+                <canvas id="nfDestsChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Top-Ports / Services</h3>
+                <canvas id="nfPortsChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Protokoll-Mix</h3>
+                <canvas id="nfProtoChart"></canvas>
+            </div>
+        </section>
+
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Interface-Auslastung</h3>
+                <div class="filter-row" style="justify-content: space-between">
+                    <span class="admin-hint" style="margin: 0">SNMP-Index aus NetFlow-Records. Namen können editiert und werden persistiert.</span>
+                    <button class="test-btn" onclick="openIfaceNameEditor()">Namen bearbeiten</button>
+                </div>
+                <canvas id="nfIfaceChart" style="max-height: 320px"></canvas>
+                <div class="table-scroll" style="margin-top: 1rem">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Firewall</th>
+                                <th>Interface</th>
+                                <th>Bytes Ingress</th>
+                                <th>Bytes Egress</th>
+                                <th>Ø Mbps In</th>
+                                <th>Ø Mbps Out</th>
+                                <th>Flows In/Out</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nfIfaceTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="map-section">
+            <div class="map-card">
+                <h3>Destination-Karte (wo gehen die Bytes hin)</h3>
+                <div id="nfMap"></div>
+            </div>
+        </section>
+
+        <!-- Iface-name editor modal -->
+        <div class="modal-overlay" id="ifaceModal">
+            <div class="modal" style="max-width: 700px">
+                <h3>Firewall- und Interface-Namen</h3>
+
+                <p class="admin-hint" style="margin-top: 0.8rem">
+                    <strong>Firewall-Hostnamen</strong> — pro Zeile: <code>firewall_ip Hostname</code><br>
+                    Beispiel: <code>10.0.1.1 HQ Firewall</code>
+                </p>
+                <textarea id="fwAliasText" rows="4" style="width: 100%; background: rgba(15,23,42,0.6); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem"></textarea>
+
+                <p class="admin-hint" style="margin-top: 1rem">
+                    <strong>Interface-Namen</strong> — pro Zeile: <code>firewall_ip iface_idx Name</code><br>
+                    Beispiel: <code>10.0.1.1 7 WAN</code>. Aktuell beobachtete Indizes stehen in der Tabelle unten.
+                </p>
+                <textarea id="ifaceMapText" rows="10" style="width: 100%; background: rgba(15,23,42,0.6); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem"></textarea>
+
+                <div class="modal-actions">
+                    <button onclick="closeIfaceNameEditor()">Abbrechen</button>
+                    <button class="primary" onclick="saveIfaceNames()">Speichern</button>
+                </div>
+            </div>
+        </div>
+
+        <section class="map-section">
+            <div class="table-card">
+                <h3>Top-Flows</h3>
+                <div class="filter-row">
+                    <input type="text" data-filter-for="nfFlowsTable" placeholder="Filter (IP, Port, Service…)">
+                    <select id="nfGroupBy" onchange="updateFlowsTable()">
+                        <option value="none">Gruppierung: keine (5-Tuple)</option>
+                        <option value="src">Quell-IP</option>
+                        <option value="dst">Ziel-IP</option>
+                        <option value="src_dst">Quelle → Ziel</option>
+                        <option value="port">Port + Protokoll</option>
+                        <option value="proto">Protokoll</option>
+                    </select>
+                    <select id="nfMinBytes" onchange="updateFlowsTable()">
+                        <option value="0" selected>Min. Bytes: keine</option>
+                        <option value="1024">≥ 1 KB</option>
+                        <option value="1048576">≥ 1 MB</option>
+                        <option value="10485760">≥ 10 MB</option>
+                        <option value="1073741824">≥ 1 GB</option>
+                    </select>
+                    <select id="nfFlowLimit" onchange="updateFlowsTable()">
+                        <option value="50">50 Zeilen</option>
+                        <option value="200" selected>200</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                </div>
+                <div class="table-scroll">
+                    <table id="nfFlowsTableElement">
+                        <thead id="nfFlowsHead"></thead>
+                        <tbody id="nfFlowsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- OSINT-Check Modal (shared with main dashboard) -->
+    <div class="modal-overlay" id="osintModal">
+        <div class="modal alert-detail-modal">
+            <div class="alert-detail-header">
+                <h3 id="osintModalTitle">OSINT-Check</h3>
+                <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            </div>
+            <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+            <div class="modal-actions">
+                <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
+                <button onclick="closeOsint()">Schliessen</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="/js/osint.js"></script>
+    <script src="/js/netflow.js"></script>
+</body>
+</html>

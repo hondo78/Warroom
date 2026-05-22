@@ -1,0 +1,34 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Empty value => nginx omits the header. Backend runs in open mode then.
+        proxy_set_header X-API-Key "${WARROOM_API_KEY}";
+    }
+
+    # IOC blocklist feed for firewalls. The X-API-Key header must be set by
+    # the firewall itself (not injected by nginx) — the feed is pulled
+    # externally, not from the browser.
+    location = /ioc_IP {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass_request_headers on;
+    }
+
+    location ~* \.(js|css|html)$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

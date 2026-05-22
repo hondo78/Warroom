@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Admin</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <h1><span>WAR</span>ROOM Admin</h1>
+        <div class="header-actions">
+            <a href="/" class="back-link">← Zurück zum Dashboard</a>
+        </div>
+    </header>
+
+    <main class="admin-main">
+        <div id="adminToast" class="admin-toast hidden"></div>
+
+        <!-- Sophos Central API -->
+        <section class="admin-card">
+            <div class="admin-card-header">
+                <h3>Sophos Central API</h3>
+                <button class="test-btn" onclick="testConnection('sophos')">Verbindung testen</button>
+            </div>
+            <p class="admin-hint">OAuth2-Credentials aus dem Sophos Central API Token Management. Tenant-ID wird nach Login automatisch erkannt, falls leer.</p>
+            <div class="admin-form">
+                <label>Client ID</label>
+                <input type="text" data-key="sophos_client_id" autocomplete="off">
+
+                <label>Client Secret</label>
+                <input type="password" data-key="sophos_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+
+                <label>Tenant ID (optional)</label>
+                <input type="text" data-key="sophos_tenant_id" autocomplete="off">
+            </div>
+            <div class="admin-actions">
+                <button class="primary" onclick="saveSection('sophos')">Sophos-Settings speichern</button>
+            </div>
+        </section>
+
+        <!-- IOC Block-IP Feed -->
+        <section class="admin-card">
+            <div class="admin-card-header">
+                <h3>IOC Block-IP Feed</h3>
+            </div>
+            <p class="admin-hint">
+                Die Blocklist wird als TXT-Feed (eine IP pro Zeile) unter folgender URL bereitgestellt.
+                Die Firewall muss den <code>X-API-Key</code> Header mitsenden.
+                Wird bei jedem Block/Unblock automatisch aktualisiert.
+            </p>
+            <div class="admin-readonly">
+                <div><span class="ro-label">Feed-URL:</span> <code id="iocFeedUrl">/ioc_IP</code></div>
+                <div><span class="ro-label">Format:</span> <code>text/plain</code> — eine IPv4/IPv6 pro Zeile, sortiert</div>
+            </div>
+        </section>
+
+        <!-- GeoIP / Reputation / OSINT -->
+        <section class="admin-card">
+            <div class="admin-card-header">
+                <h3>GeoIP &amp; OSINT-Quellen</h3>
+                <button class="test-btn" onclick="testConnection('abuseipdb')">AbuseIPDB testen</button>
+            </div>
+            <p class="admin-hint">API-Keys für GeoIP-Anreicherung und OSINT-Lookups (per IP-Knopf im Dashboard). GreyNoise Community + ipinfo brauchen keinen Key.</p>
+            <div class="admin-form">
+                <label>MaxMind License Key</label>
+                <input type="password" data-key="maxmind_license_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+
+                <label>AbuseIPDB API Key</label>
+                <input type="password" data-key="abuseipdb_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+
+                <label>VirusTotal API Key</label>
+                <input type="password" data-key="virustotal_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+
+                <label>Shodan API Key</label>
+                <input type="password" data-key="shodan_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+
+                <label>Sophos Intelix Client ID</label>
+                <input type="text" data-key="sophos_intelix_client_id" autocomplete="off">
+
+                <label>Sophos Intelix Client Secret</label>
+                <input type="password" data-key="sophos_intelix_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+            </div>
+            <div class="admin-actions">
+                <button class="primary" onclick="saveSection('geoip')">OSINT-Settings speichern</button>
+            </div>
+        </section>
+
+        <!-- Allgemein -->
+        <section class="admin-card">
+            <div class="admin-card-header">
+                <h3>Allgemein</h3>
+            </div>
+            <div class="admin-form">
+                <label>Collector-Intervall (Sekunden)</label>
+                <input type="number" data-key="collector_interval" min="30" max="86400" autocomplete="off">
+
+                <label>Log-Level</label>
+                <select data-key="log_level">
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                </select>
+
+                <label>Dashboard-Titel</label>
+                <input type="text" data-key="dashboard_title" autocomplete="off">
+            </div>
+            <div class="admin-actions">
+                <button class="primary" onclick="saveSection('general')">Allgemeines speichern</button>
+            </div>
+        </section>
+
+        <!-- System (read-only) -->
+        <section class="admin-card">
+            <div class="admin-card-header">
+                <h3>System (Read-only)</h3>
+            </div>
+            <p class="admin-hint">Diese Werte sind container-gebunden und werden über <code>.env</code> + Container-Restart geändert.</p>
+            <div class="admin-readonly">
+                <div><span class="ro-label">Database URL:</span> <code id="roDbUrl">-</code></div>
+                <div><span class="ro-label">Redis URL:</span> <code id="roRedisUrl">-</code></div>
+                <div>
+                    <span class="ro-label">Warroom API Key:</span>
+                    <span id="roApiKey">-</span>
+                    <span class="admin-hint inline">(in <code>.env</code> setzen, Frontend-Container neu starten — nginx injiziert den Header beim Boot)</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/admin.js"></script>
+</body>
+</html>
