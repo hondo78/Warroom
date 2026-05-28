@@ -55,6 +55,19 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_failed_login_interval_seconds": int,
     "agent_failed_login_subnet_attempts": int,
     "agent_failed_login_subnet_min_ips": int,
+    # OSINT-Provider Quotas
+    "osint_abuseipdb_daily_limit": int,
+    "osint_abuseipdb_monthly_limit": int,
+    "osint_virustotal_daily_limit": int,
+    "osint_virustotal_monthly_limit": int,
+    "osint_shodan_daily_limit": int,
+    "osint_shodan_monthly_limit": int,
+    "osint_greynoise_daily_limit": int,
+    "osint_greynoise_monthly_limit": int,
+    "osint_intelix_daily_limit": int,
+    "osint_intelix_monthly_limit": int,
+    "osint_ipinfo_daily_limit": int,
+    "osint_ipinfo_monthly_limit": int,
 }
 
 SECRET_KEYS: set[str] = {

@@ -89,6 +89,9 @@ async def lifespan(app: FastAPI):
         seconds=max(30, settings.agent_failed_login_interval_seconds),
         id="agent_failed_login_loop",
     )
+    # OSINT-usage telemetry: flush the in-memory provider-call counter once a minute
+    from app.osint_metrics import flush_to_db as flush_osint_metrics
+    scheduler.add_job(flush_osint_metrics, "interval", seconds=60, id="osint_metrics_flush")
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
@@ -1899,10 +1902,13 @@ async def get_failed_logins(
     rows = (await db.execute(sql, {"since": since, "day_ago": day_ago, "lim": limit})).all()
 
     blocked_set: dict[str, BlockedIp] = {}
+    whitelisted_set: dict[str, WhitelistedIp] = {}
     ips = {r[0] for r in rows if r[0]}
     if ips:
         bres = await db.execute(select(BlockedIp).where(BlockedIp.ip.in_(ips)))
         blocked_set = {b.ip: b for b in bres.scalars().all()}
+        wres = await db.execute(select(WhitelistedIp).where(WhitelistedIp.ip.in_(ips)))
+        whitelisted_set = {w.ip: w for w in wres.scalars().all()}
 
     return [
         {
@@ -1923,6 +1929,8 @@ async def get_failed_logins(
                 if r[0] in blocked_set and blocked_set[r[0]].blocked_at
                 else None
             ),
+            "whitelisted": r[0] in whitelisted_set,
+            "whitelist_source": whitelisted_set[r[0]].source if r[0] in whitelisted_set else None,
         }
         for r in rows
     ]
@@ -3374,6 +3382,29 @@ async def test_abuseipdb_connection():
         return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}
+
+
+# --- OSINT-Provider usage telemetry ---
+
+
+@app.get("/api/admin/stats/osint-usage")
+async def osint_usage_stats(days: int = Query(default=30, ge=1, le=365)):
+    """Aggregated outbound OSINT-provider call counts. Returns per-provider
+    totals (today / this month / window), status breakdown
+    (success/no_record/error/cache_hit), cache-hit rate, and quota
+    utilization against the configured daily/monthly limits."""
+    from app.osint_metrics import query_usage
+    return await query_usage(days=days)
+
+
+@app.post("/api/admin/stats/osint-usage/flush")
+async def osint_usage_flush():
+    """Force-flush the in-memory provider counter into ``osint_usage``
+    immediately. Useful after a manual lookup burst when you don't want to
+    wait the full 60s scheduler tick."""
+    from app.osint_metrics import flush_to_db
+    n = await flush_to_db()
+    return {"ok": True, "flushed": n}
 
 
 # --- Cache warmer ---

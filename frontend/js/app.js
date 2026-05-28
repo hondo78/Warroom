@@ -391,8 +391,13 @@ async function updateFailedLogins() {
             const blockedBadge = l.blocked
                 ? ` <span class="blocked-badge" title="${escapeHtml(blockedTitle)}">BLOCKED</span>`
                 : '';
+            const whitelistTitle = l.whitelisted
+                ? `IP steht auf der Whitelist${l.whitelist_source ? ' (Quelle: ' + l.whitelist_source + ')' : ''} — wird vom System niemals geblockt`
+                : '';
             let actionCell;
-            if (l.blocked) {
+            if (l.whitelisted) {
+                actionCell = `<span class="ack-label whitelist-pill" title="${escapeHtml(whitelistTitle)}">Whitelist</span>`;
+            } else if (l.blocked) {
                 actionCell = `<span class="ack-label" title="${escapeHtml(blockedTitle)}">geblockt</span>`;
             } else if (isBlockable) {
                 actionCell = `<button class="ack-btn" onclick="blockFromCell('${l.source_ip}', 'failed-login: ${(l.last_message || '').replace(/'/g, '').slice(0,80)}')">Blocken</button>`;
@@ -406,7 +411,7 @@ async function updateFailedLogins() {
             const counterTotal = `<span class="login-count">${fmtCount(l.attempts_total)}</span>`;
             const blockComment = `failed-login: ${(l.last_message || '').replace(/"/g, '').slice(0, 80)}`;
             return `
-                <tr class="${l.blocked ? 'row-blocked' : ''}" data-ip="${escapeHtml(l.source_ip || '')}" data-blockable="${(!l.blocked && isBlockable) ? '1' : '0'}" data-block-comment="${escapeHtml(blockComment)}" title="${escapeHtml(l.last_message || '')}">
+                <tr class="${l.blocked ? 'row-blocked' : ''} ${l.whitelisted ? 'row-whitelisted' : ''}" data-ip="${escapeHtml(l.source_ip || '')}" data-blockable="${(!l.blocked && !l.whitelisted && isBlockable) ? '1' : '0'}" data-block-comment="${escapeHtml(blockComment)}" title="${escapeHtml(l.last_message || '')}">
                     <td><code>${escapeHtml(l.source_ip)}</code>${blockedBadge}${osintButton(l.source_ip)}</td>
                     <td>${escapeHtml([l.country, l.city].filter(Boolean).join(', ') || '-')}</td>
                     <td>${counter24h}</td>

@@ -1,6 +1,14 @@
 const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
     geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
+    osintQuota: [
+        'osint_abuseipdb_daily_limit', 'osint_abuseipdb_monthly_limit',
+        'osint_virustotal_daily_limit', 'osint_virustotal_monthly_limit',
+        'osint_shodan_daily_limit', 'osint_shodan_monthly_limit',
+        'osint_greynoise_daily_limit', 'osint_greynoise_monthly_limit',
+        'osint_intelix_daily_limit', 'osint_intelix_monthly_limit',
+        'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
+    ],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_system_prompt', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips'],
 };

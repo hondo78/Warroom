@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - OSINT-Statistik</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="stats">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <select id="statsDays" class="form-select form-select-sm" style="width:auto" onchange="loadStats()">
+                    <option value="1">Heute</option>
+                    <option value="7" selected>Letzte 7 Tage</option>
+                    <option value="30">Letzte 30 Tage</option>
+                    <option value="90">Letzte 90 Tage</option>
+                </select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="flushAndReload()" title="In-Memory-Counter sofort in die DB schreiben und Daten neu laden"><i class="bi bi-arrow-down-circle"></i> Flush+Reload</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadStats()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <a href="/admin.html#geoip" class="btn btn-outline-secondary btn-sm" title="Quota-Limits konfigurieren"><i class="bi bi-sliders"></i> Limits</a>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">OSINT-Statistik</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link active"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0">📊 OSINT-API — Nutzung &amp; Kosten</h3>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <!-- Global KPIs -->
+                <div class="dashboard-stat-grid mb-3">
+                    <div class="small-box bg-info"><div class="inner"><h3 id="kHeute">-</h3><p>Calls heute</p></div><div class="small-box-footer">echte API-Calls (ohne Cache)</div><span class="icon"><i class="bi bi-calendar-day"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="kMonat">-</h3><p>Calls diesen Monat</p></div><div class="small-box-footer">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="kCache">-</h3><p>Cache-Hit-Rate</p></div><div class="small-box-footer" id="kCacheTotal">— gespart</div><span class="icon"><i class="bi bi-lightning-charge"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="kWarn">-</h3><p>Provider nahe Limit</p></div><div class="small-box-footer">≥ 80 % Auslastung</div><span class="icon"><i class="bi bi-exclamation-triangle"></i></span></div>
+                </div>
+
+                <!-- Provider Cards -->
+                <div class="row g-3 mb-3" id="providerCards"></div>
+
+                <!-- Trend chart -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Tagesverlauf — alle Provider</h3></div>
+                    <div class="card-body"><canvas id="trendChart" style="max-height:320px"></canvas></div>
+                </div>
+
+                <!-- Detail table -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Provider-Detail</h3></div>
+                    <div class="card-body">
+                        <div class="table-scroll" style="max-height:520px">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th>Provider</th>
+                                    <th class="text-end">Heute</th>
+                                    <th class="text-end">Diesen Monat</th>
+                                    <th>Tageslimit</th>
+                                    <th>Monatslimit</th>
+                                    <th class="text-end">Cache-Hit</th>
+                                    <th class="text-end">2xx / no_record / Fehler</th>
+                                    <th>Letzter Call</th>
+                                </tr></thead>
+                                <tbody id="providerTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="/js/nav.js"></script>
+<script src="/js/stats.js"></script>
+</body>
+</html>

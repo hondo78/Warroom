@@ -146,6 +146,20 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_whitelisted_ips_source ON whitelisted_ips(source)",
+    # Old inbound-API counter superseded by the outbound OSINT counter
+    "DROP TABLE IF EXISTS api_usage",
+    """
+    CREATE TABLE IF NOT EXISTS osint_usage (
+        provider VARCHAR(50) NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        bucket_day TIMESTAMP WITH TIME ZONE NOT NULL,
+        count BIGINT NOT NULL DEFAULT 0,
+        last_called_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        PRIMARY KEY (provider, status, bucket_day)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_osint_usage_bucket ON osint_usage(bucket_day)",
+    "CREATE INDEX IF NOT EXISTS idx_osint_usage_provider ON osint_usage(provider)",
 ]
 
 

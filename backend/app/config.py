@@ -60,6 +60,21 @@ class Settings(BaseSettings):
     agent_failed_login_subnet_attempts: int = 10
     agent_failed_login_subnet_min_ips: int = 3
 
+    # --- OSINT-Provider Quota limits (for the /stats.html cost view) ---
+    # Defaults reflect the documented free tiers; 0 disables the warning.
+    osint_abuseipdb_daily_limit: int = 1000     # Standard free tier
+    osint_abuseipdb_monthly_limit: int = 0      # AbuseIPDB tracks per-day
+    osint_virustotal_daily_limit: int = 500     # Public API
+    osint_virustotal_monthly_limit: int = 15500
+    osint_shodan_daily_limit: int = 0           # Shodan is monthly
+    osint_shodan_monthly_limit: int = 100
+    osint_greynoise_daily_limit: int = 10000    # Community
+    osint_greynoise_monthly_limit: int = 0
+    osint_intelix_daily_limit: int = 10000      # Sophos Intelix free tier
+    osint_intelix_monthly_limit: int = 0
+    osint_ipinfo_daily_limit: int = 0           # ip-api.com free is unlimited but rate-limited
+    osint_ipinfo_monthly_limit: int = 50000
+
     class Config:
         env_file = ".env"
 

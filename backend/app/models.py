@@ -242,3 +242,18 @@ class NetflowIfaceBucket(Base):
     bytes = Column(BigInteger, nullable=False, default=0)
     packets = Column(BigInteger, nullable=False, default=0)
     flows = Column(Integer, nullable=False, default=0)
+
+
+class OsintUsage(Base):
+    """Per-day call counter for each outbound OSINT provider. Populated by
+    ``osint_metrics.record`` (called from inside each provider wrapper) and
+    flushed to DB once a minute by the scheduler. ``status`` is one of
+    ``success`` / ``no_record`` / ``error`` / ``cache_hit`` so we can chart
+    quota burn (real HTTP calls) separately from cache hits."""
+    __tablename__ = "osint_usage"
+
+    provider = Column(String(50), primary_key=True)
+    status = Column(String(20), primary_key=True)
+    bucket_day = Column(DateTime(timezone=True), primary_key=True)
+    count = Column(BigInteger, nullable=False, default=0)
+    last_called_at = Column(DateTime(timezone=True), nullable=False)

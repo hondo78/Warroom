@@ -98,9 +98,14 @@ async function updateAgentList() {
             const actionBadge = `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`;
             const conf = Math.round((d.confidence || 0) * 100);
             const confCls = conf >= 80 ? 'severity-critical' : conf >= 50 ? 'severity-high' : 'severity-medium';
+            // Inline OSINT button: stop propagation so clicking 🔍 doesn't
+            // also fire the row-level showAgentDetail(d.id).
+            const osintBtn = (ip) => (typeof osintButton === 'function')
+                ? osintButton(ip, 'osint-btn').replace('onclick="', 'onclick="event.stopPropagation();')
+                : '';
             let alertCell;
             if (d.alert) {
-                alertCell = `${severityBadge(d.alert.severity)} ${escapeHtml(truncate(d.alert.type || '', 25))}${d.alert.source_ip ? '<br><code style="font-size:.78rem">' + escapeHtml(d.alert.source_ip) + '</code>' : ''}`;
+                alertCell = `${severityBadge(d.alert.severity)} ${escapeHtml(truncate(d.alert.type || '', 25))}${d.alert.source_ip ? '<br><code style="font-size:.78rem">' + escapeHtml(d.alert.source_ip) + '</code>' + osintBtn(d.alert.source_ip) : ''}`;
             } else if (['waf','ips','failed_login'].includes(d.source_type) && d.source_ip) {
                 const ctx = (d.action_args || {}).context || {};
                 let sub;
@@ -111,7 +116,7 @@ async function updateAgentList() {
                 } else {
                     sub = `${ctx.count_24h || 0} Failed-Logins (24h)`;
                 }
-                alertCell = `<code style="font-size:.78rem">${escapeHtml(d.source_ip)}</code><br><span class="ip-country" style="font-size:.72rem">${escapeHtml(sub)}</span>`;
+                alertCell = `<code style="font-size:.78rem">${escapeHtml(d.source_ip)}</code>${osintBtn(d.source_ip)}<br><span class="ip-country" style="font-size:.72rem">${escapeHtml(sub)}</span>`;
             } else {
                 alertCell = '<span class="ack-label">—</span>';
             }
@@ -236,7 +241,7 @@ function renderAgentDetail(d) {
         if (ctx.osint_reasons) rows.push(['OSINT-Treffer', (ctx.osint_reasons || []).map(escapeHtml).join(', ')]);
         ruleBlock = `
         <div class="detail-section">
-            <h4>${head} · ${escapeHtml(d.source_ip || '?')}</h4>
+            <h4>${head} · ${escapeHtml(d.source_ip || '?')}${typeof osintButton === 'function' ? osintButton(d.source_ip) : ''}</h4>
             <dl class="detail-grid">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>
         </div>`;
     }
@@ -250,7 +255,7 @@ function renderAgentDetail(d) {
                 <dt>Typ</dt><dd>${escapeHtml(a.type || '-')}</dd>
                 <dt>Severity</dt><dd>${severityBadge(a.severity)}</dd>
                 <dt>Kategorie</dt><dd>${escapeHtml(a.category || '-')}</dd>
-                <dt>Quell-IP</dt><dd>${a.source_ip ? '<code>' + escapeHtml(a.source_ip) + '</code>' : '-'}</dd>
+                <dt>Quell-IP</dt><dd>${a.source_ip ? '<code>' + escapeHtml(a.source_ip) + '</code>' + (typeof osintButton === 'function' ? osintButton(a.source_ip) : '') : '-'}</dd>
                 <dt>Ziel-IP</dt><dd>${a.destination_ip ? '<code>' + escapeHtml(a.destination_ip) + '</code>' : '-'}</dd>
                 <dt>Land/Stadt</dt><dd>${escapeHtml([a.country, a.city].filter(Boolean).join(', ') || '-')}</dd>
                 <dt>Agent</dt><dd>${escapeHtml(a.agent || '-')}</dd>
@@ -373,35 +378,40 @@ async function approveAllPending() {
     // currently visible. Status is always forced to "pending" server-side.
     const actor = document.getElementById('aFilterActor')?.value || '';
     const action = document.getElementById('aFilterAction')?.value || '';
-    const sourceType = document.getElementById('aFilterSource')?.value || '';
 
-    const params = new URLSearchParams({ limit: '1000', status: 'pending' });
+    // Probe count first so the confirm prompt is honest. Limit is capped at
+    // 500 by the backend; if there happen to be more pending decisions we
+    // still proceed (the bulk endpoint isn't limit-bound on its own).
+    const params = new URLSearchParams({ limit: '500', status: 'pending' });
     if (actor) params.set('decided_by', actor);
     if (action) params.set('action', action);
-    if (sourceType) params.set('source_type', sourceType);
     let pendingCount = 0;
+    let probeError = '';
     try {
         const probe = await fetch('/api/agent/decisions?' + params);
+        if (!probe.ok) throw new Error(`HTTP ${probe.status}`);
         const pd = await probe.json();
         pendingCount = (pd.items || []).length;
-    } catch (_) {}
+    } catch (e) {
+        probeError = e.message || String(e);
+        console.warn('approve-all probe failed:', probeError);
+    }
 
-    if (pendingCount === 0) {
+    if (!probeError && pendingCount === 0) {
         alert('Keine pending Decisions im aktuellen Filter.');
         return;
     }
 
-    const filterLabel = [
-        action && `Action=${action}`,
-        sourceType && `Quelle=${sourceType}`,
-    ].filter(Boolean).join(', ');
-    const msg = `${pendingCount} pending Decision(s)${filterLabel ? ' (' + filterLabel + ')' : ''} ausführen?\n\n`
+    const filterLabel = action ? `Action=${action}` : '';
+    const countText = probeError
+        ? '(Anzahl konnte nicht ermittelt werden — Bulk-Approve trotzdem versuchen?)'
+        : `${pendingCount} pending Decision(s)${filterLabel ? ' (' + filterLabel + ')' : ''}`;
+    const msg = `${countText} ausführen?\n\n`
         + 'Whitelist- und Sicherheits-Checks greifen weiterhin pro Decision.';
     if (!confirm(msg)) return;
 
     const body = {};
     if (action) body.action = action;
-    if (sourceType) body.source_type = sourceType;
 
     const btn = document.querySelector('button[onclick="approveAllPending()"]');
     if (btn) { btn.disabled = true; btn.textContent = '… läuft'; }

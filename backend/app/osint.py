@@ -25,6 +25,51 @@ CACHE_TTL = 3600
 TIMEOUT = 12.0
 
 
+# These reasons indicate the provider returned BEFORE any outbound HTTP call
+# was made (missing credentials / OAuth setup), so they don't burn quota and
+# shouldn't be counted as 'error'. Everything else from a provider failure
+# IS counted so misconfigurations and outages stay visible.
+_NO_CALL_REASON_HINTS = ("api key", "client_id", "oauth token")
+
+
+async def _track(provider: str, coro):
+    """Wrap a provider coroutine so its outcome is recorded in
+    ``osint_metrics``. Failure of the metrics layer never propagates."""
+    try:
+        result = await coro
+    except Exception:
+        try:
+            from app.osint_metrics import record
+            await record(provider, "error")
+        except Exception:
+            pass
+        raise
+
+    try:
+        from app.osint_metrics import record
+        if isinstance(result, dict):
+            if result.get("available") is False:
+                reason = (result.get("reason") or "").lower()
+                if not any(h in reason for h in _NO_CALL_REASON_HINTS):
+                    await record(provider, "error")
+            elif result.get("no_record"):
+                await record(provider, "no_record")
+            else:
+                await record(provider, "success")
+    except Exception:
+        pass
+    return result
+
+
+async def _record_cache_hit(providers: list[str]) -> None:
+    try:
+        from app.osint_metrics import record
+        for p in providers:
+            await record(p, "cache_hit")
+    except Exception:
+        pass
+
+
 def is_public(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
@@ -305,18 +350,19 @@ async def lookup(ip: str, force: bool = False) -> dict[str, Any]:
             if cached:
                 payload = json.loads(cached)
                 payload["cached"] = True
+                await _record_cache_hit(["abuseipdb", "virustotal", "shodan", "greynoise", "ipinfo", "intelix"])
                 return payload
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         abuse, vt, shodan, gn, ipi, intelix = await asyncio.gather(
-            _abuseipdb(client, ip),
-            _virustotal(client, ip),
-            _shodan(client, ip),
-            _greynoise(client, ip),
-            _ipinfo(client, ip),
-            _intelix(client, ip),
+            _track("abuseipdb", _abuseipdb(client, ip)),
+            _track("virustotal", _virustotal(client, ip)),
+            _track("shodan", _shodan(client, ip)),
+            _track("greynoise", _greynoise(client, ip)),
+            _track("ipinfo", _ipinfo(client, ip)),
+            _track("intelix", _intelix(client, ip)),
         )
 
     payload = {
@@ -546,6 +592,7 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
             if cached:
                 payload = json.loads(cached)
                 payload["cached"] = True
+                await _record_cache_hit(["virustotal", "intelix"])
                 return payload
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
@@ -556,8 +603,8 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         vt, intelix, dns = await asyncio.gather(
-            _vt_domain(client, domain),
-            _intelix_url(client, intelix_url),
+            _track("virustotal", _vt_domain(client, domain)),
+            _track("intelix", _intelix_url(client, intelix_url)),
             _dns_a_records(intelix_target),
         )
 
@@ -593,14 +640,15 @@ async def lookup_url(url: str, force: bool = False) -> dict[str, Any]:
             if cached:
                 payload = json.loads(cached)
                 payload["cached"] = True
+                await _record_cache_hit(["virustotal", "intelix"])
                 return payload
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         vt, intelix = await asyncio.gather(
-            _vt_url(client, url),
-            _intelix_url(client, url),
+            _track("virustotal", _vt_url(client, url)),
+            _track("intelix", _intelix_url(client, url)),
         )
 
     payload = {

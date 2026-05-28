@@ -407,35 +407,58 @@ _WAF_FILTER_SQL_FRAG = (
 )
 
 
-def _osint_is_bad(osint: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Apply the OSINT-reputation rule. Returns (is_bad, reason_parts)."""
+def _osint_is_bad(osint: dict[str, Any]) -> tuple[bool, list[str], float]:
+    """Apply the OSINT-reputation rule.
+
+    Returns ``(is_bad, reason_parts, confidence)`` where ``confidence`` is the
+    recommended decision confidence based on the strongest provider hit.
+
+    Sophos Intelix is treated as authoritative — any threat verdict from it
+    (explicit security_category, "Malicious" category, or score ≥ 70) yields
+    a high confidence of 0.95 so the IP auto-executes under the default
+    threshold. Other providers stay at the standard 0.85.
+    """
     reasons: list[str] = []
     bad = False
+    confidence = 0.0
 
     ab = (osint or {}).get("abuseipdb") or {}
-    score = ab.get("abuse_score")
-    if ab.get("available") and isinstance(score, int) and score >= 75:
+    score_ab = ab.get("abuse_score")
+    if ab.get("available") and isinstance(score_ab, int) and score_ab >= 75:
         bad = True
-        reasons.append(f"AbuseIPDB {score}/100")
+        confidence = max(confidence, 0.85)
+        reasons.append(f"AbuseIPDB {score_ab}/100")
 
     vt = (osint or {}).get("virustotal") or {}
     mal = vt.get("malicious") or 0
     if vt.get("available") and isinstance(mal, int) and mal >= 2:
         bad = True
+        confidence = max(confidence, 0.85)
         reasons.append(f"VirusTotal {mal}× malicious")
 
     gn = (osint or {}).get("greynoise") or {}
     if gn.get("classification") == "malicious":
         bad = True
+        confidence = max(confidence, 0.85)
         reasons.append("GreyNoise=malicious")
 
     intelix = (osint or {}).get("intelix") or {}
-    intelix_score = intelix.get("score")
-    if intelix.get("available") and isinstance(intelix_score, int) and intelix_score >= 70:
-        bad = True
-        reasons.append(f"Intelix-Score {intelix_score}")
+    if intelix.get("available"):
+        sec_cat = (intelix.get("security_category") or "").strip()
+        category = (intelix.get("category") or "").strip()
+        intelix_score = intelix.get("score")
+        # security_category is only populated when Sophos has classified the
+        # IP under a security threat (malware, phishing, c2, …). category
+        # of "Malicious" / "High Risk" is the explicit verbal verdict.
+        category_says_bad = category.lower() in {"malicious", "high risk", "bad"}
+        score_says_bad = isinstance(intelix_score, int) and intelix_score >= 70
+        if sec_cat or category_says_bad or score_says_bad:
+            bad = True
+            confidence = max(confidence, 0.95)
+            verdict = sec_cat or category or f"Score {intelix_score}"
+            reasons.append(f"Sophos Intelix: {verdict}")
 
-    return bad, reasons
+    return bad, reasons, confidence
 
 
 async def agent_waf_loop(window_minutes: int | None = None, force: bool = False) -> None:
@@ -629,13 +652,13 @@ async def _rule_block_or_audit(
         logger.warning(f"agent[{source_type}]: OSINT lookup for {ip} failed: {e}")
         osint = {}
 
-    is_bad, reasons = _osint_is_bad(osint)
+    is_bad, reasons, osint_confidence = _osint_is_bad(osint)
     if is_bad:
         await _store_rule_decision(
             source_type=source_type, ip=ip,
             action="block_ip",
             reasoning=f"Schlechte Reputation: {', '.join(reasons)}. Nur {count_24h} Events/24h (Schwelle {threshold}).",
-            confidence=0.85,
+            confidence=osint_confidence,
             args={"target_ip": ip},
             context={**context, "rule": "osint", "osint_reasons": reasons},
         )
