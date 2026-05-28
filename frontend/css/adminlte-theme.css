@@ -1,0 +1,267 @@
+/* AdminLTE 4 dark-mode overrides aligned with the existing Warroom palette.
+   Loaded AFTER bootstrap.min.css and adminlte.min.css so these win. */
+
+:root,
+[data-bs-theme="dark"] {
+    --bs-body-bg: #0a0e17;
+    --bs-body-color: #e2e8f0;
+    --bs-secondary-bg: #111827;
+    --bs-tertiary-bg: #1a2332;
+    --bs-border-color: #2a3a4e;
+    --bs-emphasis-color: #f8fafc;
+    --bs-secondary-color: #94a3b8;
+
+    /* Legacy custom-tokens still used by widgets in style.css */
+    --bg-primary: #0a0e17;
+    --bg-secondary: #111827;
+    --bg-card: #1a2332;
+    --border: #2a3a4e;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --accent-blue: #3b82f6;
+    --accent-red: #ef4444;
+    --accent-orange: #f59e0b;
+    --accent-green: #22c55e;
+    --accent-purple: #8b5cf6;
+}
+
+/* Sidebar + topbar surface */
+.app-sidebar,
+.sidebar-brand,
+.app-header.navbar {
+    background-color: #111827 !important;
+    border-color: #2a3a4e !important;
+}
+
+.sidebar-brand .brand-link {
+    color: #e2e8f0;
+    text-decoration: none;
+}
+.sidebar-brand .brand-link .brand-accent {
+    color: var(--accent-red);
+    font-weight: 700;
+}
+.sidebar-brand .brand-sub {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-left: 0.4rem;
+}
+
+.app-sidebar .nav-link {
+    color: #cbd5e1;
+    border-radius: 6px;
+    margin: 0.15rem 0.5rem;
+}
+.app-sidebar .nav-link:hover {
+    background: rgba(59, 130, 246, 0.12);
+    color: #f8fafc;
+}
+.app-sidebar .nav-link.active {
+    background: rgba(59, 130, 246, 0.22);
+    color: #93c5fd;
+}
+.app-sidebar .nav-icon {
+    color: inherit;
+    margin-right: 0.5rem;
+}
+
+.app-header.navbar {
+    color: var(--text-primary);
+}
+
+/* Page body background */
+.app-wrapper,
+.app-main,
+body {
+    background-color: var(--bg-primary) !important;
+}
+
+/* Bootstrap cards reskinned to match the existing card surface */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+}
+.card-header {
+    background: transparent;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.card-title {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+/* Dashboard top-row stat tiles: fixed size so they don't squish when 9 of
+   them sit next to each other, and wrap cleanly on narrower viewports. */
+.dashboard-stat-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+.dashboard-stat-grid > .small-box {
+    width: 220px;
+    min-height: 130px;
+    flex: 0 0 220px;
+    margin: 0;
+}
+@media (max-width: 480px) {
+    .dashboard-stat-grid > .small-box {
+        width: 100%;
+        flex: 1 1 100%;
+    }
+}
+
+/* Small-box stat tiles — accent-coloured top stripe instead of full flood */
+.small-box {
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: none;
+    position: relative;
+    overflow: hidden;
+}
+.small-box::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+}
+.small-box.bg-danger::before  { background: var(--accent-red); }
+.small-box.bg-warning::before { background: var(--accent-orange); }
+.small-box.bg-info::before    { background: var(--accent-blue); }
+.small-box.bg-success::before { background: var(--accent-green); }
+.small-box.bg-purple::before  { background: var(--accent-purple); }
+
+.small-box.bg-danger,
+.small-box.bg-warning,
+.small-box.bg-info,
+.small-box.bg-success,
+.small-box.bg-purple {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+}
+
+.small-box .inner h3 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+}
+.small-box.bg-danger  .inner h3 { color: var(--accent-red); }
+.small-box.bg-warning .inner h3 { color: var(--accent-orange); }
+.small-box.bg-info    .inner h3 { color: var(--accent-blue); }
+.small-box.bg-success .inner h3 { color: var(--accent-green); }
+.small-box.bg-purple  .inner h3 { color: var(--accent-purple); }
+
+.small-box .inner p,
+.small-box .small-box-footer {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.small-box .icon {
+    position: absolute;
+    top: 0.8rem;
+    right: 0.8rem;
+    color: rgba(148, 163, 184, 0.25);
+    font-size: 2.2rem;
+}
+
+/* Forms: dark inputs */
+.form-control,
+.form-select {
+    background-color: rgba(15, 23, 42, 0.6);
+    border-color: var(--border);
+    color: var(--text-primary);
+}
+.form-control:focus,
+.form-select:focus {
+    background-color: rgba(15, 23, 42, 0.8);
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 0.15rem rgba(59, 130, 246, 0.25);
+}
+.form-control::placeholder { color: var(--text-secondary); }
+
+/* Tables */
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--text-primary);
+    --bs-table-border-color: rgba(42, 58, 78, 0.4);
+    --bs-table-hover-bg: rgba(59, 130, 246, 0.05);
+    --bs-table-hover-color: var(--text-primary);
+    color: var(--text-primary);
+}
+.table > thead {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+}
+
+/* Modals */
+.modal-content {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+.modal-header,
+.modal-footer {
+    border-color: var(--border);
+}
+
+/* Bootstrap buttons sized for dense data */
+.btn-sm-table {
+    padding: 0.18rem 0.55rem;
+    font-size: 0.75rem;
+}
+
+/* Nav tabs (used in blocklist) */
+.nav-tabs {
+    border-bottom: 1px solid var(--border);
+}
+.nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+}
+.nav-tabs .nav-link:hover { color: var(--text-primary); }
+.nav-tabs .nav-link.active {
+    background: var(--bg-card);
+    border-color: var(--border) var(--border) var(--bg-card);
+    color: var(--accent-blue);
+}
+
+/* Leaflet popup tweaks stay readable */
+.leaflet-popup-content-wrapper {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border);
+}
+.leaflet-popup-tip { background: var(--bg-card) !important; }
+
+/* Status dot in topbar (kept from old layout) */
+.topbar-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    display: inline-block;
+    animation: pulse 2s infinite;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
+/* Keep existing widget classes (severity-badge, blocked-badge, osint-btn,
+   waf-* …) working — they are defined in style.css and continue to apply. */

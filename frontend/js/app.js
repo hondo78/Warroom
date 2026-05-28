@@ -66,11 +66,101 @@ async function refreshAll() {
         updateDetectionsTable(),
         updateDevicesTable(),
         updateFwLogsTable(),
-        updateBlockedIpsTable(),
         updateFailedLogins(),
         updateWafWidget(),
         updateIpsWidget(),
+        updateAgentDecisions(),
     ]);
+}
+
+async function updateAgentDecisions() {
+    try {
+        const status = document.getElementById('agentFilter')?.value || '';
+        const url = '/api/agent/decisions' + (status ? `?status=${encodeURIComponent(status)}` : '');
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const tbody = document.getElementById('agentDecisionsTable');
+        if (!tbody) return;
+        const items = data.items || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Agent-Empfehlungen für den aktuellen Filter. In der <a href="/admin.html">Admin-Seite</a> Agent aktivieren und Modell wählen.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = items.map(d => {
+            const conf = Math.round((d.confidence || 0) * 100);
+            const confCls = conf >= 80 ? 'severity-critical' : conf >= 50 ? 'severity-high' : 'severity-medium';
+            const actionBadge = `<span class="severity-badge severity-${actionToSev(d.action)}">${escapeHtml(d.action)}</span>`;
+            const alertSummary = d.alert
+                ? `${escapeHtml(d.alert.severity || '')} · ${escapeHtml(truncate(d.alert.type || '', 30))}`
+                : '<span class="ack-label">—</span>';
+            const srcIp = d.alert?.source_ip
+                ? `<code>${escapeHtml(d.alert.source_ip)}</code>${d.alert.country ? ' <span class="ip-country">(' + escapeHtml(d.alert.country) + ')</span>' : ''}`
+                : '-';
+            let actionCell = '';
+            if (d.status === 'pending') {
+                actionCell = `
+                  <button class="ack-btn" onclick="approveAgentDecision(${d.id}, this)">✓ Ausführen</button>
+                  <button class="block-link" onclick="rejectAgentDecision(${d.id}, this)" style="margin-left:.3rem">✗ Ablehnen</button>`;
+            } else {
+                const cls = {executed: 'health-good', approved: 'health-good', rejected: 'health-unknown', failed: 'health-bad'}[d.status] || 'health-unknown';
+                actionCell = `<span class="health-badge ${cls}">${escapeHtml(d.status)}</span>`;
+                if (d.error) actionCell += ` <span class="ack-label" title="${escapeHtml(d.error)}">❗</span>`;
+            }
+            return `
+                <tr title="${escapeHtml(d.reasoning || '')}">
+                    <td>${formatTime(d.created_at)}</td>
+                    <td>${actionBadge}</td>
+                    <td><span class="severity-badge ${confCls}">${conf}%</span></td>
+                    <td>${escapeHtml(truncate(d.reasoning || '-', 80))}</td>
+                    <td>${alertSummary}</td>
+                    <td>${srcIp}</td>
+                    <td>${escapeHtml(d.status)}</td>
+                    <td>${actionCell}</td>
+                </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Agent decisions update failed:', err);
+    }
+}
+
+function actionToSev(action) {
+    return ({
+        block_ip: 'critical',
+        block_subnet: 'critical',
+        isolate: 'high',
+        acknowledge: 'medium',
+        no_action: 'low',
+    })[action] || 'unknown';
+}
+
+async function approveAgentDecision(id, btn) {
+    if (!confirm('Empfehlung jetzt ausführen?')) return;
+    btn.disabled = true; btn.textContent = '...';
+    try {
+        const resp = await fetch(`/api/agent/decisions/${id}/approve`, {method: 'POST'});
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+        await updateAgentDecisions();
+    } catch (err) {
+        alert('Ausführen fehlgeschlagen: ' + err.message);
+        btn.disabled = false; btn.textContent = '✓ Ausführen';
+    }
+}
+
+async function rejectAgentDecision(id, btn) {
+    if (!confirm('Empfehlung als abgelehnt markieren?')) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/agent/decisions/${id}/reject`, {method: 'POST'});
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        await updateAgentDecisions();
+    } catch (err) {
+        alert('Ablehnen fehlgeschlagen: ' + err.message);
+        btn.disabled = false;
+    }
 }
 
 async function updateIpsWidget() {
@@ -173,10 +263,10 @@ async function updateIpsWidget() {
 async function updateWafWidget() {
     try {
         const days = parseInt(document.getElementById('wafDays')?.value || '7', 10);
-        const includeAllowed = !!document.getElementById('wafIncludeAllowed')?.checked;
+        const statusClass = document.getElementById('wafStatusClass')?.value || '4xx_5xx';
         const [statsResp, recentResp] = await Promise.all([
             fetch(`/api/firewall-logs/waf/stats?days=${days}`),
-            fetch(`/api/firewall-logs/waf/recent?days=${days}&limit=300&include_allowed=${includeAllowed}`),
+            fetch(`/api/firewall-logs/waf/recent?days=${days}&limit=300&status_class=${encodeURIComponent(statusClass)}`),
         ]);
         const stats = await statsResp.json();
         const items = await recentResp.json();
@@ -194,28 +284,10 @@ async function updateWafWidget() {
             subEl.textContent = parts.join(' · ');
         }
 
-        // Summary block: top attackers / hosts / attacks as compact pills
-        const sumEl = document.getElementById('wafSummary');
-        if (sumEl) {
-            const block = (title, items, fmt) => {
-                if (!items || !items.length) return '';
-                const pills = items.map(fmt).join('');
-                return `<div class="waf-sum-block"><span class="waf-sum-title">${title}</span>${pills}</div>`;
-            };
-            sumEl.innerHTML = [
-                block('Top Quellen', stats.top_attackers, a =>
-                    `<span class="waf-pill" title="${escapeHtml([a.country, a.city].filter(Boolean).join(', '))}">${escapeHtml(a.ip)} <em>${a.count}</em></span>`),
-                block('Top Hosts', stats.top_hosts, h =>
-                    `<span class="waf-pill">${escapeHtml(truncate(h.host, 40))} <em>${h.count}</em></span>`),
-                block('Top Attacks', stats.top_attacks, a =>
-                    `<span class="waf-pill waf-pill-attack">${escapeHtml(truncate(a.attack, 40))} <em>${a.count}</em></span>`),
-            ].join('');
-        }
-
         // Recent events table
         const tbody = document.getElementById('wafTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine WAF-Detections. SFOS Web Server Protection / WAF-Logs an Syslog-Server (Port 5514) senden.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine WAF-Detections. SFOS Web Server Protection / WAF-Logs an Syslog-Server (Port 5514) senden.</td></tr>';
             return;
         }
         tbody.innerHTML = items.map(l => {
@@ -230,7 +302,14 @@ async function updateWafWidget() {
                 ? `<code>${escapeHtml(l.source_ip)}</code>${blockedBadge}${blockLink}${osintBtn}`
                 : '-';
 
-            const reason = l.reason || l.threat || l.message;
+            // SFOS often stores reason='-' as placeholder; backend already
+            // strips that to null. If still no reason, derive one from the
+            // HTTP status so the column isn't blank for blocked 4xx/5xx.
+            let reason = l.reason || l.threat || l.message;
+            const statusStr = l.http_status ? String(l.http_status) : '';
+            if (!reason && (statusStr.startsWith('4') || statusStr.startsWith('5'))) {
+                reason = `WAF block · HTTP ${statusStr}`;
+            }
             const reasonCell = reason
                 ? escapeHtml(reason)
                 : '<span class="muted-cell" title="Keine Attack-Begründung im Log — vermutlich erlaubter Request">—</span>';
@@ -258,11 +337,19 @@ async function updateWafWidget() {
 
             const isBlockable = l.source_ip && !l.source_blocked && isPublicIpClient(l.source_ip);
             const blockComment = `WAF: ${(l.reason || l.threat || 'attack').replace(/"/g, '').slice(0, 80)}`;
+            // Per-source-IP 4xx/5xx counts across the whole time window
+            const src4 = l.src_4xx || 0;
+            const src5 = l.src_5xx || 0;
+            const errCell = (src4 || src5)
+                ? `<span class="waf-err-cell" title="Hits dieser IP im Zeitraum">${src4 ? `<span class="waf-err-4xx">${src4.toLocaleString('de-DE')}</span>` : ''}${src4 && src5 ? ' / ' : ''}${src5 ? `<span class="waf-err-5xx">${src5.toLocaleString('de-DE')}</span>` : ''}</span>`
+                : '<span class="muted-cell">—</span>';
+
             return `
             <tr data-ip="${escapeHtml(l.source_ip || '')}" data-blockable="${isBlockable ? '1' : '0'}" data-block-comment="${escapeHtml(blockComment)}" title="${escapeHtml(l.user_agent || '')}">
                 <td>${formatTime(l.created_at)}</td>
                 <td>${severityBadge(l.severity)}</td>
                 <td>${srcCell}</td>
+                <td>${errCell}</td>
                 <td>${escapeHtml([l.country, l.city].filter(Boolean).join(', ') || '-')}</td>
                 <td>${escapeHtml(l.host || '-')}</td>
                 <td>${escapeHtml(l.http_method || '-')}</td>
@@ -282,7 +369,7 @@ async function blockAllWaf() {
         tbodyId: 'wafTable',
         buttonId: 'wafBlockAll',
         defaultComment: 'bulk: WAF',
-        refresh: () => Promise.all([updateBlockedIpsTable(), updateWafWidget()]),
+        refresh: updateWafWidget,
     });
 }
 
@@ -366,6 +453,7 @@ async function blockAllFromTable({ tbodyId, buttonId, defaultComment, refresh })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        window.dispatchEvent(new CustomEvent('warroom:blocklist-changed', { detail: { ips } }));
     } catch (err) {
         alert('Block fehlgeschlagen: ' + err.message);
     } finally {
@@ -379,49 +467,12 @@ async function blockAllFailedLogins() {
         tbodyId: 'failedLoginsTable',
         buttonId: 'failedLoginsBlockAll',
         defaultComment: 'bulk: failed-login',
-        refresh: () => Promise.all([updateBlockedIpsTable(), updateFailedLogins()]),
+        refresh: updateFailedLogins,
     });
 }
 
 function fmtCount(n) {
     return (n || 0).toLocaleString('de-DE');
-}
-
-async function updateBlockedIpsTable() {
-    try {
-        const resp = await fetch('/api/firewall/blocked-ips');
-        const payload = await resp.json();
-
-        const feedEl = document.getElementById('iocFeedUrlDashboard');
-        if (feedEl) feedEl.textContent = `${window.location.origin}/ioc_IP`;
-
-        const tbody = document.getElementById('blockedIpsTable');
-        if (!payload.items || payload.items.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine geblockten IPs</td></tr>';
-            return;
-        }
-        tbody.innerHTML = payload.items.map(b => `
-            <tr>
-                <td><code>${b.ip}</code>${osintButton(b.ip)}</td>
-                <td>${b.comment || '-'}</td>
-                <td>${formatTime(b.blocked_at)}</td>
-                <td><button class="restore-btn" onclick="unblockIp('${b.ip}', this)">Unblock</button></td>
-            </tr>`).join('');
-    } catch (err) {
-        console.error('Blocked IPs update failed:', err);
-    }
-}
-
-async function blockIpManual() {
-    const ip = document.getElementById('blockIpInput').value.trim();
-    const comment = document.getElementById('blockCommentInput').value.trim();
-    if (!ip) {
-        alert('Bitte IP angeben');
-        return;
-    }
-    await blockIpRequest(ip, comment);
-    document.getElementById('blockIpInput').value = '';
-    document.getElementById('blockCommentInput').value = '';
 }
 
 async function blockIpRequest(ip, comment) {
@@ -433,29 +484,9 @@ async function blockIpRequest(ip, comment) {
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        await updateBlockedIpsTable();
+        window.dispatchEvent(new CustomEvent('warroom:blocklist-changed', { detail: { ip } }));
     } catch (err) {
         alert('Block fehlgeschlagen: ' + err.message);
-    }
-}
-
-async function unblockIp(ip, btn) {
-    if (!confirm(`IP ${ip} aus Blocklist entfernen?`)) return;
-    btn.disabled = true;
-    btn.textContent = '...';
-    try {
-        const resp = await fetch('/api/firewall/unblock-ip', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip }),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        await updateBlockedIpsTable();
-    } catch (err) {
-        alert('Unblock fehlgeschlagen: ' + err.message);
-        btn.disabled = false;
-        btn.textContent = 'Unblock';
     }
 }
 
@@ -591,17 +622,25 @@ async function updateHealthTile() {
             subEl.textContent = 'API nicht verfügbar';
             return;
         }
-        // Sophos returns { overall: "good"|"attention"|"poor", services: {...} }
-        // — extract whatever is sensible.
+        // Sophos returns a tree of {score: 0..100} leaves across endpoint
+        // protection, policies, tamper protection, exclusions etc. Compute
+        // the average score + count the sections that aren't at 100.
         const data = payload.data || {};
-        const overall = data.overall || data.status || 'unknown';
-        const issues = countHealthIssues(data);
-        valueEl.textContent = overall.toUpperCase();
-        subEl.textContent = issues > 0
-            ? `${issues} Punkt${issues === 1 ? '' : 'e'} mit Aufmerksamkeitsbedarf`
-            : 'Alles im grünen Bereich';
-        cardEl.classList.remove('critical', 'warning', 'info', 'success');
-        cardEl.classList.add(overallToClass(overall));
+        const stats = collectHealthScores(data);
+        if (!stats.count) {
+            valueEl.textContent = 'n/a';
+            subEl.textContent = 'Keine Health-Scores im Payload';
+            return;
+        }
+        const avg = Math.round(stats.sum / stats.count);
+        const cls = scoreToClass(avg);
+        const label = scoreToLabel(avg);
+        valueEl.textContent = `${avg}/100`;
+        subEl.textContent = stats.issues > 0
+            ? `${label} · ${stats.issues} Bereich${stats.issues === 1 ? '' : 'e'} unter 100 (min ${stats.min})`
+            : `${label} · alles bei 100`;
+        cardEl.classList.remove('bg-critical', 'bg-warning', 'bg-info', 'bg-success', 'bg-danger');
+        cardEl.classList.add(cls);
     } catch (err) {
         console.error('Health update failed:', err);
         valueEl.textContent = '-';
@@ -609,27 +648,35 @@ async function updateHealthTile() {
     }
 }
 
-function countHealthIssues(data) {
-    // Sophos response format varies; try common shapes.
-    if (Array.isArray(data.endpoint?.protection?.alerts)) {
-        return data.endpoint.protection.alerts.length;
+function collectHealthScores(node, acc) {
+    // Walk the tree and collect every numeric `score` field. We treat
+    // each occurrence as one weighted section — the Sophos endpoint
+    // already breaks the account into roughly comparable units.
+    acc = acc || { sum: 0, count: 0, min: 100, issues: 0 };
+    if (node && typeof node === 'object') {
+        if (typeof node.score === 'number') {
+            acc.sum += node.score;
+            acc.count += 1;
+            if (node.score < acc.min) acc.min = node.score;
+            if (node.score < 100) acc.issues += 1;
+        }
+        for (const v of Object.values(node)) {
+            if (v && typeof v === 'object') collectHealthScores(v, acc);
+        }
     }
-    if (typeof data.numberOfAlerts === 'number') {
-        return data.numberOfAlerts;
-    }
-    let n = 0;
-    for (const v of Object.values(data.services || {})) {
-        if (v && (v.status === 'attention' || v.status === 'poor')) n++;
-    }
-    return n;
+    return acc;
 }
 
-function overallToClass(overall) {
-    const o = (overall || '').toLowerCase();
-    if (o === 'good' || o === 'ok' || o === 'green') return 'success';
-    if (o === 'attention' || o === 'warning' || o === 'yellow') return 'warning';
-    if (o === 'poor' || o === 'critical' || o === 'red') return 'critical';
-    return 'info';
+function scoreToClass(score) {
+    if (score >= 95) return 'bg-success';
+    if (score >= 75) return 'bg-warning';
+    return 'bg-danger';
+}
+
+function scoreToLabel(score) {
+    if (score >= 95) return 'GOOD';
+    if (score >= 75) return 'ATTENTION';
+    return 'POOR';
 }
 
 async function updateSummary() {

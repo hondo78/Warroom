@@ -1,0 +1,701 @@
+{
+  "uid": "warroom-blocked",
+  "title": "Warroom \u2014 Blocklist",
+  "tags": [
+    "warroom",
+    "blocklist"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Warroom Blocklist-Page",
+      "url": "http://localhost:8448/blocked.html",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Geblockte IPs (gesamt)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_ips"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Geblockte Domains (gesamt)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_domains"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Geblockte URLs (gesamt)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_urls"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Neue Blocks im Zeitraum",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH a AS (SELECT blocked_at FROM blocked_ips WHERE $__timeFilter(blocked_at) UNION ALL SELECT blocked_at FROM blocked_domains WHERE $__timeFilter(blocked_at) UNION ALL SELECT blocked_at FROM blocked_urls WHERE $__timeFilter(blocked_at)) SELECT COUNT(*) FROM a"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Blocks \u00fcber Zeit \u2014 IPs / Domains / URLs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(blocked_at, $__interval) AS time, COUNT(*) AS \"IPs\" FROM blocked_ips WHERE $__timeFilter(blocked_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(blocked_at, $__interval) AS time, COUNT(*) AS \"Domains\" FROM blocked_domains WHERE $__timeFilter(blocked_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(blocked_at, $__interval) AS time, COUNT(*) AS \"URLs\" FROM blocked_urls WHERE $__timeFilter(blocked_at) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IPs"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Domains"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "URLs"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "geomap",
+      "title": "Geblockte IPs \u2014 Geolokation",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT g.lat AS latitude, g.lon AS longitude,\n       MAX(g.country) AS \"Land\",\n       MAX(g.city) AS \"Stadt\",\n       MAX(g.org) AS \"Organisation\",\n       MAX(g.asn) AS \"ASN\",\n       COUNT(DISTINCT b.ip) AS \"Anzahl IPs\",\n       array_to_string((array_agg(DISTINCT b.ip ORDER BY b.ip))[1:5], ', ') AS \"Beispiel-IPs\",\n       array_to_string((array_agg(DISTINCT b.comment) FILTER (WHERE b.comment IS NOT NULL))[1:3], ' \u00b7 ') AS \"Begr\u00fcndungen\"\nFROM blocked_ips b\nJOIN geoip_cache g ON g.ip = b.ip\nWHERE g.lat IS NOT NULL\nGROUP BY g.lat, g.lon\nORDER BY COUNT(DISTINCT b.ip) DESC\nLIMIT 300"
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "zero",
+          "lat": 25,
+          "lon": 10,
+          "zoom": 2
+        },
+        "basemap": {
+          "type": "default",
+          "name": "Layer 0",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Geblockte IPs",
+            "config": {
+              "style": {
+                "size": {
+                  "field": "Anzahl IPs",
+                  "fixed": 6,
+                  "min": 5,
+                  "max": 25
+                },
+                "color": {
+                  "field": "Anzahl IPs",
+                  "fixed": "red"
+                },
+                "opacity": 0.8,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "tooltip": true
+          }
+        ],
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true
+        },
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-YlRd"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "longitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Top-L\u00e4nder geblockter IPs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT g.country AS \"Land\",\n       COUNT(DISTINCT b.ip) AS \"IPs\",\n       array_to_string((array_agg(DISTINCT g.city) FILTER (WHERE g.city IS NOT NULL))[1:5], ', ') AS \"St\u00e4dte (Top 5)\"\nFROM blocked_ips b\nJOIN geoip_cache g ON g.ip = b.ip\nWHERE g.country IS NOT NULL\nGROUP BY g.country\nORDER BY 2 DESC\nLIMIT 25"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "IPs"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-GrYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "type": "barchart",
+      "title": "H\u00e4ufigste Block-Begr\u00fcndungen",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH all_comments AS (\n  SELECT COALESCE(SPLIT_PART(comment, ':', 1), '(ohne)') AS tag FROM blocked_ips WHERE comment IS NOT NULL\n  UNION ALL\n  SELECT COALESCE(SPLIT_PART(comment, ':', 1), '(ohne)') FROM blocked_domains WHERE comment IS NOT NULL\n  UNION ALL\n  SELECT COALESCE(SPLIT_PART(comment, ':', 1), '(ohne)') FROM blocked_urls WHERE comment IS NOT NULL\n)\nSELECT tag, COUNT(*) AS anzahl FROM all_comments\nGROUP BY tag ORDER BY anzahl DESC LIMIT 15"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Geblockte IPs (Liste)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT b.ip AS \"IP\",\n       g.country AS \"Land\",\n       g.city AS \"Stadt\",\n       g.org AS \"Org\",\n       b.comment AS \"Kommentar\",\n       b.blocked_at AS \"Geblockt\"\nFROM blocked_ips b\nLEFT JOIN geoip_cache g ON g.ip = b.ip\nORDER BY b.blocked_at DESC NULLS LAST\nLIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Geblockt"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Geblockte Domains (Liste)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT domain AS \"Domain\",\n       comment AS \"Kommentar\",\n       blocked_at AS \"Geblockt\"\nFROM blocked_domains\nORDER BY blocked_at DESC NULLS LAST\nLIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Geblockt"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Geblockte URLs (Liste)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT url AS \"URL\",\n       comment AS \"Kommentar\",\n       blocked_at AS \"Geblockt\"\nFROM blocked_urls\nORDER BY blocked_at DESC NULLS LAST\nLIMIT 1000"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Geblockt"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,12 +2,17 @@ const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
     geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
+    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_system_prompt', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips'],
 };
 
 document.addEventListener('DOMContentLoaded', () => {
     loadSettings();
     const feed = document.getElementById('iocFeedUrl');
     if (feed) feed.textContent = `${window.location.origin}/ioc_IP`;
+    const feedDomain = document.getElementById('iocFeedDomainUrl');
+    if (feedDomain) feedDomain.textContent = `${window.location.origin}/ioc_domain`;
+    const feedUrl = document.getElementById('iocFeedUrlUrl');
+    if (feedUrl) feedUrl.textContent = `${window.location.origin}/ioc_url`;
 });
 
 async function loadSettings() {
@@ -39,7 +44,7 @@ function applyToForm(data) {
             return;
         }
 
-        if (el.type === 'checkbox') {
+        if (el.type === 'checkbox' || el.dataset.bool === '1') {
             el.checked = !!value;
         } else {
             el.value = value !== null && value !== undefined ? value : '';
@@ -73,7 +78,7 @@ async function saveSection(section) {
             // Empty secret field => keep stored value (skip from payload)
             if (el.value === '') continue;
             payload[key] = el.value;
-        } else if (el.type === 'checkbox') {
+        } else if (el.type === 'checkbox' || el.dataset.bool === '1') {
             payload[key] = el.checked;
         } else if (el.type === 'number') {
             const n = parseInt(el.value, 10);
@@ -121,6 +126,57 @@ async function testConnection(target) {
     } catch (err) {
         toast(`Test-Fehler: ${err.message}`, 'error');
     }
+}
+
+async function loadAgentModels() {
+    toast('Lade Modelle vom Agent-Endpoint…', 'info');
+    try {
+        const resp = await fetch('/api/admin/agent/models');
+        const data = await resp.json();
+        if (!data.ok) {
+            toast(`Modell-Liste fehlgeschlagen: ${data.error}`, 'error');
+            return;
+        }
+        const sel = document.getElementById('agentModelSelect');
+        if (!sel) return;
+        sel.innerHTML = '<option value="">— verfügbare Modelle —</option>' +
+            (data.models || []).map(m => `<option value="${m}">${m}</option>`).join('');
+        toast(`${(data.models || []).length} Modell(e) gefunden.`, 'success');
+    } catch (err) {
+        toast(`Fehler: ${err.message}`, 'error');
+    }
+}
+
+async function agentRunNow() {
+    try {
+        const resp = await fetch('/api/agent/run-now', {method: 'POST'});
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        toast('Agent-Lauf angestoßen. Empfehlungen erscheinen im Dashboard.', 'success');
+    } catch (err) {
+        toast(`Fehler: ${err.message}`, 'error');
+    }
+}
+
+async function loadAgentDefaultPrompt() {
+    try {
+        const r = await fetch('/api/admin/agent/default-prompt');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        const ta = document.getElementById('agentSystemPrompt');
+        if (!ta) return;
+        if (ta.value && !confirm('Den aktuellen Prompt mit dem Default überschreiben?')) return;
+        ta.value = d.default || '';
+        toast('Default-Prompt geladen — noch nicht gespeichert.', 'info');
+    } catch (err) {
+        toast(`Fehler: ${err.message}`, 'error');
+    }
+}
+
+function clearAgentPrompt() {
+    const ta = document.getElementById('agentSystemPrompt');
+    if (!ta) return;
+    if (ta.value && !confirm('Feld leeren? Beim Speichern wird dann der eingebaute Default-Prompt verwendet.')) return;
+    ta.value = '';
 }
 
 let toastTimer = null;

@@ -13,10 +13,24 @@ server {
         proxy_set_header X-API-Key "${WARROOM_API_KEY}";
     }
 
-    # IOC blocklist feed for firewalls. The X-API-Key header must be set by
-    # the firewall itself (not injected by nginx) — the feed is pulled
+    # IOC blocklist feeds for firewalls. The X-API-Key header must be set by
+    # the firewall itself (not injected by nginx) — the feeds are pulled
     # externally, not from the browser.
     location = /ioc_IP {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass_request_headers on;
+    }
+
+    location = /ioc_domain {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass_request_headers on;
+    }
+
+    location = /ioc_url {
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

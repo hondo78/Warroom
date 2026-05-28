@@ -143,6 +143,35 @@ class BlockedIp(Base):
     blocked_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class BlockedDomain(Base):
+    __tablename__ = "blocked_domains"
+
+    domain = Column(String(255), primary_key=True)
+    comment = Column(Text)
+    blocked_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class BlockedUrl(Base):
+    __tablename__ = "blocked_urls"
+
+    url = Column(String(2048), primary_key=True)
+    comment = Column(Text)
+    blocked_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class WhitelistedIp(Base):
+    __tablename__ = "whitelisted_ips"
+
+    ip = Column(String(45), primary_key=True)
+    # Where this entry came from: manual | firewall_location | firewall_log
+    # | netflow | sophos. Manual entries persist across refresh; auto entries
+    # get rewritten on every refresh.
+    source = Column(String(50), nullable=False, default="manual")
+    comment = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 
@@ -163,6 +192,28 @@ class AppSetting(Base):
     key = Column(String(100), primary_key=True)
     value = Column(Text)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgentDecision(Base):
+    __tablename__ = "agent_decisions"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    alert_id = Column(String(255), nullable=False)
+    action = Column(String(50), nullable=False)           # block_ip | acknowledge | isolate | no_action
+    action_args = Column(JSONB)                            # e.g. {"ip": "1.2.3.4"} or {"endpoint_id": "..."}
+    reasoning = Column(Text)
+    confidence = Column(Float)                             # 0..1, from the model
+    status = Column(String(30), nullable=False, default="pending")  # pending | approved | rejected | executed | failed | superseded
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text)
+    model = Column(String(255))                            # which model produced this
+    decided_by = Column(String(20), nullable=False, default="agent")   # agent | human
+    human_comment = Column(Text)
+    supersedes = Column(BigInteger, nullable=True)         # id of decision this manual one replaces
+    # 'alert' = Sophos Central alert; 'waf' = WAF-event rule-based.
+    source_type = Column(String(20), nullable=False, default="alert")
+    source_ip = Column(String(45))                         # filled for WAF decisions (alerts use alert_id)
 
 
 class NetflowBucket(Base):

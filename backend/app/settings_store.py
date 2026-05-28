@@ -34,6 +34,27 @@ MANAGED_KEYS: dict[str, type] = {
     "collector_interval": int,
     "log_level": str,
     "dashboard_title": str,
+    # Agent
+    "agent_enabled": bool,
+    "agent_provider": str,
+    "agent_base_url": str,
+    "agent_api_key": str,
+    "agent_model": str,
+    "agent_interval_seconds": int,
+    "agent_auto_execute": bool,
+    "agent_auto_execute_threshold": int,
+    "agent_system_prompt": str,
+    "agent_waf_enabled": bool,
+    "agent_waf_threshold": int,
+    "agent_waf_interval_seconds": int,
+    "agent_ips_enabled": bool,
+    "agent_ips_threshold": int,
+    "agent_ips_interval_seconds": int,
+    "agent_failed_login_enabled": bool,
+    "agent_failed_login_threshold": int,
+    "agent_failed_login_interval_seconds": int,
+    "agent_failed_login_subnet_attempts": int,
+    "agent_failed_login_subnet_min_ips": int,
 }
 
 SECRET_KEYS: set[str] = {
@@ -43,6 +64,7 @@ SECRET_KEYS: set[str] = {
     "virustotal_api_key",
     "shodan_api_key",
     "sophos_intelix_client_secret",
+    "agent_api_key",
 }
 
 
@@ -109,6 +131,7 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
 
     interval_changed = "collector_interval" in sane
     log_level_changed = "log_level" in sane
+    agent_interval_changed = "agent_interval_seconds" in sane
 
     for k, v in sane.items():
         coerced = _coerce(k, v)
@@ -139,6 +162,33 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
             logger.info(f"Rescheduled collector to {settings.collector_interval}s")
         except Exception as e:
             logger.warning(f"reschedule failed: {e}")
+
+    if agent_interval_changed:
+        try:
+            from app.main import scheduler
+            scheduler.reschedule_job(
+                "agent_loop", trigger="interval",
+                seconds=max(30, settings.agent_interval_seconds),
+            )
+            logger.info(f"Rescheduled agent_loop to {settings.agent_interval_seconds}s")
+        except Exception as e:
+            logger.warning(f"agent reschedule failed: {e}")
+
+    for key, job_id, val_attr in (
+        ("agent_waf_interval_seconds", "agent_waf_loop", "agent_waf_interval_seconds"),
+        ("agent_ips_interval_seconds", "agent_ips_loop", "agent_ips_interval_seconds"),
+        ("agent_failed_login_interval_seconds", "agent_failed_login_loop", "agent_failed_login_interval_seconds"),
+    ):
+        if key in sane:
+            try:
+                from app.main import scheduler
+                scheduler.reschedule_job(
+                    job_id, trigger="interval",
+                    seconds=max(30, getattr(settings, val_attr)),
+                )
+                logger.info(f"Rescheduled {job_id} to {getattr(settings, val_attr)}s")
+            except Exception as e:
+                logger.warning(f"{job_id} reschedule failed: {e}")
 
     return sane
 

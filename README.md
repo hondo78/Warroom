@@ -40,8 +40,9 @@ an. Geblockte IPs werden als **IOC-Feed** (TXT) bereitgestellt, den Firewalls
   Angreifer-Geolokation, Firewall-Logs (IPS / WAF / Auth / Failed-Logins)
 - **NetFlow-Auswertung** (v5/v9/IPFIX) inkl. Top-Talkers und
   Interface-Throughput
-- **IP-Blocking via IOC-Feed**: Geblockte IPs werden über `GET /ioc_IP`
-  als TXT-Datei bereitgestellt. Firewalls ziehen die Liste selbst —
+- **IP-, Domain- und URL-Blocking via IOC-Feeds**: Geblockte IPs unter
+  `GET /ioc_IP`, Domains unter `GET /ioc_domain`, vollständige URLs unter
+  `GET /ioc_url` — jeweils als TXT-Datei. Firewalls ziehen die Listen selbst —
   **kein Push, keine XML-API mehr**
 - **OSINT-Anreicherung**: AbuseIPDB, VirusTotal, Shodan, Sophos Intelix,
   GreyNoise, ipinfo
@@ -78,9 +79,11 @@ docker compose up -d
 Dashboard: <http://localhost:8448>
 Admin: <http://localhost:8448/admin.html>
 
-## IOC-Feed für Firewalls
+## IOC-Feeds für Firewalls
 
-Die geblockte-IP-Liste wird live unter folgender URL bereitgestellt:
+Pflege beider Listen erfolgt unter <http://localhost:8448/blocked.html>.
+
+**IP-Feed**
 
 ```
 GET https://<warroom-host>:8448/ioc_IP
@@ -96,8 +99,37 @@ Header: X-API-Key: <WARROOM_API_KEY>
 ...
 ```
 
-Die Liste wird live aus der DB gelesen — jedes Block/Unblock im Dashboard
-ist **sofort** im Feed sichtbar (kein Push, kein Reconcile, keine Caches).
+**Domain-Feed** (nur Hostnamen, Wildcards `*.evil.tld` erlaubt)
+
+```
+GET https://<warroom-host>:8448/ioc_domain
+Header: X-API-Key: <WARROOM_API_KEY>
+```
+
+```
+*.adsrv.example
+evil.example.com
+phishing.invalid
+...
+```
+
+**URL-Feed** (vollständige URLs inkl. `http(s)://` und Pfad)
+
+```
+GET https://<warroom-host>:8448/ioc_url
+Header: X-API-Key: <WARROOM_API_KEY>
+```
+
+```
+http://example.invalid/malware.exe
+https://phish.example/login?id=1
+https://evil.example.com/c2
+...
+```
+
+Alle drei Listen werden live aus der DB gelesen — jedes Block/Unblock auf
+der Blocklist-Seite ist **sofort** im Feed sichtbar (kein Push, kein
+Reconcile, keine Caches).
 
 ### Firewall-Anbindung
 
@@ -115,19 +147,29 @@ in diesem Fall den Backend-Endpoint hinter einen Proxy mit IP-Whitelist legen
 oder Open-Mode (WARROOM_API_KEY leer) nur für die Firewall-IP per
 Nginx-Config zulassen.
 
-## Block-IP API (Web-UI)
+## Block-API (Web-UI)
 
-Die Block-Buttons im Dashboard rufen folgende Endpoints auf:
+Die Block-Buttons im Dashboard und die Blocklist-Seite rufen folgende
+Endpoints auf:
 
-| Methode | Route                       | Body                                  |
-|---------|-----------------------------|---------------------------------------|
-| POST    | `/api/firewall/block-ip`    | `{"ip": "1.2.3.4", "comment": "..."}` |
-| POST    | `/api/firewall/block-ips`   | `{"ips": ["1.2.3.4", ...]}`           |
-| POST    | `/api/firewall/unblock-ip`  | `{"ip": "1.2.3.4"}`                   |
-| GET     | `/api/firewall/blocked-ips` | -                                     |
+| Methode | Route                            | Body                                          |
+|---------|----------------------------------|-----------------------------------------------|
+| POST    | `/api/firewall/block-ip`         | `{"ip": "1.2.3.4", "comment": "..."}`         |
+| POST    | `/api/firewall/block-ips`        | `{"ips": ["1.2.3.4", ...]}`                   |
+| POST    | `/api/firewall/unblock-ip`       | `{"ip": "1.2.3.4"}`                           |
+| GET     | `/api/firewall/blocked-ips`      | -                                             |
+| POST    | `/api/firewall/block-domain`     | `{"domain": "evil.tld", "comment": "..."}`    |
+| POST    | `/api/firewall/block-domains`    | `{"domains": ["evil.tld", "*.adsrv.tld"]}`    |
+| POST    | `/api/firewall/unblock-domain`   | `{"domain": "evil.tld"}`                      |
+| GET     | `/api/firewall/blocked-domains`  | -                                             |
+| POST    | `/api/firewall/block-url`        | `{"url": "https://evil.tld/x", "comment":""}` |
+| POST    | `/api/firewall/block-urls`       | `{"urls": ["https://a/b", "http://c/d"]}`     |
+| POST    | `/api/firewall/unblock-url`      | `{"url": "https://evil.tld/x"}`               |
+| GET     | `/api/firewall/blocked-urls`     | -                                             |
 
-Alle schreiben in die `blocked_ips`-Tabelle. Der `/ioc_IP`-Feed liest
-diese Tabelle live → keine Sync-Logik nötig.
+IPs landen in `blocked_ips`, Hostnamen in `blocked_domains`, vollständige
+URLs in `blocked_urls`. Die Feeds `/ioc_IP`, `/ioc_domain` und `/ioc_url`
+lesen diese Tabellen live → keine Sync-Logik.
 
 ## Konfiguration
 

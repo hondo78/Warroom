@@ -1,7 +1,9 @@
 import hmac
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, status
@@ -16,7 +18,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import Alert, AppSetting, BlockedIp, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket
+from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, WhitelistedIp
 from app.sophos_client import sophos_client
 from app.settings_store import (
     MANAGED_KEYS,
@@ -59,6 +61,34 @@ async def lifespan(app: FastAPI):
     await apply_overrides_to_settings()
     sophos_client.reload()
     scheduler.add_job(collect_all, "interval", seconds=settings.collector_interval, id="collector")
+    # Keep the heavy dashboard endpoints warm in Redis so the first user after
+    # an idle period doesn't pay the cold-query price. Tighter than the lowest
+    # @cached TTL (30s) so cache entries always overlap.
+    scheduler.add_job(warm_dashboard_cache, "interval", seconds=25, id="cache_warmer")
+    scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
+    # AI agent — only fires if agent_enabled is set; the function itself
+    # is the gate, so we always schedule it.
+    from app.agent import agent_loop, agent_waf_loop, agent_ips_loop, agent_failed_login_loop
+    scheduler.add_job(
+        agent_loop, "interval",
+        seconds=max(30, settings.agent_interval_seconds),
+        id="agent_loop",
+    )
+    scheduler.add_job(
+        agent_waf_loop, "interval",
+        seconds=max(30, settings.agent_waf_interval_seconds),
+        id="agent_waf_loop",
+    )
+    scheduler.add_job(
+        agent_ips_loop, "interval",
+        seconds=max(30, settings.agent_ips_interval_seconds),
+        id="agent_ips_loop",
+    )
+    scheduler.add_job(
+        agent_failed_login_loop, "interval",
+        seconds=max(30, settings.agent_failed_login_interval_seconds),
+        id="agent_failed_login_loop",
+    )
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
@@ -255,6 +285,7 @@ async def get_top_attackers(
 # --- Map Data ---
 
 @app.get("/api/map/attacks")
+@cached(ttl=60)
 async def get_attack_map(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -524,6 +555,7 @@ async def get_firewall_event_stats(
 # --- Recent Alerts, Events & Detections ---
 
 @app.get("/api/events/recent")
+@cached(ttl=60)
 async def get_recent_events(
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -560,6 +592,7 @@ async def get_recent_events(
 
 
 @app.get("/api/alerts/recent")
+@cached(ttl=60)
 async def get_recent_alerts(
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -665,6 +698,7 @@ async def perform_alert_action(
 
 
 @app.get("/api/endpoints/list")
+@cached(ttl=60)
 async def get_endpoints_list(
     limit: int = Query(default=200, ge=1, le=1000),
     health: str | None = Query(default=None),
@@ -706,6 +740,7 @@ async def get_endpoints_list(
 
 
 @app.get("/api/endpoints/stats")
+@cached(ttl=60)
 async def get_endpoints_stats(db: AsyncSession = Depends(get_db)):
     total = (await db.execute(select(func.count(Endpoint.id)))).scalar() or 0
 
@@ -804,6 +839,16 @@ async def list_blocked_ips(db: AsyncSession = Depends(get_db)):
     }
 
 
+async def _is_whitelisted(db: AsyncSession, ip: str) -> bool:
+    """Single source of truth for the block-allowed check. Used by every path
+    that writes into ``blocked_ips`` — manual UI, bulk endpoint, and the AI
+    agent's execute_decision."""
+    if not ip:
+        return False
+    res = await db.execute(select(WhitelistedIp.ip).where(WhitelistedIp.ip == ip))
+    return res.first() is not None
+
+
 @app.post("/api/firewall/block-ip")
 async def block_ip(body: BlockIpIn, db: AsyncSession = Depends(get_db)):
     import ipaddress
@@ -811,6 +856,9 @@ async def block_ip(body: BlockIpIn, db: AsyncSession = Depends(get_db)):
         ipaddress.ip_address(body.ip)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid IP address")
+
+    if await _is_whitelisted(db, body.ip):
+        raise HTTPException(status_code=409, detail=f"IP {body.ip} is whitelisted — block refused")
 
     existing = await db.execute(select(BlockedIp).where(BlockedIp.ip == body.ip))
     entry = existing.scalar_one_or_none()
@@ -844,6 +892,13 @@ async def block_ips_bulk(body: BlockIpsIn, db: AsyncSession = Depends(get_db)):
     if not valid:
         raise HTTPException(status_code=400, detail="no valid IP addresses provided")
 
+    # Drop whitelisted IPs up front so we never even consider blocking them
+    wl_rows = (await db.execute(
+        select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(valid))
+    )).scalars().all()
+    whitelisted = set(wl_rows)
+    valid = [ip for ip in valid if ip not in whitelisted]
+
     existing_rows = (await db.execute(
         select(BlockedIp).where(BlockedIp.ip.in_(valid))
     )).scalars().all()
@@ -867,6 +922,7 @@ async def block_ips_bulk(body: BlockIpsIn, db: AsyncSession = Depends(get_db)):
         "added": added,
         "skipped": skipped,
         "invalid": invalid,
+        "whitelisted": sorted(whitelisted),
     }
 
 
@@ -901,6 +957,678 @@ async def ioc_ip_list(db: AsyncSession = Depends(get_db)):
     )
 
 
+# --- Blocked Domains / URLs ---
+
+# Accept both a bare domain and a full URL (http(s)://…/path?q=…). We normalise
+# anything callers send through one entrypoint so the rest of the code only has
+# to deal with lowercase host strings. Wildcards (`*.example.com`) are kept as-is.
+_DOMAIN_LABEL_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+
+
+def _normalize_domain(value: str) -> str:
+    """Return a normalised host string for the domain blocklist.
+
+    Strict — rejects anything that isn't a bare host. URLs (with scheme or
+    path) go to the URL blocklist via ``_normalize_url`` instead. Port is
+    stripped, host is lowercased, trailing dot dropped. Leading ``*.``
+    wildcards are preserved (firewalls support that in IOC feeds).
+    """
+    if not value:
+        raise ValueError("empty value")
+    raw = value.strip()
+    if not raw:
+        raise ValueError("empty value")
+
+    if "://" in raw:
+        raise ValueError("looks like a URL — use the URL blocklist instead")
+    if "/" in raw or "?" in raw or "#" in raw:
+        raise ValueError("contains path/query — use the URL blocklist instead")
+    if "@" in raw:
+        raise ValueError("contains userinfo — drop the user@ prefix")
+
+    # host[:port] — strip port if exactly one colon and the rest is digits
+    if raw.count(":") == 1:
+        host_part, port_part = raw.rsplit(":", 1)
+        if port_part.isdigit():
+            host = host_part
+        else:
+            host = raw
+    else:
+        host = raw
+
+    host = host.strip().rstrip(".").lower()
+    if not host:
+        raise ValueError("could not extract host")
+
+    wildcard = False
+    if host.startswith("*."):
+        wildcard = True
+        host = host[2:]
+
+    if len(host) > 253:
+        raise ValueError("host too long")
+
+    labels = host.split(".")
+    if len(labels) < 2:
+        raise ValueError("not a fully-qualified domain")
+    for label in labels:
+        if not _DOMAIN_LABEL_RE.match(label):
+            raise ValueError(f"invalid label: {label!r}")
+
+    return ("*." + host) if wildcard else host
+
+
+def _normalize_url(value: str) -> str:
+    """Return a normalised URL for the URL blocklist.
+
+    Requires a scheme (http/https). Lowercases scheme + host, strips
+    trailing whitespace. Keeps path/query/fragment as-is. Use the domain
+    blocklist for bare hosts.
+    """
+    if not value:
+        raise ValueError("empty value")
+    raw = value.strip()
+    if not raw:
+        raise ValueError("empty value")
+    if "://" not in raw:
+        raise ValueError("missing scheme — use the domain blocklist for bare hosts")
+
+    parsed = urlparse(raw)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError(f"unsupported scheme: {scheme!r}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("missing host")
+    if len(raw) > 2048:
+        raise ValueError("url too long")
+
+    # Reassemble: lowercase scheme + host, keep port/path/query/fragment intact.
+    netloc = host
+    if parsed.port is not None:
+        # Drop default ports for the canonical form.
+        if not ((scheme == "http" and parsed.port == 80) or (scheme == "https" and parsed.port == 443)):
+            netloc = f"{host}:{parsed.port}"
+    rest = parsed.path or ""
+    if parsed.query:
+        rest += "?" + parsed.query
+    if parsed.fragment:
+        rest += "#" + parsed.fragment
+    return f"{scheme}://{netloc}{rest}"
+
+
+class BlockDomainIn(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=2048)
+    comment: str | None = Field(None, max_length=500)
+
+
+class BlockDomainsIn(BaseModel):
+    domains: list[str] = Field(..., min_length=1, max_length=500)
+    comment: str | None = Field(None, max_length=500)
+
+
+@app.get("/api/firewall/blocked-domains")
+async def list_blocked_domains(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BlockedDomain).order_by(BlockedDomain.blocked_at.desc()))
+    rows = result.scalars().all()
+    return {
+        "items": [
+            {
+                "domain": d.domain,
+                "comment": d.comment,
+                "blocked_at": d.blocked_at.isoformat() if d.blocked_at else None,
+            }
+            for d in rows
+        ],
+    }
+
+
+@app.post("/api/firewall/block-domain")
+async def block_domain(body: BlockDomainIn, db: AsyncSession = Depends(get_db)):
+    try:
+        domain = _normalize_domain(body.domain)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
+
+    existing = await db.execute(select(BlockedDomain).where(BlockedDomain.domain == domain))
+    entry = existing.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if entry is None:
+        entry = BlockedDomain(domain=domain, comment=body.comment, blocked_at=now)
+        db.add(entry)
+    elif body.comment is not None:
+        entry.comment = body.comment
+    await db.commit()
+
+    return {"ok": True, "domain": domain}
+
+
+@app.post("/api/firewall/block-domains")
+async def block_domains_bulk(body: BlockDomainsIn, db: AsyncSession = Depends(get_db)):
+    invalid: list[str] = []
+    valid: list[str] = []
+    for raw in body.domains:
+        try:
+            valid.append(_normalize_domain(raw))
+        except ValueError:
+            invalid.append(raw)
+
+    if not valid:
+        raise HTTPException(status_code=400, detail="no valid domains provided")
+
+    existing_rows = (await db.execute(
+        select(BlockedDomain).where(BlockedDomain.domain.in_(valid))
+    )).scalars().all()
+    existing_domains = {r.domain for r in existing_rows}
+
+    now = datetime.now(timezone.utc)
+    added: list[str] = []
+    skipped: list[str] = []
+    for domain in valid:
+        if domain in existing_domains:
+            skipped.append(domain)
+            continue
+        if domain in added:
+            continue
+        db.add(BlockedDomain(domain=domain, comment=body.comment, blocked_at=now))
+        added.append(domain)
+    await db.commit()
+
+    return {
+        "ok": True,
+        "added": added,
+        "skipped": skipped,
+        "invalid": invalid,
+    }
+
+
+@app.post("/api/firewall/unblock-domain")
+async def unblock_domain(body: BlockDomainIn, db: AsyncSession = Depends(get_db)):
+    try:
+        domain = _normalize_domain(body.domain)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
+
+    existing = await db.execute(select(BlockedDomain).where(BlockedDomain.domain == domain))
+    entry = existing.scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="domain is not in the blocklist")
+    await db.delete(entry)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.get("/ioc_domain", response_class=PlainTextResponse)
+async def ioc_domain_list(db: AsyncSession = Depends(get_db)):
+    """Plain-text IOC feed for firewalls: one domain per line, sorted.
+
+    Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
+    request, so block/unblock takes effect immediately.
+    """
+    rows = (await db.execute(select(BlockedDomain.domain).order_by(BlockedDomain.domain))).scalars().all()
+    body = "\n".join(rows)
+    if body:
+        body += "\n"
+    return PlainTextResponse(
+        body,
+        headers={
+            "Content-Disposition": 'inline; filename="ioc_domain"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# --- Blocked URLs ---
+
+
+class BlockUrlIn(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2048)
+    comment: str | None = Field(None, max_length=500)
+
+
+class BlockUrlsIn(BaseModel):
+    urls: list[str] = Field(..., min_length=1, max_length=500)
+    comment: str | None = Field(None, max_length=500)
+
+
+@app.get("/api/firewall/blocked-urls")
+async def list_blocked_urls(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BlockedUrl).order_by(BlockedUrl.blocked_at.desc()))
+    rows = result.scalars().all()
+    return {
+        "items": [
+            {
+                "url": u.url,
+                "comment": u.comment,
+                "blocked_at": u.blocked_at.isoformat() if u.blocked_at else None,
+            }
+            for u in rows
+        ],
+    }
+
+
+@app.post("/api/firewall/block-url")
+async def block_url(body: BlockUrlIn, db: AsyncSession = Depends(get_db)):
+    try:
+        url = _normalize_url(body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid url: {e}")
+
+    existing = await db.execute(select(BlockedUrl).where(BlockedUrl.url == url))
+    entry = existing.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if entry is None:
+        entry = BlockedUrl(url=url, comment=body.comment, blocked_at=now)
+        db.add(entry)
+    elif body.comment is not None:
+        entry.comment = body.comment
+    await db.commit()
+
+    return {"ok": True, "url": url}
+
+
+@app.post("/api/firewall/block-urls")
+async def block_urls_bulk(body: BlockUrlsIn, db: AsyncSession = Depends(get_db)):
+    invalid: list[str] = []
+    valid: list[str] = []
+    for raw in body.urls:
+        try:
+            valid.append(_normalize_url(raw))
+        except ValueError:
+            invalid.append(raw)
+
+    if not valid:
+        raise HTTPException(status_code=400, detail="no valid urls provided")
+
+    existing_rows = (await db.execute(
+        select(BlockedUrl).where(BlockedUrl.url.in_(valid))
+    )).scalars().all()
+    existing_urls = {r.url for r in existing_rows}
+
+    now = datetime.now(timezone.utc)
+    added: list[str] = []
+    skipped: list[str] = []
+    for url in valid:
+        if url in existing_urls:
+            skipped.append(url)
+            continue
+        if url in added:
+            continue
+        db.add(BlockedUrl(url=url, comment=body.comment, blocked_at=now))
+        added.append(url)
+    await db.commit()
+
+    return {
+        "ok": True,
+        "added": added,
+        "skipped": skipped,
+        "invalid": invalid,
+    }
+
+
+@app.post("/api/firewall/unblock-url")
+async def unblock_url(body: BlockUrlIn, db: AsyncSession = Depends(get_db)):
+    try:
+        url = _normalize_url(body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid url: {e}")
+
+    existing = await db.execute(select(BlockedUrl).where(BlockedUrl.url == url))
+    entry = existing.scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=404, detail="url is not in the blocklist")
+    await db.delete(entry)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.get("/ioc_url", response_class=PlainTextResponse)
+async def ioc_url_list(db: AsyncSession = Depends(get_db)):
+    """Plain-text IOC feed for firewalls: one URL per line, sorted.
+
+    Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
+    request, so block/unblock takes effect immediately.
+    """
+    rows = (await db.execute(select(BlockedUrl.url).order_by(BlockedUrl.url))).scalars().all()
+    body = "\n".join(rows)
+    if body:
+        body += "\n"
+    return PlainTextResponse(
+        body,
+        headers={
+            "Content-Disposition": 'inline; filename="ioc_url"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# --- Whitelist (IPs that may never be blocked) ---
+
+
+class WhitelistIn(BaseModel):
+    ip: str = Field(..., min_length=7, max_length=45)
+    comment: str | None = Field(None, max_length=500)
+
+
+@app.get("/api/firewall/whitelist")
+async def list_whitelist(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(
+        select(WhitelistedIp).order_by(WhitelistedIp.source, WhitelistedIp.ip)
+    )).scalars().all()
+    return {"items": [
+        {
+            "ip": w.ip,
+            "source": w.source,
+            "comment": w.comment,
+            "created_at": w.created_at.isoformat() if w.created_at else None,
+            "last_seen_at": w.last_seen_at.isoformat() if w.last_seen_at else None,
+        }
+        for w in rows
+    ]}
+
+
+@app.post("/api/firewall/whitelist")
+async def add_whitelist(body: WhitelistIn, db: AsyncSession = Depends(get_db)):
+    import ipaddress
+    try:
+        ipaddress.ip_address(body.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+
+    existing = await db.get(WhitelistedIp, body.ip)
+    if existing is None:
+        db.add(WhitelistedIp(ip=body.ip, source="manual", comment=body.comment))
+    else:
+        # Upgrade to manual so a refresh doesn't remove it
+        existing.source = "manual"
+        if body.comment is not None:
+            existing.comment = body.comment
+        existing.last_seen_at = datetime.now(timezone.utc)
+    # If the IP is already in the blocklist, drop it — whitelist takes precedence
+    bl = await db.get(BlockedIp, body.ip)
+    if bl is not None:
+        await db.delete(bl)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/firewall/whitelist/{ip}")
+async def remove_whitelist(ip: str, db: AsyncSession = Depends(get_db)):
+    rec = await db.get(WhitelistedIp, ip)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="not in whitelist")
+    await db.delete(rec)
+    await db.commit()
+    return {"ok": True}
+
+
+_AUTO_SOURCES = {"firewall_location", "firewall_log", "netflow", "sophos"}
+
+
+@app.post("/api/firewall/whitelist/refresh")
+async def refresh_whitelist(db: AsyncSession = Depends(get_db)):
+    """Auto-populate the whitelist from every place the system already knows
+    about firewalls. Manual entries are never touched."""
+    discovered: dict[str, str] = {}  # ip -> source label
+
+    # 1) firewall_locations (manual user entries with explicit IP)
+    fl_rows = (await db.execute(
+        select(FirewallLocation.ip, FirewallLocation.name).where(FirewallLocation.ip.isnot(None))
+    )).all()
+    for ip, name in fl_rows:
+        discovered.setdefault(ip, f"firewall_location · {name}")
+
+    # 2) firewall_logs.firewall_ip — IPs that actively send syslog to us
+    fl_log = (await db.execute(
+        select(FirewallLog.firewall_ip, func.max(FirewallLog.firewall_name))
+        .where(FirewallLog.firewall_ip.isnot(None))
+        .group_by(FirewallLog.firewall_ip)
+    )).all()
+    for ip, name in fl_log:
+        discovered.setdefault(ip, f"firewall_log · {name or '?'}")
+
+    # 3) netflow_buckets.firewall_ip — exporters
+    nf_rows = (await db.execute(
+        select(NetflowBucket.firewall_ip).where(NetflowBucket.firewall_ip.isnot(None)).distinct()
+    )).scalars().all()
+    for ip in nf_rows:
+        discovered.setdefault(ip, "netflow · exporter")
+
+    # 4) Sophos firewalls API (best-effort, may not be available)
+    try:
+        sophos_fws = await sophos_client.get_firewalls()
+        for fw in sophos_fws or []:
+            for key in ("ip", "externalIpv4Addresses", "internalIpv4Addresses"):
+                v = fw.get(key)
+                if isinstance(v, str):
+                    discovered.setdefault(v, f"sophos · {fw.get('name', '?')}")
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, str):
+                            discovered.setdefault(item, f"sophos · {fw.get('name', '?')}")
+    except Exception as e:
+        logger.warning(f"whitelist refresh: sophos lookup failed: {e}")
+
+    # Apply: keep manual entries untouched, sync auto entries
+    now = datetime.now(timezone.utc)
+    added: list[str] = []
+    refreshed: list[str] = []
+    auto_existing = (await db.execute(
+        select(WhitelistedIp).where(WhitelistedIp.source != "manual")
+    )).scalars().all()
+    auto_by_ip = {w.ip: w for w in auto_existing}
+
+    for ip, label in discovered.items():
+        if ip in auto_by_ip:
+            w = auto_by_ip[ip]
+            w.source = label
+            w.last_seen_at = now
+            refreshed.append(ip)
+        elif (await db.get(WhitelistedIp, ip)) is None:
+            db.add(WhitelistedIp(ip=ip, source=label, comment="auto-discovered", created_at=now, last_seen_at=now))
+            added.append(ip)
+        else:
+            # Already exists as manual — leave alone
+            pass
+
+    # Remove auto entries that are no longer discovered (firewall rotated IP, etc.)
+    stale: list[str] = []
+    for ip, w in auto_by_ip.items():
+        if ip not in discovered:
+            await db.delete(w)
+            stale.append(ip)
+
+    # And drop any of these IPs from blocked_ips, just in case
+    all_ips = list(discovered.keys())
+    if all_ips:
+        bl_rows = (await db.execute(
+            select(BlockedIp).where(BlockedIp.ip.in_(all_ips))
+        )).scalars().all()
+        for b in bl_rows:
+            await db.delete(b)
+
+    await db.commit()
+    return {
+        "ok": True,
+        "added": added,
+        "refreshed": refreshed,
+        "removed_stale_auto": stale,
+        "removed_from_blocklist": [b.ip for b in bl_rows] if all_ips else [],
+        "total_now": len(discovered) + sum(1 for w in (await db.execute(
+            select(WhitelistedIp).where(WhitelistedIp.source == "manual")
+        )).scalars().all()),
+    }
+
+
+# --- Firewall overview (extended with interfaces + log/flow counts) ---
+
+
+@app.get("/api/firewalls/extended")
+async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
+    """One row per known firewall (grouped by name), not per IP. A firewall
+    that's both manually configured AND sends syslog from a different IP
+    shows up once with both IPs listed underneath."""
+    locs = (await db.execute(select(FirewallLocation))).scalars().all()
+
+    log_stats = (await db.execute(
+        select(
+            FirewallLog.firewall_ip,
+            func.max(FirewallLog.firewall_name).label("name"),
+            func.count(FirewallLog.id).label("log_count"),
+            func.max(FirewallLog.created_at).label("last_log"),
+        )
+        .where(FirewallLog.firewall_ip.isnot(None))
+        .group_by(FirewallLog.firewall_ip)
+    )).all()
+
+    iface_stats = (await db.execute(
+        select(
+            NetflowIfaceBucket.firewall_ip,
+            func.count(func.distinct(NetflowIfaceBucket.iface_idx)).label("iface_count"),
+            func.max(NetflowIfaceBucket.bucket_start).label("last_flow"),
+        )
+        .group_by(NetflowIfaceBucket.firewall_ip)
+    )).all()
+
+    wl_rows = (await db.execute(select(WhitelistedIp.ip))).scalars().all()
+    whitelisted = set(wl_rows)
+
+    # --- Step 1: build per-IP records (still indexed by IP) ---
+    by_ip: dict[str, dict] = {}
+    for loc in locs:
+        if not loc.ip:
+            continue
+        by_ip[loc.ip] = {
+            "ip": loc.ip,
+            "name": loc.name,
+            "location_id": loc.id,
+            "sources": ["location"],
+            "lat": loc.lat, "lon": loc.lon,
+            "country": loc.country, "city": loc.city,
+            "log_count": 0, "last_log": None,
+            "iface_count": 0, "last_flow": None,
+            "whitelisted": loc.ip in whitelisted,
+        }
+
+    for r in log_stats:
+        ip, name, cnt, last = r
+        rec = by_ip.setdefault(ip, {
+            "ip": ip, "name": name, "location_id": None, "sources": [],
+            "lat": None, "lon": None, "country": None, "city": None,
+            "log_count": 0, "last_log": None,
+            "iface_count": 0, "last_flow": None,
+            "whitelisted": ip in whitelisted,
+        })
+        rec["log_count"] = int(cnt or 0)
+        rec["last_log"] = last.isoformat() if last else None
+        rec["name"] = rec.get("name") or name
+        rec["sources"] = list(set((rec.get("sources") or []) + ["syslog"]))
+
+    for r in iface_stats:
+        ip, count, last = r
+        rec = by_ip.setdefault(ip, {
+            "ip": ip, "name": None, "location_id": None, "sources": [],
+            "lat": None, "lon": None, "country": None, "city": None,
+            "log_count": 0, "last_log": None,
+            "whitelisted": ip in whitelisted,
+        })
+        rec["iface_count"] = int(count or 0)
+        rec["last_flow"] = last.isoformat() if last else None
+        rec["sources"] = list(set((rec.get("sources") or []) + ["netflow"]))
+
+    # --- Step 2: collapse per IP records into firewalls (keyed by name) ---
+    grouped: dict[str, dict] = {}
+    for ip, rec in by_ip.items():
+        name = (rec.get("name") or "").strip()
+        # Firewalls without a name (only seen in NetFlow) get bucketed under
+        # their IP so the user can still see + name them later.
+        key = name.lower() if name else f"__ip__{ip}"
+        fw = grouped.setdefault(key, {
+            "name": name or None,
+            "ips": [],
+            "location_id": None,
+            "log_count": 0, "last_log": None,
+            "iface_count": 0, "last_flow": None,
+            "country": None, "city": None,
+            "lat": None, "lon": None,
+            "whitelisted_count": 0,
+            "ip_count": 0,
+        })
+        fw["ips"].append({
+            "ip": ip,
+            "sources": rec.get("sources") or [],
+            "whitelisted": rec["whitelisted"],
+            "log_count": rec["log_count"],
+            "iface_count": rec["iface_count"],
+            "last_log": rec["last_log"],
+            "last_flow": rec["last_flow"],
+        })
+        fw["log_count"] += rec["log_count"]
+        fw["iface_count"] += rec["iface_count"]
+        fw["ip_count"] += 1
+        if rec["whitelisted"]:
+            fw["whitelisted_count"] += 1
+        if rec["last_log"] and (fw["last_log"] is None or rec["last_log"] > fw["last_log"]):
+            fw["last_log"] = rec["last_log"]
+        if rec["last_flow"] and (fw["last_flow"] is None or rec["last_flow"] > fw["last_flow"]):
+            fw["last_flow"] = rec["last_flow"]
+        # First firewall_location wins as the display location
+        if rec.get("location_id") and not fw["location_id"]:
+            fw["location_id"] = rec["location_id"]
+            fw["country"] = rec["country"]; fw["city"] = rec["city"]
+            fw["lat"] = rec["lat"]; fw["lon"] = rec["lon"]
+
+    # Sort each firewall's IP list deterministically (location IPs first)
+    for fw in grouped.values():
+        fw["ips"].sort(key=lambda x: (not ("location" in x["sources"]), -(x["log_count"] + x["iface_count"]), x["ip"]))
+
+    items = sorted(grouped.values(), key=lambda r: r["log_count"] + r["iface_count"], reverse=True)
+    return {"items": items}
+
+
+@app.get("/api/firewalls/{fw_ip}/interfaces")
+async def firewall_interfaces(fw_ip: str, db: AsyncSession = Depends(get_db)):
+    """Per-interface stats for one firewall (last 24h)."""
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    rows = (await db.execute(
+        select(
+            NetflowIfaceBucket.iface_idx,
+            NetflowIfaceBucket.direction,
+            func.sum(NetflowIfaceBucket.bytes).label("b"),
+            func.sum(NetflowIfaceBucket.flows).label("f"),
+            func.max(NetflowIfaceBucket.bucket_start).label("last_seen"),
+        )
+        .where(NetflowIfaceBucket.firewall_ip == fw_ip, NetflowIfaceBucket.bucket_start >= since)
+        .group_by(NetflowIfaceBucket.iface_idx, NetflowIfaceBucket.direction)
+    )).all()
+
+    # Resolve interface names from app_settings.iface_names
+    name_setting = await db.get(AppSetting, "iface_names")
+    names: dict = {}
+    if name_setting and name_setting.value:
+        try:
+            names = json.loads(name_setting.value).get(fw_ip, {}) or {}
+        except (ValueError, TypeError):
+            names = {}
+
+    pivot: dict[int, dict] = {}
+    for idx, direction, b, f, last in rows:
+        cell = pivot.setdefault(idx, {
+            "iface_idx": idx,
+            "name": names.get(str(idx)),
+            "bytes_in": 0, "bytes_out": 0,
+            "flows_in": 0, "flows_out": 0,
+            "last_seen": None,
+        })
+        if direction == "in":
+            cell["bytes_in"] = int(b or 0); cell["flows_in"] = int(f or 0)
+        else:
+            cell["bytes_out"] = int(b or 0); cell["flows_out"] = int(f or 0)
+        if last and (cell["last_seen"] is None or last.isoformat() > cell["last_seen"]):
+            cell["last_seen"] = last.isoformat()
+    return {"items": sorted(pivot.values(), key=lambda r: -(r["bytes_in"] + r["bytes_out"]))}
+
+
 @app.get("/api/sophos/health-check")
 async def sophos_health_check():
     """Account health score with 5-minute Redis cache to avoid hammering Sophos."""
@@ -933,6 +1661,7 @@ async def sophos_health_check():
 
 
 @app.get("/api/detections/recent")
+@cached(ttl=60)
 async def get_recent_detections(
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -1019,6 +1748,7 @@ async def delete_firewall(fw_id: int, db: AsyncSession = Depends(get_db)):
 # --- Firewall Logs (Syslog) ---
 
 @app.get("/api/firewall-logs/recent")
+@cached(ttl=60)
 async def get_recent_fw_logs(
     limit: int = Query(default=50, ge=1, le=500),
     log_type: str | None = Query(default=None),
@@ -1104,6 +1834,7 @@ async def get_fw_log_top_attackers(
 
 
 @app.get("/api/firewall-logs/failed-logins")
+@cached(ttl=60)
 async def get_failed_logins(
     days: int = Query(default=7, ge=1, le=90),
     limit: int = Query(default=200, ge=1, le=1000),
@@ -1276,17 +2007,56 @@ async def get_waf_stats(
     """)
     hosts = (await db.execute(top_hosts_sql, {"since": since})).all()
 
+    # Treat SFOS placeholders ('-', '') as missing so they don't clutter the
+    # 'top attacks' chart with a fake "attack" called '-'.
     top_attacks_sql = text(f"""
-        SELECT COALESCE(threat_name, raw_data->>'attack', raw_data->>'attack_type', raw_data->>'reason', raw_data->>'log_subtype') AS attack,
-               COUNT(*) AS cnt
-        FROM firewall_logs
-        WHERE created_at >= :since AND {_WAF_FILTER_SQL} AND {_WAF_ATTACK_FILTER_SQL}
-          AND COALESCE(threat_name, raw_data->>'attack', raw_data->>'attack_type', raw_data->>'reason', raw_data->>'log_subtype') IS NOT NULL
-        GROUP BY attack
-        ORDER BY cnt DESC
-        LIMIT 10
+        WITH src AS (
+            SELECT COALESCE(
+                       NULLIF(NULLIF(threat_name, ''), '-'),
+                       NULLIF(NULLIF(raw_data->>'attack', ''), '-'),
+                       NULLIF(NULLIF(raw_data->>'attack_type', ''), '-'),
+                       NULLIF(NULLIF(raw_data->>'reason', ''), '-'),
+                       NULLIF(NULLIF(raw_data->>'log_subtype', ''), '-'),
+                       CASE WHEN (raw_data->>'http_status') LIKE '4%' OR (raw_data->>'http_status') LIKE '5%'
+                            THEN 'HTTP ' || (raw_data->>'http_status') END
+                   ) AS attack
+            FROM firewall_logs
+            WHERE created_at >= :since AND {_WAF_FILTER_SQL} AND {_WAF_ATTACK_FILTER_SQL}
+        )
+        SELECT attack, COUNT(*) AS cnt FROM src
+        WHERE attack IS NOT NULL
+        GROUP BY attack ORDER BY cnt DESC LIMIT 10
     """)
     attacks = (await db.execute(top_attacks_sql, {"since": since})).all()
+
+    # Per-IP 4xx / 5xx breakdown across the whole WAF dataset (not just
+    # attack-filtered) — useful for spotting noisy scanners that get a lot
+    # of 4xx but might not trigger Sophos' attack heuristics.
+    error_sources_sql = text(f"""
+        SELECT source_ip, attacker_country, attacker_city,
+               COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '4%') AS count_4xx,
+               COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '5%') AS count_5xx,
+               MAX(created_at) AS last_seen
+        FROM firewall_logs
+        WHERE created_at >= :since AND {_WAF_FILTER_SQL}
+          AND source_ip IS NOT NULL
+          AND (raw_data->>'http_status') ~ '^[45][0-9][0-9]$'
+        GROUP BY source_ip, attacker_country, attacker_city
+        ORDER BY (COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '4%')
+                  + COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '5%')) DESC
+        LIMIT 15
+    """)
+    error_sources = (await db.execute(error_sources_sql, {"since": since})).all()
+
+    # Also a flat total for the summary tile
+    error_totals_sql = text(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '4%') AS total_4xx,
+            COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '5%') AS total_5xx
+        FROM firewall_logs
+        WHERE created_at >= :since AND {_WAF_FILTER_SQL}
+    """)
+    error_totals = (await db.execute(error_totals_sql, {"since": since})).first()
 
     return {
         "total": int(row[0] or 0),
@@ -1296,51 +2066,90 @@ async def get_waf_stats(
         "unique_hosts": int(row[4] or 0),
         "total_all": int(row[5] or 0),
         "allowed_all": int(row[5] or 0) - int(row[0] or 0),
+        "total_4xx": int(error_totals[0] or 0) if error_totals else 0,
+        "total_5xx": int(error_totals[1] or 0) if error_totals else 0,
         "top_attackers": [
             {"ip": r[0], "country": r[1], "city": r[2], "count": int(r[3])}
             for r in attackers
         ],
         "top_hosts": [{"host": r[0], "count": int(r[1])} for r in hosts],
         "top_attacks": [{"attack": r[0], "count": int(r[1])} for r in attacks],
+        "top_error_sources": [
+            {
+                "ip": r[0], "country": r[1], "city": r[2],
+                "count_4xx": int(r[3] or 0),
+                "count_5xx": int(r[4] or 0),
+                "last_seen": r[5].isoformat() if r[5] else None,
+            }
+            for r in error_sources
+        ],
     }
 
 
 @app.get("/api/firewall-logs/waf/recent")
+@cached(ttl=60)
 async def get_waf_recent(
     days: int = Query(default=7, ge=1, le=90),
     limit: int = Query(default=200, ge=1, le=1000),
-    include_allowed: bool = Query(default=False),
+    status_class: str = Query(default="4xx_5xx"),
     db: AsyncSession = Depends(get_db),
 ):
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    attack_filter_clause = "" if include_allowed else f"AND {_WAF_ATTACK_FILTER_SQL}"
+    # Status-class filter based directly on the http_status field (which
+    # SFOS actually populates). Far more reliable than the old attack
+    # heuristic, which over-matched because '-' placeholders for reason/
+    # attack passed the IS NOT NULL test.
+    status_map = {
+        "all":     "",
+        "4xx_5xx": "AND (fl.raw_data->>'http_status') ~ '^[45][0-9][0-9]$'",
+        "5xx":     "AND (fl.raw_data->>'http_status') ~ '^5[0-9][0-9]$'",
+        "4xx":     "AND (fl.raw_data->>'http_status') ~ '^4[0-9][0-9]$'",
+        "2xx_3xx": "AND (fl.raw_data->>'http_status') ~ '^[23][0-9][0-9]$'",
+    }
+    attack_filter_clause = status_map.get(status_class, status_map["4xx_5xx"])
+    # CTE per_ip computes 4xx / 5xx counts ACROSS the whole time window
+    # per source_ip. We LEFT JOIN it onto each row so the table can show
+    # the running total of error responses caused by the IP.
     sql = text(f"""
+        WITH per_ip AS (
+            SELECT source_ip,
+                   COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '4%') AS src_4xx,
+                   COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '5%') AS src_5xx
+            FROM firewall_logs
+            WHERE created_at >= :since AND {_WAF_FILTER_SQL}
+              AND source_ip IS NOT NULL
+              AND (raw_data->>'http_status') ~ '^[45][0-9][0-9]$'
+            GROUP BY source_ip
+        )
         SELECT
-            id,
-            created_at,
-            severity,
-            firewall_name,
-            source_ip,
-            source_port,
-            destination_ip,
-            destination_port,
-            action,
-            message,
-            threat_name,
-            attacker_country,
-            attacker_city,
-            COALESCE(raw_data->>'domain', raw_data->>'website', raw_data->>'host') AS host,
-            COALESCE(raw_data->>'httpmethod', raw_data->>'method') AS http_method,
-            COALESCE(raw_data->>'httpquery', raw_data->>'url', raw_data->>'querystring', raw_data->>'request') AS http_query,
-            COALESCE(raw_data->>'httpresp_code', raw_data->>'status_code', raw_data->>'response_code') AS http_status,
-            COALESCE(raw_data->>'reason', raw_data->>'attack', raw_data->>'attack_type') AS reason,
-            COALESCE(raw_data->>'useragent', raw_data->>'user_agent') AS user_agent,
-            COALESCE(raw_data->>'referer', raw_data->>'referrer') AS referer,
-            raw_data->>'log_component' AS log_component,
-            raw_data->>'log_subtype' AS log_subtype
-        FROM firewall_logs
-        WHERE created_at >= :since AND {_WAF_FILTER_SQL} {attack_filter_clause}
-        ORDER BY created_at DESC
+            fl.id,
+            fl.created_at,
+            fl.severity,
+            fl.firewall_name,
+            fl.source_ip,
+            fl.source_port,
+            fl.destination_ip,
+            fl.destination_port,
+            fl.action,
+            fl.message,
+            fl.threat_name,
+            fl.attacker_country,
+            fl.attacker_city,
+            COALESCE(fl.raw_data->>'domain', fl.raw_data->>'website', fl.raw_data->>'host') AS host,
+            COALESCE(fl.raw_data->>'httpmethod', fl.raw_data->>'method') AS http_method,
+            COALESCE(fl.raw_data->>'httpquery', fl.raw_data->>'url', fl.raw_data->>'querystring', fl.raw_data->>'request') AS http_query,
+            COALESCE(fl.raw_data->>'http_status', fl.raw_data->>'httpresp_code', fl.raw_data->>'status_code', fl.raw_data->>'response_code') AS http_status,
+            NULLIF(NULLIF(NULLIF(COALESCE(fl.raw_data->>'reason', fl.raw_data->>'attack', fl.raw_data->>'attack_type'), ''), '-'), 'n/a') AS reason,
+            COALESCE(fl.raw_data->>'useragent', fl.raw_data->>'user_agent') AS user_agent,
+            COALESCE(fl.raw_data->>'referer', fl.raw_data->>'referrer') AS referer,
+            fl.raw_data->>'log_component' AS log_component,
+            fl.raw_data->>'log_subtype' AS log_subtype,
+            COALESCE(p.src_4xx, 0) AS src_4xx,
+            COALESCE(p.src_5xx, 0) AS src_5xx
+        FROM firewall_logs fl
+        LEFT JOIN per_ip p ON p.source_ip = fl.source_ip
+        WHERE fl.created_at >= :since AND {_WAF_FILTER_SQL} {attack_filter_clause}
+        ORDER BY fl.created_at DESC
         LIMIT :lim
     """)
     rows = (await db.execute(sql, {"since": since, "lim": limit})).all()
@@ -1376,6 +2185,8 @@ async def get_waf_recent(
             "referer": r[19],
             "log_component": r[20],
             "log_subtype": r[21],
+            "src_4xx": int(r[22] or 0),
+            "src_5xx": int(r[23] or 0),
         }
         for r in rows
     ]
@@ -1475,6 +2286,7 @@ async def get_ips_stats(
 
 
 @app.get("/api/firewall-logs/ips/recent")
+@cached(ttl=60)
 async def get_ips_recent(
     days: int = Query(default=7, ge=1, le=90),
     limit: int = Query(default=200, ge=1, le=1000),
@@ -1558,6 +2370,37 @@ async def health():
 
 
 # --- OSINT lookup ---
+
+
+# Order matters: the more specific /api/osint/url and /api/osint/domain/...
+# routes must be declared BEFORE the catch-all /api/osint/{ip}, otherwise
+# FastAPI matches the catch-all first and treats "url" / "domain" as IP
+# values.
+@app.get("/api/osint/url")
+async def osint_lookup_url(
+    u: str = Query(..., min_length=8, max_length=2048),
+    force: bool = Query(default=False),
+):
+    """VirusTotal + Sophos Intelix lookup for a URL. URL is passed as the
+    ``u`` query parameter so callers don't have to fight path-encoding."""
+    try:
+        normalised = _normalize_url(u)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid url: {e}")
+    from app.osint import lookup_url as osint_url_fn
+    return await osint_url_fn(normalised, force=force)
+
+
+@app.get("/api/osint/domain/{domain}")
+async def osint_lookup_domain(domain: str, force: bool = Query(default=False)):
+    """VirusTotal + Sophos Intelix + DNS A-record lookup for a domain.
+    Wildcards (`*.foo.tld`) are accepted and the bare host is queried."""
+    try:
+        normalised = _normalize_domain(domain)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
+    from app.osint import lookup_domain as osint_domain_fn
+    return await osint_domain_fn(normalised, force=force)
 
 
 @app.get("/api/osint/{ip}")
@@ -2133,6 +2976,26 @@ class AdminSettingsIn(BaseModel):
     collector_interval: int | None = Field(default=None, ge=30, le=86400)
     log_level: str | None = None
     dashboard_title: str | None = None
+    agent_enabled: bool | None = None
+    agent_provider: str | None = None
+    agent_base_url: str | None = None
+    agent_api_key: str | None = None
+    agent_model: str | None = None
+    agent_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_auto_execute: bool | None = None
+    agent_auto_execute_threshold: int | None = Field(default=None, ge=0, le=101)
+    agent_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_waf_enabled: bool | None = None
+    agent_waf_threshold: int | None = Field(default=None, ge=1, le=10000)
+    agent_waf_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_ips_enabled: bool | None = None
+    agent_ips_threshold: int | None = Field(default=None, ge=1, le=10000)
+    agent_ips_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_failed_login_enabled: bool | None = None
+    agent_failed_login_threshold: int | None = Field(default=None, ge=1, le=10000)
+    agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_failed_login_subnet_attempts: int | None = Field(default=None, ge=1, le=10000)
+    agent_failed_login_subnet_min_ips: int | None = Field(default=None, ge=2, le=1000)
 
 
 @app.put("/api/admin/settings")
@@ -2166,6 +3029,334 @@ async def test_sophos_connection():
         return {"ok": False, "error": str(e)[:300]}
 
 
+# --- AI Agent ---
+
+
+def _serialize_decision(r: AgentDecision, alert: Alert | None) -> dict:
+    return {
+        "id": r.id,
+        "alert_id": r.alert_id,
+        "source_type": r.source_type,
+        "source_ip": r.source_ip,
+        "action": r.action,
+        "action_args": r.action_args or {},
+        "reasoning": r.reasoning,
+        "confidence": r.confidence,
+        "status": r.status,
+        "model": r.model,
+        "decided_by": r.decided_by,
+        "human_comment": r.human_comment,
+        "supersedes": r.supersedes,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "error": r.error,
+        "alert": {
+            "id": alert.id, "type": alert.alert_type, "severity": alert.severity,
+            "category": alert.category,
+            "description": alert.description, "source_ip": alert.source_ip,
+            "destination_ip": alert.destination_ip,
+            "country": alert.attacker_country, "city": alert.attacker_city,
+            "agent": alert.managed_agent_name,
+            "created_at": alert.created_at.isoformat() if alert.created_at else None,
+            "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+            "acknowledged_action": alert.acknowledged_action,
+        } if alert else None,
+    }
+
+
+@app.get("/api/agent/decisions")
+async def list_agent_decisions(
+    status: str | None = Query(default=None),
+    decided_by: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(AgentDecision).order_by(AgentDecision.created_at.desc())
+    if status:
+        stmt = stmt.where(AgentDecision.status == status)
+    if decided_by:
+        stmt = stmt.where(AgentDecision.decided_by == decided_by)
+    if action:
+        stmt = stmt.where(AgentDecision.action == action)
+    stmt = stmt.limit(limit)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    alert_ids = [r.alert_id for r in rows]
+    alerts_by_id: dict[str, Alert] = {}
+    if alert_ids:
+        ares = await db.execute(select(Alert).where(Alert.id.in_(alert_ids)))
+        alerts_by_id = {a.id: a for a in ares.scalars().all()}
+
+    return {"items": [_serialize_decision(r, alerts_by_id.get(r.alert_id)) for r in rows]}
+
+
+@app.get("/api/agent/decisions/stats")
+async def agent_decisions_stats(db: AsyncSession = Depends(get_db)):
+    """Counts grouped by status and decided_by, used by the agent page tiles."""
+    rows = (await db.execute(
+        select(AgentDecision.status, AgentDecision.decided_by, func.count(AgentDecision.id))
+        .group_by(AgentDecision.status, AgentDecision.decided_by)
+    )).all()
+    out = {"total": 0, "by_status": {}, "by_actor": {"agent": 0, "human": 0}}
+    for status, actor, cnt in rows:
+        out["total"] += cnt
+        out["by_status"][status or "unknown"] = out["by_status"].get(status or "unknown", 0) + cnt
+        out["by_actor"][actor or "agent"] = out["by_actor"].get(actor or "agent", 0) + cnt
+    return out
+
+
+@app.get("/api/agent/decisions/timeline")
+async def agent_decisions_timeline(days: int = Query(default=7, ge=1, le=90), db: AsyncSession = Depends(get_db)):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(
+            func.date_trunc("hour", AgentDecision.created_at).label("ts"),
+            AgentDecision.decided_by,
+            func.count(AgentDecision.id),
+        )
+        .where(AgentDecision.created_at >= since)
+        .group_by(text("1"), AgentDecision.decided_by)
+        .order_by(text("1"))
+    )).all()
+    return [
+        {"ts": r[0].isoformat() if r[0] else None, "actor": r[1] or "agent", "count": int(r[2])}
+        for r in rows
+    ]
+
+
+@app.get("/api/agent/decisions/{decision_id}")
+async def get_agent_decision(decision_id: int, db: AsyncSession = Depends(get_db)):
+    rec = await db.get(AgentDecision, decision_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="decision not found")
+    alert = await db.get(Alert, rec.alert_id)
+    payload = _serialize_decision(rec, alert)
+    if alert and alert.raw_data:
+        payload["alert"]["raw_data"] = alert.raw_data
+    # Chain history: any decisions that supersede this one, and the one this superseded
+    chain_q = await db.execute(
+        select(AgentDecision).where(
+            (AgentDecision.supersedes == decision_id) | (AgentDecision.id == (rec.supersedes or -1))
+        ).order_by(AgentDecision.created_at)
+    )
+    payload["chain"] = [_serialize_decision(r, alert) for r in chain_q.scalars().all()]
+    return payload
+
+
+class DecisionFeedback(BaseModel):
+    comment: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/agent/decisions/{decision_id}/approve")
+async def approve_agent_decision(decision_id: int, body: DecisionFeedback | None = None, db: AsyncSession = Depends(get_db)):
+    rec = await db.get(AgentDecision, decision_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="decision not found")
+    if body and body.comment is not None:
+        rec.human_comment = body.comment
+        await db.commit()
+    from app.agent import execute_decision
+    try:
+        return await execute_decision(decision_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agent/decisions/{decision_id}/reject")
+async def reject_agent_decision(decision_id: int, body: DecisionFeedback | None = None, db: AsyncSession = Depends(get_db)):
+    rec = await db.get(AgentDecision, decision_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="decision not found")
+    rec.status = "rejected"
+    rec.decided_at = datetime.now(timezone.utc)
+    if body and body.comment is not None:
+        rec.human_comment = body.comment
+    await db.commit()
+    return {"ok": True}
+
+
+class BulkApproveIn(BaseModel):
+    source_type: str | None = Field(None, max_length=20)
+    action: str | None = Field(None, max_length=50)
+    comment: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/agent/decisions/approve-all-pending")
+async def approve_all_pending(body: BulkApproveIn | None = None, db: AsyncSession = Depends(get_db)):
+    """Bulk-approve every pending decision (optionally filtered by source_type
+    and/or action). Each is executed via the same code path as a single
+    approve — whitelist guards and other safety checks still apply per row."""
+    q = select(AgentDecision).where(AgentDecision.status == "pending")
+    if body and body.source_type:
+        q = q.where(AgentDecision.source_type == body.source_type)
+    if body and body.action:
+        q = q.where(AgentDecision.action == body.action)
+    q = q.order_by(AgentDecision.id.asc())
+    rows = (await db.execute(q)).scalars().all()
+    if not rows:
+        return {"ok": True, "approved": 0, "failed": 0, "ids": [], "errors": []}
+
+    if body and body.comment:
+        for rec in rows:
+            rec.human_comment = body.comment
+        await db.commit()
+
+    from app.agent import execute_decision
+    approved: list[int] = []
+    errors: list[dict[str, str | int]] = []
+    for rec in rows:
+        try:
+            await execute_decision(rec.id)
+            approved.append(rec.id)
+        except Exception as e:
+            errors.append({"id": rec.id, "error": str(e)[:200]})
+            logger.warning(f"bulk-approve: decision {rec.id} failed: {e}")
+    return {
+        "ok": True,
+        "approved": len(approved),
+        "failed": len(errors),
+        "ids": approved,
+        "errors": errors,
+    }
+
+
+_ALLOWED_HUMAN_ACTIONS = {"block_ip", "acknowledge", "isolate", "no_action"}
+
+
+class HumanDecisionIn(BaseModel):
+    alert_id: str | None = Field(None, max_length=255)
+    source_type: str = Field("alert", max_length=20)
+    source_ip: str | None = Field(None, max_length=45)
+    action: str = Field(..., min_length=1, max_length=50)
+    action_args: dict | None = None
+    comment: str | None = Field(None, max_length=2000)
+    supersedes: int | None = None
+    execute: bool = True
+
+
+@app.post("/api/agent/decisions/manual")
+async def manual_agent_decision(body: HumanDecisionIn, db: AsyncSession = Depends(get_db)):
+    """Record a human-initiated decision. For Sophos alerts pass ``alert_id``;
+    for WAF override pass ``source_type='waf'`` + ``source_ip``."""
+    if body.action not in _ALLOWED_HUMAN_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"action must be one of {sorted(_ALLOWED_HUMAN_ACTIONS)}")
+
+    alert = None
+    if body.alert_id:
+        alert = await db.get(Alert, body.alert_id)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="alert not found")
+    elif body.source_type == "waf":
+        if not body.source_ip:
+            raise HTTPException(status_code=400, detail="source_ip required for waf decision")
+    else:
+        raise HTTPException(status_code=400, detail="either alert_id or (source_type=waf + source_ip) required")
+
+    rec = AgentDecision(
+        alert_id=body.alert_id,
+        source_type=body.source_type,
+        source_ip=body.source_ip,
+        action=body.action,
+        action_args=body.action_args or {},
+        reasoning="(manual decision)",
+        confidence=1.0,
+        status="pending",
+        decided_by="human",
+        human_comment=body.comment,
+        supersedes=body.supersedes,
+        model=None,
+    )
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+
+    if body.supersedes:
+        prev = await db.get(AgentDecision, body.supersedes)
+        if prev is not None and prev.status in {"pending"}:
+            prev.status = "superseded"
+            prev.decided_at = datetime.now(timezone.utc)
+            await db.commit()
+
+    if body.execute:
+        from app.agent import execute_decision
+        try:
+            await execute_decision(rec.id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"recorded but execution failed: {e}")
+
+    await db.refresh(rec)
+    return _serialize_decision(rec, alert)
+
+
+@app.post("/api/agent/run-now")
+async def agent_run_now():
+    """Trigger one immediate pass of the agent loop. Useful for testing
+    from the admin UI without waiting for the scheduler."""
+    from app.agent import agent_loop
+    scheduler.add_job(agent_loop, "date", id="agent_manual", replace_existing=True)
+    return {"ok": True}
+
+
+@app.post("/api/agent/waf-run-now")
+async def agent_waf_run_now(window_minutes: int = Query(default=60, ge=1, le=10080)):
+    """Trigger a WAF-agent scan over the past ``window_minutes`` (default 60).
+    Runs even when the WAF agent is otherwise disabled — admin-initiated."""
+    from app.agent import agent_waf_loop
+    scheduler.add_job(
+        agent_waf_loop, "date",
+        id="agent_waf_manual", replace_existing=True,
+        kwargs={"window_minutes": window_minutes, "force": True},
+    )
+    return {"ok": True, "window_minutes": window_minutes}
+
+
+@app.post("/api/agent/ips-run-now")
+async def agent_ips_run_now(window_minutes: int = Query(default=60, ge=1, le=10080)):
+    from app.agent import agent_ips_loop
+    scheduler.add_job(
+        agent_ips_loop, "date",
+        id="agent_ips_manual", replace_existing=True,
+        kwargs={"window_minutes": window_minutes, "force": True},
+    )
+    return {"ok": True, "window_minutes": window_minutes}
+
+
+@app.post("/api/agent/failed-login-run-now")
+async def agent_failed_login_run_now(window_minutes: int = Query(default=60, ge=1, le=10080)):
+    from app.agent import agent_failed_login_loop
+    scheduler.add_job(
+        agent_failed_login_loop, "date",
+        id="agent_failed_login_manual", replace_existing=True,
+        kwargs={"window_minutes": window_minutes, "force": True},
+    )
+    return {"ok": True, "window_minutes": window_minutes}
+
+
+@app.post("/api/admin/test/agent")
+async def test_agent_connection():
+    from app.agent import test_connection
+    return await test_connection()
+
+
+@app.get("/api/admin/agent/models")
+async def list_agent_models():
+    """Pull /v1/models from the configured agent endpoint so the admin UI
+    can populate a dropdown of model IDs."""
+    from app.agent import list_available_models
+    return await list_available_models()
+
+
+@app.get("/api/admin/agent/default-prompt")
+async def get_agent_default_prompt():
+    """Return the bundled fallback system prompt so the admin UI can offer
+    'reset to default'."""
+    from app.agent import DEFAULT_SYSTEM_PROMPT
+    return {"default": DEFAULT_SYSTEM_PROMPT}
+
+
 @app.post("/api/admin/test/abuseipdb")
 async def test_abuseipdb_connection():
     """Cheap probe: query AbuseIPDB for 8.8.8.8."""
@@ -2183,3 +3374,71 @@ async def test_abuseipdb_connection():
         return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}
+
+
+# --- Cache warmer ---
+
+# Endpoints + default params the dashboard hits with the UI's default
+# settings (7-day window, table limits). Each call routes through the
+# @cached decorator → Redis stays warm so users never pay the cold price.
+# Order matters only insofar as failures are isolated — one bad query
+# won't stop the others.
+_WARM_TARGETS: list[tuple[str, dict]] = [
+    ("get_summary", {}),
+    ("get_severity_distribution", {"days": 7}),
+    ("get_timeline", {"days": 7}),
+    ("get_categories", {"days": 7}),
+    ("get_top_attackers", {"days": 7, "limit": 20}),
+    ("get_firewall_event_stats", {"days": 7}),
+    ("get_attack_map", {"days": 7}),
+    ("get_recent_alerts", {"limit": 200}),
+    ("get_recent_events", {"limit": 200}),
+    ("get_recent_detections", {"limit": 200}),
+    # Optional Query(...) defaults stay as sentinel objects when bypassing
+    # FastAPI's DI — pass them explicitly so the SQL sees None.
+    ("get_recent_fw_logs", {"limit": 500, "log_type": None}),
+    ("get_failed_logins", {"days": 7, "limit": 300}),
+    ("get_waf_stats", {"days": 7}),
+    ("get_waf_recent", {"days": 7, "limit": 300, "include_allowed": False}),
+    ("get_ips_stats", {"days": 7}),
+    ("get_ips_recent", {"days": 7, "limit": 300}),
+    ("get_endpoints_list", {"limit": 200, "health": None, "isolation": None, "search": None}),
+    ("get_endpoints_stats", {}),
+]
+
+
+async def warm_dashboard_cache() -> None:
+    """Pre-populate Redis with the heavy dashboard endpoints.
+
+    Calls each cached function with the UI's default parameters so the
+    cache key matches what the browser later requests. Runs targets in
+    parallel with a small concurrency cap so the DB pool (size 10) isn't
+    overwhelmed; failure on one target doesn't block the others.
+    """
+    import asyncio
+    import time
+
+    sem = asyncio.Semaphore(4)
+    start = time.monotonic()
+    results = {"ok": 0, "fail": 0}
+
+    async def warm_one(name: str, kwargs: dict) -> None:
+        func = globals().get(name)
+        if func is None:
+            logger.warning(f"warmer: target {name!r} not found")
+            results["fail"] += 1
+            return
+        async with sem:
+            try:
+                async with async_session() as db:
+                    await func(db=db, **kwargs)
+                results["ok"] += 1
+            except Exception as e:
+                results["fail"] += 1
+                logger.warning(f"warmer: {name} failed: {e}")
+
+    await asyncio.gather(*(warm_one(name, kw) for name, kw in _WARM_TARGETS))
+    logger.info(
+        f"cache warmer: {results['ok']} ok / {results['fail']} failed "
+        f"in {time.monotonic() - start:.2f}s"
+    )

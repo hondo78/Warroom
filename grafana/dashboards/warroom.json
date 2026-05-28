@@ -1,0 +1,1519 @@
+{
+  "uid": "warroom-overview",
+  "title": "Warroom \u2014 Security Overview",
+  "tags": [
+    "warroom",
+    "security"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Warroom Dashboard",
+      "url": "http://localhost:8448/",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "html",
+        "content": "**Karten-Legende** &nbsp;\u00b7&nbsp; <span style=\"color:#3b82f6;font-size:1.2em\">\u2605</span> Firewall &nbsp;\u00b7&nbsp; Angreifer nach Alter: &nbsp; <span style=\"color:rgba(239,68,68,1.0);font-size:1.3em\">\u25cf</span> Neu (0&nbsp;\u2013&nbsp;$age_step_1) &nbsp;\u2192&nbsp; <span style=\"color:rgba(236,72,153,0.8);font-size:1.3em\">\u25cf</span> $age_step_1&nbsp;\u2013&nbsp;$age_step_2 &nbsp;\u2192&nbsp; <span style=\"color:rgba(168,85,247,0.6);font-size:1.3em\">\u25cf</span> $age_step_2&nbsp;\u2013&nbsp;$age_step_3 &nbsp;\u2192&nbsp; <span style=\"color:rgba(99,102,241,0.4);font-size:1.3em\">\u25cf</span> $age_step_3&nbsp;\u2013&nbsp;$age_step_4 &nbsp;\u2192&nbsp; <span style=\"color:rgba(59,130,246,0.2);font-size:1.3em\">\u25cf</span> $age_step_4&nbsp;\u2013&nbsp;$age_step_5 &nbsp;\u2192&nbsp; <span style=\"color:rgba(30,58,138,0.1);font-size:1.3em\">\u25cb</span> \u00c4lter ($age_step_5&nbsp;\u2013&nbsp;Ende)"
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Alerts (Gesamt / 24h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last_24h FROM alerts"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Events (Gesamt / 24h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 13,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last_24h FROM events"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Detections (Threat-Alerts)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last_24h FROM alerts WHERE alert_type ILIKE '%threat%' OR alert_type ILIKE '%detect%' OR alert_type ILIKE '%malware%' OR category = 'runtimeDetections'"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Firewall Logs (Gesamt / 24h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 13,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last_24h FROM firewall_logs"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Blocked IPs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_ips"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Blocked Domains",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_domains"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Blocked URLs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) FROM blocked_urls"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Endpoints",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE isolation_status = 'isolated') AS isolated, COUNT(*) FILTER (WHERE health_overall = 'bad') AS bad FROM endpoints"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Timeline \u2014 Alerts / Events / Threat-Detections",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at, $__interval) AS time, COUNT(*) AS \"Alerts\" FROM alerts WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at, $__interval) AS time, COUNT(*) AS \"Events\" FROM events WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "C",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at, $__interval) AS time, COUNT(*) AS \"Detections\" FROM alerts WHERE $__timeFilter(created_at) AND (alert_type ILIKE '%threat%' OR alert_type ILIKE '%detect%' OR alert_type ILIKE '%malware%' OR category = 'runtimeDetections') GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Alarme nach Schweregrad",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(severity, 'unknown') AS severity, COUNT(*) AS count FROM alerts WHERE $__timeFilter(created_at) GROUP BY severity ORDER BY 2 DESC"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "name"
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "critical"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "high"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "medium"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "low"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": "barchart",
+      "title": "Top Angreifer-IPs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 29,
+        "w": 16,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(destination_ip, source_ip) AS ip, COUNT(*) AS hits FROM alerts WHERE $__timeFilter(created_at) AND COALESCE(destination_ip, source_ip) IS NOT NULL GROUP BY 1 ORDER BY hits DESC LIMIT 20"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "geomap",
+      "title": "Angriffe \u2014 6 Fade-Stufen \u00fcber den Dashboard-Zeitraum",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A1",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.0 AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) <= 0.16666666666666666\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "A2",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.16666666666666666 AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) <= 0.3333333333333333\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "A3",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.3333333333333333 AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) <= 0.5\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "A4",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.5 AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) <= 0.6666666666666666\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "A5",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.6666666666666666 AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) <= 0.8333333333333334\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "A6",
+          "format": "table",
+          "rawSql": "SELECT fl.created_at AS time,\n       fl.attacker_lat AS latitude, fl.attacker_lon AS longitude,\n       fl.source_ip AS \"Quell-IP\",\n       fl.destination_ip AS \"Ziel-IP\",\n       fl.log_type AS \"Art\",\n       fl.severity AS \"Schwere\",\n       fl.attacker_country AS \"Land\",\n       fl.attacker_city AS \"Stadt\",\n       fl.threat_name AS \"Threat\",\n       fl.firewall_name AS \"Firewall\"\nFROM firewall_logs fl\nWHERE $__timeFilter(fl.created_at)\n  AND fl.attacker_lat IS NOT NULL\n  AND fl.source_ip IS NOT NULL\n  AND fl.destination_ip IS NOT NULL\n  AND fl.log_type IN (${attack_type:sqlstring})\n AND (EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - fl.created_at)) / NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0)) > 0.8333333333333334\nORDER BY fl.created_at DESC\nLIMIT 150"
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "rawSql": "WITH attacks AS (\n  SELECT ROW_NUMBER() OVER (ORDER BY fl.created_at DESC) AS rn,\n         fl.attacker_lat AS att_lat, fl.attacker_lon AS att_lon,\n         COALESCE(floc.lat, (SELECT lat FROM firewall_locations LIMIT 1)) AS fw_lat,\n         COALESCE(floc.lon, (SELECT lon FROM firewall_locations LIMIT 1)) AS fw_lon\n  FROM firewall_logs fl\n  LEFT JOIN firewall_locations floc ON floc.ip = fl.firewall_ip OR floc.name = fl.firewall_name\n  WHERE $__timeFilter(fl.created_at)\n    AND fl.attacker_lat IS NOT NULL\n    AND fl.source_ip IS NOT NULL\n    AND fl.destination_ip IS NOT NULL\n    AND fl.log_type IN (${attack_type:sqlstring})\n  ORDER BY fl.created_at DESC\n  LIMIT 500\n)\nSELECT (rn - 1) * 2 AS step, att_lat AS latitude, att_lon AS longitude FROM attacks WHERE att_lat IS NOT NULL\nUNION ALL\nSELECT (rn - 1) * 2 + 1, fw_lat, fw_lon FROM attacks WHERE fw_lat IS NOT NULL\nORDER BY step"
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "rawSql": "SELECT lat AS latitude, lon AS longitude, name AS \"Firewall\", ip AS \"IP\", country AS \"Land\", city AS \"Stadt\"\nFROM firewall_locations"
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "zero",
+          "lat": 25,
+          "lon": 10,
+          "zoom": 2
+        },
+        "basemap": {
+          "type": "default",
+          "name": "Layer 0",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "route",
+            "name": "Angriffslinien",
+            "config": {
+              "style": {
+                "color": {
+                  "fixed": "red"
+                },
+                "opacity": 0.18,
+                "lineWidth": 1
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "B"
+            },
+            "tooltip": false
+          },
+          {
+            "type": "markers",
+            "name": "\u00c4lter (verschwunden)",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 4
+                },
+                "color": {
+                  "fixed": "#1e3a8a"
+                },
+                "opacity": 0.0,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A6"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "\u00c4lter",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 5
+                },
+                "color": {
+                  "fixed": "#3b82f6"
+                },
+                "opacity": 0.2,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A5"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "\u00c4lter",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 5
+                },
+                "color": {
+                  "fixed": "#6366f1"
+                },
+                "opacity": 0.4,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A4"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "\u00c4lter",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#a855f7"
+                },
+                "opacity": 0.6,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A3"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "\u00c4lter",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 6
+                },
+                "color": {
+                  "fixed": "#ec4899"
+                },
+                "opacity": 0.8,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A2"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "Neu",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 7
+                },
+                "color": {
+                  "fixed": "#ef4444"
+                },
+                "opacity": 1.0,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "A1"
+            },
+            "tooltip": true
+          },
+          {
+            "type": "markers",
+            "name": "Firewall(s)",
+            "config": {
+              "style": {
+                "size": {
+                  "fixed": 12
+                },
+                "color": {
+                  "fixed": "#3b82f6"
+                },
+                "opacity": 1.0,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/star.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "filterData": {
+              "id": "byRefId",
+              "options": "C"
+            },
+            "tooltip": true
+          }
+        ],
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showScale": false,
+          "showDebug": false,
+          "showMeasure": false
+        },
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "longitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "step"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "NetFlow \u2014 Bytes \u00fcber Zeit",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(bucket_start, $__interval) AS time, COALESCE(SUM(bytes), 0) AS \"Bytes\" FROM netflow_buckets WHERE $__timeFilter(bucket_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "NetFlow \u2014 Top Source-IPs nach Bytes",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT n.src_ip AS \"Source-IP\", SUM(n.bytes) AS \"Bytes\", SUM(n.flows) AS \"Flows\", MAX(g.country) AS \"Land\" FROM netflow_buckets n LEFT JOIN geoip_cache g ON g.ip = n.src_ip WHERE $__timeFilter(n.bucket_start) AND n.src_ip IS NOT NULL GROUP BY n.src_ip ORDER BY 2 DESC LIMIT 25"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-BlYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "Letzte Firewall-Logs",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT created_at AS \"Zeit\", severity AS \"Schwere\", log_type AS \"Typ\", firewall_name AS \"Firewall\", source_ip AS \"Quelle\", destination_ip AS \"Ziel\", action AS \"Aktion\", COALESCE(threat_name, LEFT(message, 80)) AS \"Threat/Nachricht\", attacker_country AS \"Land\" FROM firewall_logs ORDER BY created_at DESC LIMIT 100"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Zeit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Schwere"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "high": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "medium": {
+                        "color": "blue",
+                        "index": 2
+                      },
+                      "low": {
+                        "color": "green",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Fehlgeschlagene Logins (7 Tage)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "WITH failed AS (SELECT source_ip, created_at, user_name, attacker_country FROM firewall_logs WHERE created_at >= NOW() - INTERVAL '7 days' AND source_ip IS NOT NULL AND (log_type IN ('Authentication', 'Event') OR (raw_data->>'log_component') ILIKE ANY (ARRAY['%auth%','%admin%','%ssl vpn%','%ipsec%'])) AND ((raw_data->>'status') ILIKE 'fail%' OR (raw_data->>'auth_status') ILIKE 'fail%' OR COALESCE(message,'') ILIKE '%fail%' OR COALESCE(message,'') ILIKE '%denied%')) SELECT source_ip AS \"Quell-IP\", COUNT(*) AS \"Versuche\", COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS \"24h\", MAX(created_at) AS \"Letzter\", MAX(attacker_country) AS \"Land\" FROM failed GROUP BY source_ip ORDER BY 2 DESC LIMIT 50"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Letzter"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Versuche"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-GrYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "type": "table",
+      "title": "Letzte Alarme (Sophos Central)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 55,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT created_at AS \"Zeit\", severity AS \"Schwere\", alert_type AS \"Typ\", LEFT(description, 80) AS \"Beschreibung\", source_ip AS \"Quelle\" FROM alerts ORDER BY created_at DESC LIMIT 50"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Zeit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Schwere"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "color": "red",
+                        "index": 0
+                      },
+                      "high": {
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "medium": {
+                        "color": "blue",
+                        "index": 2
+                      },
+                      "low": {
+                        "color": "green",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "attack_type",
+        "label": "Angriffsart",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT DISTINCT log_type AS \"attack\" FROM firewall_logs WHERE log_type IS NOT NULL UNION SELECT DISTINCT alert_type FROM alerts WHERE alert_type IS NOT NULL ORDER BY 1",
+        "refresh": 1,
+        "regex": "",
+        "multi": true,
+        "includeAll": true,
+        "allValue": null,
+        "sort": 1,
+        "hide": 0,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "age_step_1",
+        "label": "Age step 1",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT (CASE\n  WHEN sec >= 172800 THEN ROUND((sec/86400)::numeric, 1)::text || 'd'\n  WHEN sec >= 3600 THEN ROUND((sec/3600)::numeric, 1)::text || 'h'\n  WHEN sec >= 60 THEN GREATEST(1, ROUND((sec/60)::numeric))::text || 'min'\n  ELSE GREATEST(1, ROUND(sec::numeric))::text || 's'\nEND) AS label\nFROM (\n  SELECT EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)) * 1.0 / 6.0 AS sec\n) t",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "sort": 0
+      },
+      {
+        "name": "age_step_2",
+        "label": "Age step 2",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT (CASE\n  WHEN sec >= 172800 THEN ROUND((sec/86400)::numeric, 1)::text || 'd'\n  WHEN sec >= 3600 THEN ROUND((sec/3600)::numeric, 1)::text || 'h'\n  WHEN sec >= 60 THEN GREATEST(1, ROUND((sec/60)::numeric))::text || 'min'\n  ELSE GREATEST(1, ROUND(sec::numeric))::text || 's'\nEND) AS label\nFROM (\n  SELECT EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)) * 2.0 / 6.0 AS sec\n) t",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "sort": 0
+      },
+      {
+        "name": "age_step_3",
+        "label": "Age step 3",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT (CASE\n  WHEN sec >= 172800 THEN ROUND((sec/86400)::numeric, 1)::text || 'd'\n  WHEN sec >= 3600 THEN ROUND((sec/3600)::numeric, 1)::text || 'h'\n  WHEN sec >= 60 THEN GREATEST(1, ROUND((sec/60)::numeric))::text || 'min'\n  ELSE GREATEST(1, ROUND(sec::numeric))::text || 's'\nEND) AS label\nFROM (\n  SELECT EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)) * 3.0 / 6.0 AS sec\n) t",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "sort": 0
+      },
+      {
+        "name": "age_step_4",
+        "label": "Age step 4",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT (CASE\n  WHEN sec >= 172800 THEN ROUND((sec/86400)::numeric, 1)::text || 'd'\n  WHEN sec >= 3600 THEN ROUND((sec/3600)::numeric, 1)::text || 'h'\n  WHEN sec >= 60 THEN GREATEST(1, ROUND((sec/60)::numeric))::text || 'min'\n  ELSE GREATEST(1, ROUND(sec::numeric))::text || 's'\nEND) AS label\nFROM (\n  SELECT EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)) * 4.0 / 6.0 AS sec\n) t",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "sort": 0
+      },
+      {
+        "name": "age_step_5",
+        "label": "Age step 5",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT (CASE\n  WHEN sec >= 172800 THEN ROUND((sec/86400)::numeric, 1)::text || 'd'\n  WHEN sec >= 3600 THEN ROUND((sec/3600)::numeric, 1)::text || 'h'\n  WHEN sec >= 60 THEN GREATEST(1, ROUND((sec/60)::numeric))::text || 'min'\n  ELSE GREATEST(1, ROUND(sec::numeric))::text || 's'\nEND) AS label\nFROM (\n  SELECT EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)) * 5.0 / 6.0 AS sec\n) t",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "sort": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  }
+}

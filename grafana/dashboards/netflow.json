@@ -1,0 +1,810 @@
+{
+  "uid": "warroom-netflow",
+  "title": "Warroom \u2014 NetFlow",
+  "tags": [
+    "warroom",
+    "netflow"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Warroom NetFlow-Page",
+      "url": "http://localhost:8448/netflow.html",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "firewall",
+        "label": "Firewall",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "warroom-postgres"
+        },
+        "query": "SELECT DISTINCT firewall_ip FROM netflow_buckets WHERE firewall_ip IS NOT NULL ORDER BY 1",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "hide": 0,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Volumen",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT pg_size_pretty(COALESCE(SUM(bytes),0)::bigint) AS bytes FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND firewall_ip IN (${firewall:sqlstring})"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Flows",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(SUM(flows),0) AS flows FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND firewall_ip IN (${firewall:sqlstring})"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Source-IPs (unique)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT src_ip) AS sources FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND src_ip IS NOT NULL AND firewall_ip IN (${firewall:sqlstring})"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Destinations (unique)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT dst_ip) AS dests FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND dst_ip IS NOT NULL AND firewall_ip IN (${firewall:sqlstring})"
+        }
+      ],
+      "options": {
+        "graphMode": "none",
+        "colorMode": "value",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Bandbreite \u2014 Bytes \u00fcber Zeit",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(bucket_start, $__interval) AS time, COALESCE(SUM(bytes),0) AS \"Bytes\" FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND firewall_ip IN (${firewall:sqlstring}) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "barchart",
+      "title": "Top-Talker \u2014 Source-IPs nach Bytes",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT src_ip AS ip, SUM(bytes) AS bytes FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND src_ip IS NOT NULL AND firewall_ip IN (${firewall:sqlstring}) GROUP BY src_ip ORDER BY bytes DESC LIMIT 15"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "barchart",
+      "title": "Top-Destinationen nach Bytes",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT dst_ip AS ip, SUM(bytes) AS bytes FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND dst_ip IS NOT NULL AND firewall_ip IN (${firewall:sqlstring}) GROUP BY dst_ip ORDER BY bytes DESC LIMIT 15"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "barchart",
+      "title": "Top-Ports / Services",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT CASE dst_port WHEN 20 THEN 'ftp-data' WHEN 21 THEN 'ftp' WHEN 22 THEN 'ssh' WHEN 23 THEN 'telnet' WHEN 25 THEN 'smtp' WHEN 53 THEN 'dns' WHEN 80 THEN 'http' WHEN 110 THEN 'pop3' WHEN 123 THEN 'ntp' WHEN 143 THEN 'imap' WHEN 161 THEN 'snmp' WHEN 389 THEN 'ldap' WHEN 443 THEN 'https' WHEN 445 THEN 'smb' WHEN 465 THEN 'smtps' WHEN 514 THEN 'syslog' WHEN 587 THEN 'submission' WHEN 636 THEN 'ldaps' WHEN 993 THEN 'imaps' WHEN 995 THEN 'pop3s' WHEN 1433 THEN 'mssql' WHEN 3306 THEN 'mysql' WHEN 3389 THEN 'rdp' WHEN 5432 THEN 'postgres' WHEN 5900 THEN 'vnc' WHEN 6379 THEN 'redis' WHEN 8080 THEN 'http-alt' WHEN 8443 THEN 'https-alt' WHEN 27017 THEN 'mongodb' ELSE 'port-' || dst_port::text END AS service, SUM(bytes) AS bytes FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND dst_port IS NOT NULL AND firewall_ip IN (${firewall:sqlstring}) GROUP BY dst_port ORDER BY bytes DESC LIMIT 15"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "piechart",
+      "title": "Protokoll-Mix",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT CASE protocol WHEN 1 THEN 'ICMP' WHEN 6 THEN 'TCP' WHEN 17 THEN 'UDP' WHEN 47 THEN 'GRE' WHEN 50 THEN 'ESP' WHEN 51 THEN 'AH' WHEN 58 THEN 'ICMPv6' ELSE 'P' || protocol::text END AS protocol, SUM(bytes) AS bytes FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND protocol IS NOT NULL AND firewall_ip IN (${firewall:sqlstring}) GROUP BY protocol ORDER BY bytes DESC"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "displayLabels": [
+          "name"
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "geomap",
+      "title": "Destination-Karte \u2014 wo gehen die Bytes hin",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT g.lat AS latitude, g.lon AS longitude,\n       MAX(g.country) AS \"Land\",\n       MAX(g.city) AS \"Stadt\",\n       MAX(g.org) AS \"Organisation\",\n       MAX(g.asn) AS \"ASN\",\n       COUNT(DISTINCT nb.dst_ip) AS \"Unique Ziel-IPs\",\n       pg_size_pretty(SUM(nb.bytes)::bigint) AS \"Volumen\",\n       SUM(nb.packets) AS \"Pakete\",\n       SUM(nb.flows) AS \"Flows\",\n       array_to_string((array_agg(DISTINCT nb.dst_ip ORDER BY nb.dst_ip) FILTER (WHERE nb.dst_ip IS NOT NULL))[1:5], ', ') AS \"Top Ziel-IPs\",\n       array_to_string((array_agg(DISTINCT nb.src_ip ORDER BY nb.src_ip) FILTER (WHERE nb.src_ip IS NOT NULL))[1:5], ', ') AS \"Quell-IPs (intern)\",\n       array_to_string((array_agg(DISTINCT CASE nb.dst_port WHEN 20 THEN 'ftp-data' WHEN 21 THEN 'ftp' WHEN 22 THEN 'ssh' WHEN 23 THEN 'telnet' WHEN 25 THEN 'smtp' WHEN 53 THEN 'dns' WHEN 80 THEN 'http' WHEN 110 THEN 'pop3' WHEN 123 THEN 'ntp' WHEN 143 THEN 'imap' WHEN 161 THEN 'snmp' WHEN 389 THEN 'ldap' WHEN 443 THEN 'https' WHEN 445 THEN 'smb' WHEN 465 THEN 'smtps' WHEN 514 THEN 'syslog' WHEN 587 THEN 'submission' WHEN 636 THEN 'ldaps' WHEN 993 THEN 'imaps' WHEN 995 THEN 'pop3s' WHEN 1433 THEN 'mssql' WHEN 3306 THEN 'mysql' WHEN 3389 THEN 'rdp' WHEN 5432 THEN 'postgres' WHEN 5900 THEN 'vnc' WHEN 6379 THEN 'redis' WHEN 8080 THEN 'http-alt' WHEN 8443 THEN 'https-alt' WHEN 27017 THEN 'mongodb' ELSE 'port-' || nb.dst_port::text END) FILTER (WHERE nb.dst_port IS NOT NULL))[1:5], ', ') AS \"Top Services\",\n       array_to_string((array_agg(DISTINCT CASE nb.protocol WHEN 1 THEN 'ICMP' WHEN 6 THEN 'TCP' WHEN 17 THEN 'UDP' WHEN 47 THEN 'GRE' WHEN 50 THEN 'ESP' WHEN 51 THEN 'AH' WHEN 58 THEN 'ICMPv6' ELSE 'P' || nb.protocol::text END) FILTER (WHERE nb.protocol IS NOT NULL))[1:5], ', ') AS \"Protokolle\",\n       MIN(nb.bucket_start) AS \"Erster Flow\",\n       MAX(nb.bucket_start) AS \"Letzter Flow\",\n       SUM(nb.bytes) AS \"Bytes\"\nFROM netflow_buckets nb\nJOIN geoip_cache g ON g.ip = nb.dst_ip\nWHERE $__timeFilter(nb.bucket_start)\n  AND g.lat IS NOT NULL\n  AND nb.firewall_ip IN (${firewall:sqlstring})\nGROUP BY g.lat, g.lon\nORDER BY SUM(nb.bytes) DESC\nLIMIT 300"
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "zero",
+          "lat": 25,
+          "lon": 10,
+          "zoom": 2
+        },
+        "basemap": {
+          "type": "default",
+          "name": "Layer 0",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Destinations",
+            "config": {
+              "style": {
+                "size": {
+                  "field": "Bytes",
+                  "fixed": 6,
+                  "min": 5,
+                  "max": 25
+                },
+                "color": {
+                  "field": "Bytes",
+                  "fixed": "blue"
+                },
+                "opacity": 0.75,
+                "symbol": {
+                  "mode": "fixed",
+                  "fixed": "img/icons/marker/circle.svg"
+                }
+              },
+              "showLegend": false
+            },
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "tooltip": true
+          }
+        ],
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": true,
+          "showAttribution": true,
+          "showScale": false
+        },
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlYlRd"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "latitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "longitude"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": true,
+                  "tooltip": true,
+                  "viz": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": true,
+                  "viz": false
+                }
+              },
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Erster Flow"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Letzter Flow"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "type": "table",
+      "title": "Interface-Auslastung",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT firewall_ip AS \"Firewall\", iface_idx AS \"Iface\", COALESCE(SUM(bytes) FILTER (WHERE direction = 'in'), 0) AS \"Bytes Ingress\", COALESCE(SUM(bytes) FILTER (WHERE direction = 'out'), 0) AS \"Bytes Egress\", COALESCE(SUM(flows) FILTER (WHERE direction = 'in'), 0) AS \"Flows In\", COALESCE(SUM(flows) FILTER (WHERE direction = 'out'), 0) AS \"Flows Out\", ROUND(COALESCE(SUM(bytes) FILTER (WHERE direction = 'in'), 0) * 8.0 /   NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0) / 1000000, 3) AS \"\u00d8 Mbps In\", ROUND(COALESCE(SUM(bytes) FILTER (WHERE direction = 'out'), 0) * 8.0 /   NULLIF(EXTRACT(EPOCH FROM ($__timeTo()::timestamptz - $__timeFrom()::timestamptz)), 0) / 1000000, 3) AS \"\u00d8 Mbps Out\" FROM netflow_iface_buckets WHERE $__timeFilter(bucket_start) AND firewall_ip IN (${firewall:sqlstring}) GROUP BY firewall_ip, iface_idx ORDER BY (COALESCE(SUM(bytes) FILTER (WHERE direction = 'in'), 0) + COALESCE(SUM(bytes) FILTER (WHERE direction = 'out'), 0)) DESC"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes Ingress"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-BlYlRd"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes Egress"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-BlYlRd"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "\u00d8 Mbps In"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Mbits"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "\u00d8 Mbps Out"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Mbits"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "type": "table",
+      "title": "Top-Flows (5-Tuple)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "warroom-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT src_ip AS \"Quell-IP\", dst_ip AS \"Ziel-IP\", dst_port AS \"Port\", CASE protocol WHEN 1 THEN 'ICMP' WHEN 6 THEN 'TCP' WHEN 17 THEN 'UDP' WHEN 47 THEN 'GRE' WHEN 50 THEN 'ESP' WHEN 51 THEN 'AH' WHEN 58 THEN 'ICMPv6' ELSE 'P' || protocol::text END AS \"Proto\", CASE dst_port WHEN 20 THEN 'ftp-data' WHEN 21 THEN 'ftp' WHEN 22 THEN 'ssh' WHEN 23 THEN 'telnet' WHEN 25 THEN 'smtp' WHEN 53 THEN 'dns' WHEN 80 THEN 'http' WHEN 110 THEN 'pop3' WHEN 123 THEN 'ntp' WHEN 143 THEN 'imap' WHEN 161 THEN 'snmp' WHEN 389 THEN 'ldap' WHEN 443 THEN 'https' WHEN 445 THEN 'smb' WHEN 465 THEN 'smtps' WHEN 514 THEN 'syslog' WHEN 587 THEN 'submission' WHEN 636 THEN 'ldaps' WHEN 993 THEN 'imaps' WHEN 995 THEN 'pop3s' WHEN 1433 THEN 'mssql' WHEN 3306 THEN 'mysql' WHEN 3389 THEN 'rdp' WHEN 5432 THEN 'postgres' WHEN 5900 THEN 'vnc' WHEN 6379 THEN 'redis' WHEN 8080 THEN 'http-alt' WHEN 8443 THEN 'https-alt' WHEN 27017 THEN 'mongodb' ELSE 'port-' || dst_port::text END AS \"Service\", SUM(bytes) AS \"Bytes\", SUM(packets) AS \"Pakete\", SUM(flows) AS \"Flows\" FROM netflow_buckets WHERE $__timeFilter(bucket_start) AND src_ip IS NOT NULL AND dst_ip IS NOT NULL AND firewall_ip IN (${firewall:sqlstring}) GROUP BY src_ip, dst_ip, dst_port, protocol ORDER BY \"Bytes\" DESC LIMIT 200"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Bytes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "continuous-BlYlRd"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

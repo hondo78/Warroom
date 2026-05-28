@@ -29,6 +29,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Allow the backend to reach LMStudio / Ollama / vLLM running on the
+    # host machine via http://host.docker.internal:<port>. This is the
+    # built-in alias on Docker Desktop and is wired manually on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./geoip:/app/geoip
     depends_on:
@@ -82,5 +87,32 @@ services:
     depends_on:
       - backend
 
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    ports:
+      - "3030:3000"
+    environment:
+      # Anonymous viewer access — no login needed to look at the dashboard.
+      # Editing still requires the admin login below.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_DEFAULT_THEME: "dark"
+      # Available to provisioning files as $POSTGRES_USER etc.
+      POSTGRES_USER: "${POSTGRES_USER:-warroom}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+      POSTGRES_DB: "${POSTGRES_DB:-warroom}"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  grafana_data:

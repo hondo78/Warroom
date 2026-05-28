@@ -52,6 +52,22 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_blocked_ips_blocked_at ON blocked_ips(blocked_at DESC)",
     """
+    CREATE TABLE IF NOT EXISTS blocked_domains (
+        domain VARCHAR(255) PRIMARY KEY,
+        comment TEXT,
+        blocked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_blocked_domains_blocked_at ON blocked_domains(blocked_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS blocked_urls (
+        url VARCHAR(2048) PRIMARY KEY,
+        comment TEXT,
+        blocked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_blocked_urls_blocked_at ON blocked_urls(blocked_at DESC)",
+    """
     CREATE TABLE IF NOT EXISTS app_settings (
         key VARCHAR(100) PRIMARY KEY,
         value TEXT,
@@ -91,6 +107,45 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_iface_bucket ON netflow_iface_buckets(bucket_start DESC)",
     "CREATE INDEX IF NOT EXISTS idx_iface_fw ON netflow_iface_buckets(firewall_ip, iface_idx)",
+    """
+    CREATE TABLE IF NOT EXISTS agent_decisions (
+        id BIGSERIAL PRIMARY KEY,
+        alert_id VARCHAR(255) NOT NULL,
+        action VARCHAR(50) NOT NULL,
+        action_args JSONB,
+        reasoning TEXT,
+        confidence DOUBLE PRECISION,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        decided_at TIMESTAMP WITH TIME ZONE,
+        error TEXT,
+        model VARCHAR(255)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_status ON agent_decisions(status)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_alert_id ON agent_decisions(alert_id)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_created_at ON agent_decisions(created_at DESC)",
+    # Additive columns for Human-in-the-loop tracking.
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS decided_by VARCHAR(20) NOT NULL DEFAULT 'agent'",
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS human_comment TEXT",
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS supersedes BIGINT",
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_decided_by ON agent_decisions(decided_by)",
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'alert'",
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS source_ip VARCHAR(45)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_source_type ON agent_decisions(source_type)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_decisions_source_ip ON agent_decisions(source_ip)",
+    # alert_id is no longer mandatory for synthetic (WAF) decisions
+    "ALTER TABLE agent_decisions ALTER COLUMN alert_id DROP NOT NULL",
+    """
+    CREATE TABLE IF NOT EXISTS whitelisted_ips (
+        ip VARCHAR(45) PRIMARY KEY,
+        source VARCHAR(50) NOT NULL DEFAULT 'manual',
+        comment TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_whitelisted_ips_source ON whitelisted_ips(source)",
 ]
 
 
