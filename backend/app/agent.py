@@ -93,6 +93,132 @@ block_ip empfehlen — das System würde das ohnehin verweigern, aber die Empfeh
 landet als 'failed' in der DB und verschwendet Zeit."""
 
 
+# --- Default System-Prompts für die regel-getriebenen Loops ---
+# Jeder dieser Prompts kann in der Admin-Seite überschrieben werden. Leer ⇒
+# Fallback auf diese Defaults. Die Prompts spiegeln die früher hartcodierten
+# Regel-Leitern wider, sind aber jetzt für das LLM gedacht — Schwellen kommen
+# als ``thresholds`` im JSON, das LLM darf davon begründet abweichen.
+
+DEFAULT_WAF_PROMPT = """Du bist ein WAF-Security-Analyst für Warroom.
+
+INPUT (JSON, vom System gestellt):
+  - source_ip       — angreifende öffentliche IPv4
+  - context         — Aggregat-Werte zur IP (4xx/5xx-Counts in 24 h, HTTP-Statuses,
+                       Hosts, Land/Stadt) und die konfigurierte Schwelle (threshold)
+  - osint           — OSINT-Lookup (abuseipdb, virustotal, shodan, greynoise,
+                       intelix, ipinfo). Felder können fehlen wenn ein Provider
+                       keinen Key/Account hat.
+  - allowed_actions — erlaubte Werte für `action`
+
+ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift):
+1. count_4xx_24h + count_5xx_24h >= threshold       → action="block_ip", confidence=0.95.
+2. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
+   intelix.score >= 70 ODER intelix.category ∈ {Malicious, High Risk, Bad})
+                                                    → action="block_ip", confidence=0.95.
+3. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
+   virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
+                                                    → action="block_ip", confidence=0.85.
+4. Sonst                                            → action="no_action", confidence=0.6.
+
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text):
+{
+  "action":     "<einer aus allowed_actions>",
+  "args":       {} oder {"target_ip": "<source_ip>"},
+  "confidence": <float 0..1>,
+  "reasoning":  "<deutsche Begründung, max 2-3 Sätze, nenne die ausschlaggebenden Werte>"
+}
+"""
+
+
+DEFAULT_IPS_PROMPT = """Du bist ein IPS/IDP-Security-Analyst für Warroom.
+
+INPUT (JSON):
+  - source_ip
+  - context         — count_24h (IPS-Hits in 24h), severities (Liste), signatures,
+                       categories, threshold (konfigurierte Schwelle), Land/Stadt
+  - osint           — wie WAF
+  - allowed_actions
+
+ENTSCHEIDUNGSREGELN (erste passende greift):
+1. severities enthält "high" oder "critical"         → action="block_ip", confidence=0.92.
+   IPS klassifiziert das System bereits als Intrusion-Attempt; bei hoher
+   Schwere ist Block ohne weitere Belege gerechtfertigt.
+2. count_24h >= threshold                            → action="block_ip", confidence=0.95.
+3. OSINT-Sophos-Intelix-Treffer                      → action="block_ip", confidence=0.95.
+4. OSINT-Treffer anderer Provider                    → action="block_ip", confidence=0.85.
+5. Sonst                                             → action="no_action", confidence=0.6.
+
+AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
+"""
+
+
+DEFAULT_FAILED_LOGIN_PROMPT = """Du bist ein Brute-Force/Login-Security-Analyst für Warroom.
+
+INPUT (JSON):
+  - source_ip       — die IP, um die es geht (kann der erste Vertreter eines
+                       Subnets sein, wenn subnet_brute_force_indicator=true)
+  - context         — bei per-IP: count_24h, users (Liste), components
+                       (SSL VPN/Admin/User Portal/IPSec), threshold, Land/Stadt
+                     bei Subnet-Brute-Force: subnet (/24-CIDR), subnet_attempts,
+                       subnet_distinct_ips, observed_ips, users, country und
+                       das Flag `subnet_brute_force_indicator = true`
+  - osint
+  - allowed_actions — enthält "block_ip", "block_subnet", "no_action"
+
+ENTSCHEIDUNGSREGELN:
+A) WENN context.subnet_brute_force_indicator = true:
+   → action="block_subnet", args={"target_subnet": context.subnet},
+     confidence=0.92. Das gesamte /24 wird geblockt; die einzelnen IPs sind
+     bereits durch das System koordiniert und der Whitelist-Schutz greift
+     pro Host bei der Ausführung.
+   → reasoning: nenne Subnet, Versuche, distinct_ips.
+
+B) Sonst (per-IP-Pfad):
+   1. count_24h >= threshold                         → "block_ip", confidence=0.95.
+   2. OSINT Sophos-Intelix-Treffer                   → "block_ip", confidence=0.95.
+   3. OSINT-Treffer anderer Provider                 → "block_ip", confidence=0.85.
+   4. Sonst                                          → "no_action", confidence=0.6.
+
+AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
+"""
+
+
+# Mapping source_type → (setting_attr, default_prompt) für den Lookup
+_RULE_PROMPTS = {
+    "waf":          ("agent_waf_system_prompt", DEFAULT_WAF_PROMPT),
+    "ips":          ("agent_ips_system_prompt", DEFAULT_IPS_PROMPT),
+    "failed_login": ("agent_failed_login_system_prompt", DEFAULT_FAILED_LOGIN_PROMPT),
+}
+
+
+def _prompt_for(source_type: str) -> str:
+    attr, default = _RULE_PROMPTS[source_type]
+    return (getattr(settings, attr, "") or "").strip() or default
+
+
+def _allowed_actions_for_source(source_type: str) -> list[str]:
+    if source_type == "failed_login":
+        return ["block_ip", "block_subnet", "no_action"]
+    return ["block_ip", "no_action"]
+
+
+def _osint_summary(osint: dict[str, Any]) -> dict[str, Any]:
+    """Compact summary of the relevant OSINT signals — stored in the
+    decision audit trail so the UI can show why the LLM decided what it did
+    without storing the full provider payloads."""
+    if not isinstance(osint, dict):
+        return {}
+    return {
+        "cached": osint.get("cached"),
+        "abuseipdb_score": (osint.get("abuseipdb") or {}).get("abuse_score"),
+        "virustotal_malicious": (osint.get("virustotal") or {}).get("malicious"),
+        "intelix_security_category": (osint.get("intelix") or {}).get("security_category"),
+        "intelix_category": (osint.get("intelix") or {}).get("category"),
+        "intelix_score": (osint.get("intelix") or {}).get("score"),
+        "greynoise_classification": (osint.get("greynoise") or {}).get("classification"),
+    }
+
+
 def _is_public_ip(ip: str | None) -> bool:
     if not ip:
         return False
@@ -126,7 +252,20 @@ def _build_user_prompt(alert: Alert, already_blocked: bool, whitelisted: bool, w
     return "Neuer Alarm:\n" + json.dumps(fields, indent=2, ensure_ascii=False, default=str)
 
 
-async def _call_llm(prompt: str) -> dict[str, Any]:
+async def _call_llm(
+    prompt: str,
+    system_prompt: str | None = None,
+    source: str = "alert",
+) -> dict[str, Any]:
+    """Send a /chat/completions request and parse the decision JSON.
+
+    Telemetry: every call (success or error) is recorded into
+    ``llm_metrics`` for the /stats.html page. The recorder failure is
+    swallowed — telemetry must never break the agent pipeline.
+    """
+    import time
+    from app import llm_metrics
+
     base = (settings.agent_base_url or "").rstrip("/")
     if not base:
         raise RuntimeError("agent_base_url not configured")
@@ -134,49 +273,149 @@ async def _call_llm(prompt: str) -> dict[str, Any]:
     headers = {"Content-Type": "application/json"}
     if settings.agent_api_key:
         headers["Authorization"] = f"Bearer {settings.agent_api_key}"
-    # Admin-editable system prompt; empty falls back to the bundled default
-    system_prompt = (settings.agent_system_prompt or "").strip() or DEFAULT_SYSTEM_PROMPT
+    # Caller may pass a per-source system prompt; default to the alert prompt.
+    if system_prompt is None:
+        system_prompt = (settings.agent_system_prompt or "").strip() or DEFAULT_SYSTEM_PROMPT
+    model_name = settings.agent_model or "local-model"
     payload = {
-        "model": settings.agent_model or "local-model",
+        "model": model_name,
         "temperature": 0.2,
-        "max_tokens": 600,
-        "response_format": {"type": "json_object"},  # ignored by servers that don't support it
+        "max_tokens": 3000,  # reasoning models burn 1500-2500 on a hidden think block
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
     }
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(url, headers=headers, json=payload)
-    if r.status_code != 200:
-        raise RuntimeError(f"LLM HTTP {r.status_code}: {r.text[:200]}")
-    data = r.json()
+    started = time.monotonic()
+    prompt_tokens = completion_tokens = 0
     try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError(f"Unexpected response shape: {e}") from e
-    return _parse_decision(content)
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(url, headers=headers, json=payload)
+        if r.status_code != 200:
+            raise RuntimeError(f"LLM HTTP {r.status_code}: {r.text[:200]}")
+        data = r.json()
+        usage = data.get("usage") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise RuntimeError(f"Unexpected response shape: {e}") from e
+        decision = _parse_decision(content)
+    except Exception:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        try:
+            await llm_metrics.record(
+                source=source, status="error", model=model_name,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            )
+        except Exception:
+            pass
+        raise
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    try:
+        await llm_metrics.record(
+            source=source, status="success", model=model_name,
+            duration_ms=duration_ms,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+        )
+    except Exception:
+        pass
+    return decision
+
+
+def _extract_json_objects(text: str) -> list[dict[str, Any]]:
+    """Find every top-level balanced ``{…}`` block in ``text`` and parse it.
+    Returns the successfully-parsed dicts in source order. Used to handle
+    reasoning models that emit draft + final JSON, or JSON-shaped fragments
+    inside their think-trace.
+    """
+    results: list[dict[str, Any]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        end = -1
+        for j in range(i, n):
+            ch = text[j]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end < 0:
+            break
+        try:
+            obj = json.loads(text[i : end + 1])
+            if isinstance(obj, dict):
+                results.append(obj)
+        except json.JSONDecodeError:
+            pass
+        i = end + 1
+    return results
 
 
 def _parse_decision(content: str) -> dict[str, Any]:
-    """Extract the JSON object from the LLM's reply, tolerant of trailing text
-    or ```json fences."""
+    """Extract the decision JSON from the LLM's reply.
+
+    Tolerant against (a) ```-fences, (b) reasoning-model preambles like
+    ``<think>…</think>`` or prose thinking, (c) trailing text, and
+    (d) multiple ``{…}`` blocks (a "draft" inside the thinking + the final
+    answer): we collect every balanced block, then pick the LAST one whose
+    ``action`` is one of the allowed values. If none qualifies, fall back to
+    the very last block so the existing validation produces a useful error.
+    """
+    import re
+
     text = (content or "").strip()
-    # Strip code fences
+    # Strip Qwen-style hidden reasoning blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip surrounding ```/```json fence
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
             text = text[: text.rfind("```")].rstrip()
-    # Find the first {...} block if there's extra noise
-    if not text.startswith("{"):
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            text = text[start : end + 1]
+
+    obj: dict[str, Any] | None = None
+    # Fast path: whole string is JSON
     try:
-        obj = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"LLM did not return JSON: {e}; raw={content[:200]!r}") from e
+        candidate = json.loads(text)
+        if isinstance(candidate, dict):
+            obj = candidate
+    except json.JSONDecodeError:
+        pass
+
+    if obj is None or (obj.get("action") or "").strip() not in ALLOWED_ACTIONS:
+        blocks = _extract_json_objects(text)
+        if not blocks:
+            raise RuntimeError(f"LLM did not return JSON; raw={content[:300]!r}")
+        # Prefer the last block with a valid action; otherwise last block at all
+        for cand in reversed(blocks):
+            act = (cand.get("action") or "").strip()
+            if act in ALLOWED_ACTIONS:
+                obj = cand
+                break
+        else:
+            obj = blocks[-1]
 
     action = (obj.get("action") or "").strip()
     if action not in ALLOWED_ACTIONS:
@@ -214,7 +453,7 @@ async def analyze_alert(alert: Alert) -> dict[str, Any] | None:
         )).scalars().all()
     prompt = _build_user_prompt(alert, already_blocked=blocked, whitelisted=whitelisted, whitelist_sample=list(wl_sample))
     try:
-        return await _call_llm(prompt)
+        return await _call_llm(prompt, source="alert")
     except Exception as e:
         logger.warning(f"agent: analyze_alert({alert.id}) failed: {e}")
         return None
@@ -407,66 +646,10 @@ _WAF_FILTER_SQL_FRAG = (
 )
 
 
-def _osint_is_bad(osint: dict[str, Any]) -> tuple[bool, list[str], float]:
-    """Apply the OSINT-reputation rule.
-
-    Returns ``(is_bad, reason_parts, confidence)`` where ``confidence`` is the
-    recommended decision confidence based on the strongest provider hit.
-
-    Sophos Intelix is treated as authoritative — any threat verdict from it
-    (explicit security_category, "Malicious" category, or score ≥ 70) yields
-    a high confidence of 0.95 so the IP auto-executes under the default
-    threshold. Other providers stay at the standard 0.85.
-    """
-    reasons: list[str] = []
-    bad = False
-    confidence = 0.0
-
-    ab = (osint or {}).get("abuseipdb") or {}
-    score_ab = ab.get("abuse_score")
-    if ab.get("available") and isinstance(score_ab, int) and score_ab >= 75:
-        bad = True
-        confidence = max(confidence, 0.85)
-        reasons.append(f"AbuseIPDB {score_ab}/100")
-
-    vt = (osint or {}).get("virustotal") or {}
-    mal = vt.get("malicious") or 0
-    if vt.get("available") and isinstance(mal, int) and mal >= 2:
-        bad = True
-        confidence = max(confidence, 0.85)
-        reasons.append(f"VirusTotal {mal}× malicious")
-
-    gn = (osint or {}).get("greynoise") or {}
-    if gn.get("classification") == "malicious":
-        bad = True
-        confidence = max(confidence, 0.85)
-        reasons.append("GreyNoise=malicious")
-
-    intelix = (osint or {}).get("intelix") or {}
-    if intelix.get("available"):
-        sec_cat = (intelix.get("security_category") or "").strip()
-        category = (intelix.get("category") or "").strip()
-        intelix_score = intelix.get("score")
-        # security_category is only populated when Sophos has classified the
-        # IP under a security threat (malware, phishing, c2, …). category
-        # of "Malicious" / "High Risk" is the explicit verbal verdict.
-        category_says_bad = category.lower() in {"malicious", "high risk", "bad"}
-        score_says_bad = isinstance(intelix_score, int) and intelix_score >= 70
-        if sec_cat or category_says_bad or score_says_bad:
-            bad = True
-            confidence = max(confidence, 0.95)
-            verdict = sec_cat or category or f"Score {intelix_score}"
-            reasons.append(f"Sophos Intelix: {verdict}")
-
-    return bad, reasons, confidence
-
-
 async def agent_waf_loop(window_minutes: int | None = None, force: bool = False) -> None:
-    """For each fresh WAF row with a 4xx/5xx status, check:
-      1) 4+ failed requests from the same source_ip in last 24h, or
-      2) OSINT reputation says malicious.
-    Either triggers a block_ip recommendation; otherwise the IP gets a
-    no_action audit entry (with a long cooldown so we don't spam logs).
+    """Collect WAF candidates (fresh 4xx/5xx events), filter against whitelist
+    / private IPs / cooldown, then let the LLM decide per IP — the decision
+    logic lives entirely in ``agent_waf_system_prompt`` (admin-editable).
 
     ``window_minutes`` overrides the default lookback (3× interval). ``force=True``
     runs even when the agent is otherwise disabled — used by the manual trigger
@@ -497,40 +680,13 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
             LIMIT 100
         """), {"since": window_start})
         candidate_ips = [r[0] for r in candidates_q.fetchall()]
-        if not candidate_ips:
-            return
-
-        # Step 2: drop whitelisted + private/reserved + recently-decided IPs
-        wl_q = await db.execute(
-            select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(candidate_ips))
+        candidate_ips = await _filter_candidates(
+            db, candidate_ips, "waf", block_cooldown, noaction_cooldown
         )
-        wl = set(wl_q.scalars().all())
-        candidate_ips = [ip for ip in candidate_ips if ip not in wl and _is_public_ip(ip)]
         if not candidate_ips:
             return
 
-        # block-action decisions have a 1h cooldown; no-action a 24h cooldown
-        recent_q = await db.execute(
-            select(AgentDecision.source_ip, AgentDecision.action, AgentDecision.created_at)
-            .where(
-                AgentDecision.source_type == "waf",
-                AgentDecision.source_ip.in_(candidate_ips),
-                AgentDecision.created_at >= noaction_cooldown,
-            )
-        )
-        skip = set()
-        for ip, action, ts in recent_q.all():
-            if action == "block_ip" and ts >= block_cooldown:
-                skip.add(ip)
-            elif action == "no_action" and ts >= noaction_cooldown:
-                skip.add(ip)
-            elif action != "no_action":  # other recent decisions also enough
-                skip.add(ip)
-        candidate_ips = [ip for ip in candidate_ips if ip not in skip]
-        if not candidate_ips:
-            return
-
-        # Step 3: per-IP 24h error counts
+        # Step 2: per-IP 24h error counts
         counts_q = await db.execute(text(f"""
             SELECT source_ip,
                    COUNT(*) FILTER (WHERE (raw_data->>'http_status') LIKE '4%') AS c4,
@@ -550,8 +706,6 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
 
     logger.info(f"agent[waf]: {len(candidate_ips)} candidate IP(s)")
 
-    from app.osint import lookup as osint_lookup
-
     for ip in candidate_ips:
         row = per_ip.get(ip)
         c4 = int(row[1] or 0) if row else 0
@@ -560,7 +714,6 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
         hosts = [h for h in (row[4] if row else []) if h]
         country = row[5] if row else None
         city = row[6] if row else None
-        total = c4 + c5
 
         context = {
             "source_ip": ip,
@@ -572,11 +725,7 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
             "country": country, "city": city,
         }
 
-        await _rule_block_or_audit(
-            source_type="waf", ip=ip,
-            count_24h=total, threshold=threshold,
-            context=context,
-        )
+        await _llm_decide_rule(source_type="waf", ip=ip, context=context)
 
 
 async def _store_rule_decision(
@@ -596,7 +745,7 @@ async def _store_rule_decision(
         confidence=confidence,
         status="pending",
         decided_by="agent",
-        model=f"rule:{source_type}",
+        model=settings.agent_model or "local-model",
     )
     async with async_session() as db:
         db.add(rec)
@@ -612,71 +761,104 @@ async def _store_rule_decision(
             logger.warning(f"agent[{source_type}]: auto-execute failed for {ip}: {e}")
 
 
-async def _rule_block_or_audit(
-    source_type: str, ip: str, count_24h: int, threshold: int,
-    context: dict, severity_match: str | None = None,
+async def _llm_decide_rule(
+    source_type: str, ip: str | None, context: dict,
+    extra_args: dict | None = None,
 ) -> None:
-    """Apply the standard ladder:
-       1) severity_match → immediate block (used by IPS for high/critical)
-       2) count_24h ≥ threshold → block
-       3) OSINT bad reputation → block
-       4) otherwise audit no_action
+    """LLM-based replacement for the old rule ladder.
+
+    Pulls OSINT for the IP, builds a JSON payload, calls the LLM with the
+    per-source system prompt (admin-editable, falls back to the bundled
+    default), and persists the parsed decision via ``_store_rule_decision``
+    — which also handles auto-execute.
+
+    ``ip`` may be None for synthetic decisions (e.g. when source_ip column
+    isn't applicable). ``extra_args`` is merged into the decision's args
+    field — used e.g. to inject target_subnet for the subnet-brute-force
+    path so the LLM doesn't have to fabricate it.
     """
-    if severity_match:
-        await _store_rule_decision(
-            source_type=source_type, ip=ip,
-            action="block_ip",
-            reasoning=f"IPS-Hit mit Schwere '{severity_match}'.",
-            confidence=0.92,
-            args={"target_ip": ip},
-            context={**context, "rule": "severity"},
-        )
+    if source_type not in _RULE_PROMPTS:
+        logger.warning(f"agent: no prompt defined for source_type={source_type!r}")
         return
 
-    if count_24h >= threshold:
-        await _store_rule_decision(
-            source_type=source_type, ip=ip,
-            action="block_ip",
-            reasoning=f"{count_24h} Events in 24 h ≥ Schwelle {threshold}.",
-            confidence=0.95,
-            args={"target_ip": ip},
-            context={**context, "rule": "threshold"},
-        )
-        return
+    # 1) OSINT enrichment — only for public IPs. Private/None → empty dict;
+    #    the LLM still gets a decision-shaped payload but with no OSINT signals.
+    osint: dict[str, Any] = {}
+    if ip and _is_public_ip(ip):
+        try:
+            from app.osint import lookup as osint_lookup
+            osint = await osint_lookup(ip, force=False)
+        except Exception as e:
+            logger.warning(f"agent[{source_type}]: OSINT lookup for {ip} failed: {e}")
+            osint = {"error": str(e)[:200]}
 
-    # OSINT fallback
+    # 2) Build the user message — a single JSON object the LLM can chew on
+    payload = {
+        "source_type": source_type,
+        "source_ip": ip,
+        "context": context,
+        "osint": osint,
+        "allowed_actions": _allowed_actions_for_source(source_type),
+    }
+    user_msg = "Eingangsdaten:\n" + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+
+    # 3) Ask the LLM
     try:
-        from app.osint import lookup as osint_lookup
-        osint = await osint_lookup(ip, force=False)
+        decision = await _call_llm(
+            user_msg,
+            system_prompt=_prompt_for(source_type),
+            source=source_type,
+        )
     except Exception as e:
-        logger.warning(f"agent[{source_type}]: OSINT lookup for {ip} failed: {e}")
-        osint = {}
+        logger.warning(f"agent[{source_type}]: LLM call failed for ip={ip}: {e}")
+        return
 
-    is_bad, reasons, osint_confidence = _osint_is_bad(osint)
-    if is_bad:
-        await _store_rule_decision(
-            source_type=source_type, ip=ip,
-            action="block_ip",
-            reasoning=f"Schlechte Reputation: {', '.join(reasons)}. Nur {count_24h} Events/24h (Schwelle {threshold}).",
-            confidence=osint_confidence,
-            args={"target_ip": ip},
-            context={**context, "rule": "osint", "osint_reasons": reasons},
+    # 3b) Per-source action validation: the LLM might hallucinate an action
+    #     that the prompt didn't actually allow (e.g. block_subnet for WAF).
+    #     Reject those before persisting — otherwise execute_decision blows
+    #     up with a less helpful error later.
+    allowed = set(_allowed_actions_for_source(source_type))
+    if decision["action"] not in allowed:
+        logger.warning(
+            f"agent[{source_type}]: LLM emitted action={decision['action']!r} "
+            f"not in allowed_actions={sorted(allowed)} for ip={ip}; dropping"
         )
         return
 
+    # 4) Action-arg merging:
+    #    - extra_args (e.g. target_subnet) overrides whatever the LLM emitted
+    #    - block_ip without target_ip defaults to the source IP
+    action_args = {**(decision.get("args") or {}), **(extra_args or {})}
+    if decision["action"] == "block_ip" and "target_ip" not in action_args and ip:
+        action_args["target_ip"] = ip
+
+    # 5) Persist via the shared helper (handles auto-execute)
     await _store_rule_decision(
         source_type=source_type, ip=ip,
-        action="no_action",
-        reasoning=f"Nur {count_24h} Events in 24 h (< Schwelle {threshold}); OSINT unauffällig.",
-        confidence=0.6,
-        args={},
-        context={**context, "rule": "neither"},
+        action=decision["action"],
+        reasoning=decision.get("reasoning") or "",
+        confidence=decision.get("confidence", 0.0),
+        args=action_args,
+        context={
+            **context,
+            "rule": "llm",
+            "osint_summary": _osint_summary(osint),
+        },
     )
 
 
 async def _filter_candidates(db, candidate_ips: list[str], source_type: str,
                               block_cooldown_dt, noaction_cooldown_dt) -> list[str]:
-    """Drop whitelisted + private + recently-decided IPs from the candidate list."""
+    """Drop whitelisted + private + recently-decided IPs.
+
+    Cooldown rules per existing decision:
+      * ``block_ip`` / ``block_subnet`` / ``acknowledge`` / ``isolate`` — skip
+        while within the 1h block-cooldown window (avoids hammering the LLM
+        when we already decided to act on this IP recently).
+      * ``no_action`` — skip while within the 24h audit-cooldown window
+        (we already wrote an audit row and don't want a duplicate).
+      * Anything else (unknown legacy actions) — skip conservatively.
+    """
     if not candidate_ips:
         return []
     wl_q = await db.execute(
@@ -695,13 +877,15 @@ async def _filter_candidates(db, candidate_ips: list[str], source_type: str,
             AgentDecision.created_at >= noaction_cooldown_dt,
         )
     )
-    skip = set()
+    skip: set[str] = set()
+    BLOCKING_ACTIONS = {"block_ip", "block_subnet", "acknowledge", "isolate"}
     for ip, action, ts in recent_q.all():
-        if action == "block_ip" and ts >= block_cooldown_dt:
+        if action in BLOCKING_ACTIONS and ts >= block_cooldown_dt:
             skip.add(ip)
         elif action == "no_action" and ts >= noaction_cooldown_dt:
             skip.add(ip)
-        elif action not in {"no_action", "block_ip"}:
+        elif action not in BLOCKING_ACTIONS and action != "no_action":
+            # Unknown action — conservative skip
             skip.add(ip)
     return [ip for ip in candidate_ips if ip not in skip]
 
@@ -717,9 +901,10 @@ _IPS_FILTER_SQL_FRAG = (
 
 
 async def agent_ips_loop(window_minutes: int | None = None, force: bool = False) -> None:
-    """Per-IP rule check for IDP/IPS events. Sophos has already classified
-    these as intrusion attempts, so the threshold is lower (3 by default)
-    and high/critical severity triggers an immediate block."""
+    """Collect IDP/IPS candidates, filter, then defer to the LLM via the
+    ``agent_ips_system_prompt`` (admin-editable). The default prompt knows
+    that Sophos has already classified these as intrusion attempts, so it
+    treats high/critical severity as immediate-block."""
     if (not settings.agent_enabled or not settings.agent_ips_enabled) and not force:
         return
 
@@ -774,25 +959,13 @@ async def agent_ips_loop(window_minutes: int | None = None, force: bool = False)
         country = row[6] if row else None
         city = row[7] if row else None
 
-        # High/critical severity → immediate block
-        sev_match = None
-        for s in sevs:
-            if (s or "").lower() in {"high", "critical"}:
-                sev_match = s
-                break
-
         context = {
             "source_ip": ip,
             "count_24h": cnt, "threshold": threshold,
             "severities": sevs, "signatures": sigs, "categories": cats,
             "country": country, "city": city,
         }
-        await _rule_block_or_audit(
-            source_type="ips", ip=ip,
-            count_24h=cnt, threshold=threshold,
-            context=context,
-            severity_match=sev_match,
-        )
+        await _llm_decide_rule(source_type="ips", ip=ip, context=context)
 
 
 # --- Failed-login loop (rule-based, brute-force detection) ---
@@ -813,14 +986,16 @@ _FAILED_LOGIN_SQL_FRAG = (
 
 
 async def agent_failed_login_loop(window_minutes: int | None = None, force: bool = False) -> None:
-    """Per-IP rule check for failed-login attempts (auth/admin/SSL-VPN/IPsec/
-    User-Portal). Threshold defaults to 5 — repeated auth failures from one
-    public IP are a brute-force indicator.
+    """Two-stage failed-login workflow, both stages delegating the decision
+    to the LLM (``agent_failed_login_system_prompt``):
 
-    Also detects subnet-coordinated brute force: if a /24 emits ≥ N attempts
-    from ≥ M distinct IPs in 24 h, **every** active IP in that subnet gets
-    flagged for block, even if individual IPs are under their own threshold.
-    """
+      * **Stage 1 — Subnet sweep**: aggregate fails per /24. Subnets that
+        clear ``subnet_attempts`` × ``subnet_min_ips`` are presented to the
+        LLM with ``subnet_brute_force_indicator=true`` and the LLM may
+        emit ``block_subnet`` covering all 254 hosts. Observed IPs are
+        marked handled so they don't re-enter Stage 2.
+      * **Stage 2 — Per-IP**: remaining candidates (auth/admin/SSL-VPN/
+        IPsec/User-Portal failures) go through the standard per-IP path."""
     if (not settings.agent_enabled or not settings.agent_failed_login_enabled) and not force:
         return
 
@@ -896,18 +1071,10 @@ async def agent_failed_login_loop(window_minutes: int | None = None, force: bool
 
             users_clean = [u for u in (users or []) if u]
             rep_ip = (observed_candidates[0] if observed_candidates else (list(ips or []) or [None])[0])
-            await _store_rule_decision(
+            await _llm_decide_rule(
                 source_type="failed_login", ip=rep_ip,
-                action="block_subnet",
-                reasoning=(
-                    f"Subnet-Brute-Force aus {prefix24}: {int(attempts)} Versuche "
-                    f"von {int(distinct_ips)} unterschiedlichen IPs in 24 h. "
-                    f"Alle Hosts im /24 werden geblockt."
-                ),
-                confidence=0.92,
-                args={"target_subnet": prefix24, "target_ip": rep_ip},
                 context={
-                    "rule": "subnet_brute_force",
+                    "subnet_brute_force_indicator": True,
                     "subnet": prefix24,
                     "subnet_attempts": int(attempts),
                     "subnet_distinct_ips": int(distinct_ips),
@@ -916,6 +1083,9 @@ async def agent_failed_login_loop(window_minutes: int | None = None, force: bool
                     "users": users_clean,
                     "country": country,
                 },
+                # Inject the CIDR so the LLM doesn't have to fabricate it —
+                # we know it for certain from the SQL aggregation.
+                extra_args={"target_subnet": prefix24},
             )
             for ip in observed_candidates:
                 handled_by_subnet.add(ip)
@@ -968,19 +1138,23 @@ async def agent_failed_login_loop(window_minutes: int | None = None, force: bool
             "count_24h": cnt, "threshold": threshold,
             "users": users, "components": comps,
             "country": country, "city": city,
+            "subnet_brute_force_indicator": False,
         }
-        await _rule_block_or_audit(
-            source_type="failed_login", ip=ip,
-            count_24h=cnt, threshold=threshold,
-            context=context,
-        )
+        await _llm_decide_rule(source_type="failed_login", ip=ip, context=context)
 
 
 async def test_connection() -> dict[str, Any]:
-    """Cheap probe: ask the model to say 'pong' as JSON. Used by the admin UI."""
+    """Cheap probe: ask the model to say 'pong' as JSON. Used by the admin UI.
+    Recorded under source='test' in the LLM telemetry."""
+    import time
+    from app import llm_metrics
+
     base = (settings.agent_base_url or "").rstrip("/")
     if not base:
         return {"ok": False, "error": "agent_base_url not set"}
+    model_name = settings.agent_model or "local-model"
+    started = time.monotonic()
+    prompt_tokens = completion_tokens = 0
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.post(
@@ -990,7 +1164,7 @@ async def test_connection() -> dict[str, Any]:
                     **({"Authorization": f"Bearer {settings.agent_api_key}"} if settings.agent_api_key else {}),
                 },
                 json={
-                    "model": settings.agent_model or "local-model",
+                    "model": model_name,
                     "temperature": 0,
                     "max_tokens": 50,
                     "messages": [
@@ -1000,10 +1174,27 @@ async def test_connection() -> dict[str, Any]:
                 },
             )
         if r.status_code != 200:
-            return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
-        content = r.json()["choices"][0]["message"]["content"]
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+        data = r.json()
+        usage = data.get("usage") or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        content = data["choices"][0]["message"]["content"]
+        await llm_metrics.record(
+            source="test", status="success", model=model_name,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+        )
         return {"ok": True, "model": settings.agent_model, "sample": content[:200]}
     except Exception as e:
+        try:
+            await llm_metrics.record(
+                source="test", status="error", model=model_name,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            )
+        except Exception:
+            pass
         return {"ok": False, "error": str(e)[:300]}
 
 

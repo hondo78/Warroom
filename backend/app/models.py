@@ -244,6 +244,26 @@ class NetflowIfaceBucket(Base):
     flows = Column(Integer, nullable=False, default=0)
 
 
+class LlmUsage(Base):
+    """Per-day LLM-call counter, segmented by ``source`` (alert/waf/ips/
+    failed_login/test/manual), ``status`` (success/error), and the model
+    that was actually used at call time. Token counts are summed (divide by
+    ``count`` for averages); ``duration_ms`` is the cumulative wall-clock
+    spent across calls so the UI can chart average latency per source.
+    """
+    __tablename__ = "llm_usage"
+
+    source = Column(String(20), primary_key=True)
+    status = Column(String(20), primary_key=True)
+    model = Column(String(120), primary_key=True)
+    bucket_day = Column(DateTime(timezone=True), primary_key=True)
+    count = Column(BigInteger, nullable=False, default=0)
+    prompt_tokens = Column(BigInteger, nullable=False, default=0)
+    completion_tokens = Column(BigInteger, nullable=False, default=0)
+    duration_ms = Column(BigInteger, nullable=False, default=0)
+    last_called_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class OsintUsage(Base):
     """Per-day call counter for each outbound OSINT provider. Populated by
     ``osint_metrics.record`` (called from inside each provider wrapper) and

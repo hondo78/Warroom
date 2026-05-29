@@ -317,20 +317,57 @@
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_subnet_min_ips" min="2" max="1000" placeholder="3">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">System-Prompt</label></div>
-                            <div class="col-md-8">
-                                <textarea class="form-control form-control-sm" data-key="agent_system_prompt" id="agentSystemPrompt" rows="14" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt wird verwendet)"></textarea>
-                                <div class="d-flex justify-content-between align-items-start mt-1 flex-wrap gap-2">
-                                    <small class="admin-hint" style="max-width:60%">Steuert, wie das LLM Alarme klassifiziert. Bis 20 000 Zeichen. <strong>Pflicht im Schema</strong>: das Modell muss weiter JSON mit <code>action</code> / <code>args</code> / <code>confidence</code> / <code>reasoning</code> zurückgeben, sonst landet die Decision als <em>failed</em>.</small>
-                                    <div class="d-flex gap-2">
-                                        <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt()" type="button" title="Den eingebauten Default-Prompt in das Feld laden"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
-                                        <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt()" type="button" title="Feld leeren — beim Speichern wird automatisch der Default verwendet"><i class="bi bi-eraser"></i> Leeren</button>
-                                    </div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('agent')">Agent-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KI-Agent System-Prompts -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">🤖 KI-Agent — System-Prompts</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint">Jeder Workflow (Sophos-Alerts, WAF, IPS, Failed-Login) bekommt seinen eigenen System-Prompt. Leeres Feld ⇒ eingebauter Default-Prompt. Das LLM bekommt ein JSON mit Event-Aggregaten, OSINT-Lookup und erlaubten Aktionen — es muss strikt JSON mit <code>action</code>/<code>args</code>/<code>confidence</code>/<code>reasoning</code> antworten.</p>
+
+                        <ul class="nav nav-tabs mb-2" role="tablist">
+                            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#promptAlert" type="button">Sophos Alerts</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptWaf" type="button">WAF</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptIps" type="button">IPS</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptLogin" type="button">Failed-Login</button></li>
+                        </ul>
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="promptAlert">
+                                <textarea class="form-control form-control-sm" data-key="agent_system_prompt" id="agentSystemPrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für Sophos-Alerts)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('alert')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('alert')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="promptWaf">
+                                <textarea class="form-control form-control-sm" data-key="agent_waf_system_prompt" id="agentWafPrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für WAF)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('waf')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('waf')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="promptIps">
+                                <textarea class="form-control form-control-sm" data-key="agent_ips_system_prompt" id="agentIpsPrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für IPS)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('ips')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('ips')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="promptLogin">
+                                <textarea class="form-control form-control-sm" data-key="agent_failed_login_system_prompt" id="agentLoginPrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für Failed-Login)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('failed_login')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('failed_login')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
                                 </div>
                             </div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('agent')">Agent-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('agentPrompts')">Prompts speichern</button>
                         </div>
                     </div>
                 </div>

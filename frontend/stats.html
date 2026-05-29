@@ -64,6 +64,15 @@
         <div class="app-content">
             <div class="container-fluid">
 
+                <!-- Section-Tabs -->
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOsint" type="button"><i class="bi bi-search"></i> OSINT-Provider</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLlm" type="button"><i class="bi bi-cpu"></i> LLM</button></li>
+                </ul>
+                <div class="tab-content">
+
+                <div class="tab-pane fade show active" id="tabOsint">
+
                 <!-- Global KPIs -->
                 <div class="dashboard-stat-grid mb-3">
                     <div class="small-box bg-info"><div class="inner"><h3 id="kHeute">-</h3><p>Calls heute</p></div><div class="small-box-footer">echte API-Calls (ohne Cache)</div><span class="icon"><i class="bi bi-calendar-day"></i></span></div>
@@ -103,10 +112,109 @@
                     </div>
                 </div>
 
+                </div> <!-- /tabOsint -->
+
+                <!-- ====== TAB: LLM ====== -->
+                <div class="tab-pane fade" id="tabLlm">
+
+                <div class="dashboard-stat-grid mb-3">
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmHeute">-</h3><p>Calls heute</p></div><div class="small-box-footer">an /chat/completions</div><span class="icon"><i class="bi bi-chat-square-dots"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmMonat">-</h3><p>Calls diesen Monat</p></div><div class="small-box-footer">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="llmSuccess">-</h3><p>Erfolgsrate</p></div><div class="small-box-footer" id="llmSuccessTotal">— / —</div><span class="icon"><i class="bi bi-check2-circle"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="llmAvgMs">-</h3><p>Ø Latenz (ms)</p></div><div class="small-box-footer" id="llmLastCalled">letzter Call: —</div><span class="icon"><i class="bi bi-speedometer2"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmTokensMonth">-</h3><p>Tokens diesen Monat</p></div><div class="small-box-footer" id="llmTokensToday">heute: —</div><span class="icon"><i class="bi bi-tags"></i></span></div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header"><h3 class="card-title mb-0">Calls pro Quelle</h3></div>
+                            <div class="card-body"><canvas id="llmSourceChart" style="max-height:280px"></canvas></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card h-100">
+                            <div class="card-header"><h3 class="card-title mb-0">Tagesverlauf</h3></div>
+                            <div class="card-body"><canvas id="llmTrendChart" style="max-height:280px"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analyzer: free-range chart with date pickers + source filter -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h3 class="card-title mb-0">Analyse — Calls &amp; Tokens</h3>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(1)">24h</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(7)">7 T</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(30)">30 T</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(90)">90 T</button>
+                            </div>
+                            <label class="small text-secondary mb-0">Von</label>
+                            <input type="date" id="llmAnalyzeFrom" class="form-control form-control-sm" style="width:150px" onchange="loadLlmAnalyze()">
+                            <label class="small text-secondary mb-0">Bis</label>
+                            <input type="date" id="llmAnalyzeTo" class="form-control form-control-sm" style="width:150px" onchange="loadLlmAnalyze()">
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-1 mb-2" id="llmSourceFilter">
+                            <small class="text-secondary me-2 align-self-center">Quellen:</small>
+                        </div>
+                        <canvas id="llmAnalyzeChart" style="max-height:420px"></canvas>
+                    </div>
+                    <div class="card-footer small text-secondary" id="llmAnalyzeFooter">—</div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Quellen-Detail</h3></div>
+                    <div class="card-body">
+                        <div class="table-scroll" style="max-height:280px">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th>Quelle</th>
+                                    <th class="text-end">Calls</th>
+                                    <th class="text-end">Erfolg</th>
+                                    <th class="text-end">Fehler</th>
+                                    <th class="text-end">Prompt-Tokens</th>
+                                    <th class="text-end">Completion-Tokens</th>
+                                    <th class="text-end">Ø Latenz (ms)</th>
+                                    <th>Letzter Call</th>
+                                </tr></thead>
+                                <tbody id="llmSourceTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Modelle</h3></div>
+                    <div class="card-body">
+                        <div class="table-scroll" style="max-height:240px">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th>Modell</th>
+                                    <th class="text-end">Calls</th>
+                                    <th class="text-end">Prompt-Tokens</th>
+                                    <th class="text-end">Completion-Tokens</th>
+                                    <th class="text-end">Ø Latenz (ms)</th>
+                                </tr></thead>
+                                <tbody id="llmModelTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                </div> <!-- /tabLlm -->
+
+                </div> <!-- /tab-content -->
+
             </div>
         </div>
     </main>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
 <script src="/js/nav.js"></script>
 <script src="/js/stats.js"></script>

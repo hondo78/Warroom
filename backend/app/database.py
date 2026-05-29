@@ -160,6 +160,22 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_osint_usage_bucket ON osint_usage(bucket_day)",
     "CREATE INDEX IF NOT EXISTS idx_osint_usage_provider ON osint_usage(provider)",
+    """
+    CREATE TABLE IF NOT EXISTS llm_usage (
+        source VARCHAR(20) NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        model VARCHAR(120) NOT NULL,
+        bucket_day TIMESTAMP WITH TIME ZONE NOT NULL,
+        count BIGINT NOT NULL DEFAULT 0,
+        prompt_tokens BIGINT NOT NULL DEFAULT 0,
+        completion_tokens BIGINT NOT NULL DEFAULT 0,
+        duration_ms BIGINT NOT NULL DEFAULT 0,
+        last_called_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        PRIMARY KEY (source, status, model, bucket_day)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_llm_usage_bucket ON llm_usage(bucket_day)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_usage_source ON llm_usage(source)",
 ]
 
 

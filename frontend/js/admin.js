@@ -10,7 +10,8 @@ const SECTIONS = {
         'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
     ],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
-    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_system_prompt', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips'],
+    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips'],
+    agentPrompts: ['agent_system_prompt', 'agent_waf_system_prompt', 'agent_ips_system_prompt', 'agent_failed_login_system_prompt'],
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -165,25 +166,36 @@ async function agentRunNow() {
     }
 }
 
-async function loadAgentDefaultPrompt() {
+const PROMPT_TEXTAREA_IDS = {
+    alert:        'agentSystemPrompt',
+    waf:          'agentWafPrompt',
+    ips:          'agentIpsPrompt',
+    failed_login: 'agentLoginPrompt',
+};
+
+async function loadAgentDefaultPrompt(source = 'alert') {
+    const targetId = PROMPT_TEXTAREA_IDS[source];
+    if (!targetId) return;
     try {
-        const r = await fetch('/api/admin/agent/default-prompt');
+        const r = await fetch(`/api/admin/agent/default-prompt?source=${encodeURIComponent(source)}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
-        const ta = document.getElementById('agentSystemPrompt');
+        const ta = document.getElementById(targetId);
         if (!ta) return;
-        if (ta.value && !confirm('Den aktuellen Prompt mit dem Default überschreiben?')) return;
+        if (ta.value && !confirm(`Den aktuellen ${source}-Prompt mit dem Default überschreiben?`)) return;
         ta.value = d.default || '';
-        toast('Default-Prompt geladen — noch nicht gespeichert.', 'info');
+        toast(`Default-Prompt (${source}) geladen — noch nicht gespeichert.`, 'info');
     } catch (err) {
         toast(`Fehler: ${err.message}`, 'error');
     }
 }
 
-function clearAgentPrompt() {
-    const ta = document.getElementById('agentSystemPrompt');
+function clearAgentPrompt(source = 'alert') {
+    const targetId = PROMPT_TEXTAREA_IDS[source];
+    if (!targetId) return;
+    const ta = document.getElementById(targetId);
     if (!ta) return;
-    if (ta.value && !confirm('Feld leeren? Beim Speichern wird dann der eingebaute Default-Prompt verwendet.')) return;
+    if (ta.value && !confirm('Feld leeren? Beim Speichern wird der eingebaute Default-Prompt verwendet.')) return;
     ta.value = '';
 }
 

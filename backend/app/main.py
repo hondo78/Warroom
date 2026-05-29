@@ -92,6 +92,9 @@ async def lifespan(app: FastAPI):
     # OSINT-usage telemetry: flush the in-memory provider-call counter once a minute
     from app.osint_metrics import flush_to_db as flush_osint_metrics
     scheduler.add_job(flush_osint_metrics, "interval", seconds=60, id="osint_metrics_flush")
+    # LLM-usage telemetry: flush the in-memory LLM-call counter once a minute
+    from app.llm_metrics import flush_to_db as flush_llm_metrics
+    scheduler.add_job(flush_llm_metrics, "interval", seconds=60, id="llm_metrics_flush")
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
@@ -2993,6 +2996,9 @@ class AdminSettingsIn(BaseModel):
     agent_auto_execute: bool | None = None
     agent_auto_execute_threshold: int | None = Field(default=None, ge=0, le=101)
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_waf_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_ips_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_failed_login_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_enabled: bool | None = None
     agent_waf_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_waf_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
@@ -3004,6 +3010,18 @@ class AdminSettingsIn(BaseModel):
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     agent_failed_login_subnet_attempts: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_subnet_min_ips: int | None = Field(default=None, ge=2, le=1000)
+    osint_abuseipdb_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_abuseipdb_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_virustotal_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_virustotal_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_shodan_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_shodan_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_greynoise_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_greynoise_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_intelix_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_intelix_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_ipinfo_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
+    osint_ipinfo_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
 
 
 @app.put("/api/admin/settings")
@@ -3358,11 +3376,29 @@ async def list_agent_models():
 
 
 @app.get("/api/admin/agent/default-prompt")
-async def get_agent_default_prompt():
+async def get_agent_default_prompt(source: str = Query(default="alert")):
     """Return the bundled fallback system prompt so the admin UI can offer
-    'reset to default'."""
-    from app.agent import DEFAULT_SYSTEM_PROMPT
-    return {"default": DEFAULT_SYSTEM_PROMPT}
+    'reset to default'. ``source`` is one of: alert (the original Sophos-
+    alert prompt), waf, ips, failed_login."""
+    from app.agent import (
+        DEFAULT_SYSTEM_PROMPT,
+        DEFAULT_WAF_PROMPT,
+        DEFAULT_IPS_PROMPT,
+        DEFAULT_FAILED_LOGIN_PROMPT,
+    )
+    mapping = {
+        "alert":        DEFAULT_SYSTEM_PROMPT,
+        "waf":          DEFAULT_WAF_PROMPT,
+        "ips":          DEFAULT_IPS_PROMPT,
+        "failed_login": DEFAULT_FAILED_LOGIN_PROMPT,
+    }
+    prompt = mapping.get(source)
+    if prompt is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown source {source!r}; must be one of {sorted(mapping)}",
+        )
+    return {"default": prompt, "source": source}
 
 
 @app.post("/api/admin/test/abuseipdb")
@@ -3403,6 +3439,43 @@ async def osint_usage_flush():
     immediately. Useful after a manual lookup burst when you don't want to
     wait the full 60s scheduler tick."""
     from app.osint_metrics import flush_to_db
+    n = await flush_to_db()
+    return {"ok": True, "flushed": n}
+
+
+@app.get("/api/admin/stats/llm-usage")
+async def llm_usage_stats(
+    days: int = Query(default=30, ge=1, le=365),
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = Query(default=None),
+):
+    """Aggregated outbound LLM-call counts: per source (alert/waf/ips/
+    failed_login/test), per model, token totals, average latency, plus per-
+    source per-day series for the analyzer chart on /stats.html.
+
+    If ``from`` and/or ``to`` (YYYY-MM-DD) are supplied they override
+    ``days`` — used by the analyzer card's date pickers."""
+    from app.llm_metrics import query_usage
+
+    start: datetime | None = None
+    end: datetime | None = None
+    if from_:
+        try:
+            start = datetime.fromisoformat(from_).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"invalid from={from_!r}")
+    if to:
+        try:
+            end = datetime.fromisoformat(to).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"invalid to={to!r}")
+    return await query_usage(days=days, start=start, end=end)
+
+
+@app.post("/api/admin/stats/llm-usage/flush")
+async def llm_usage_flush():
+    """Force-flush the in-memory LLM counter into ``llm_usage`` immediately."""
+    from app.llm_metrics import flush_to_db
     n = await flush_to_db()
     return {"ok": True, "flushed": n}
 

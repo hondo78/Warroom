@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     agent_auto_execute_threshold: int = 90  # percent (0..100)
     # Empty -> fall back to DEFAULT_SYSTEM_PROMPT in app.agent.
     agent_system_prompt: str = ""
+    # Per-source LLM system prompts for rule-based decisions. Empty -> fall
+    # back to the bundled defaults (DEFAULT_WAF_PROMPT / _IPS_PROMPT /
+    # _FAILED_LOGIN_PROMPT) defined in app.agent.
+    agent_waf_system_prompt: str = ""
+    agent_ips_system_prompt: str = ""
+    agent_failed_login_system_prompt: str = ""
     # WAF loop — rule-based, fires on every new WAF row with a 4xx/5xx status
     agent_waf_enabled: bool = False
     agent_waf_threshold: int = 4       # 4+ failed requests in 24h -> block
