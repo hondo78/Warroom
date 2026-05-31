@@ -34,6 +34,9 @@ MANAGED_KEYS: dict[str, type] = {
     "collector_interval": int,
     "log_level": str,
     "dashboard_title": str,
+    "firewall_log_retention_enabled": bool,
+    "firewall_log_connection_retention_days": int,
+    "firewall_log_retention_days": int,
     # Agent
     "agent_enabled": bool,
     "agent_provider": str,

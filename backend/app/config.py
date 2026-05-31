@@ -18,6 +18,14 @@ class Settings(BaseSettings):
 
     collector_interval: int = 300
 
+    # --- Firewall-log retention (firewall_logs grows fast; connection logs
+    # dominate). High-volume 'Firewall' connection logs are pruned sooner than
+    # security-relevant types (WAF/IPS/Auth/ATP/…). Deletes run batched. ---
+    firewall_log_retention_enabled: bool = True
+    firewall_log_connection_retention_days: int = 14   # log_type='Firewall'
+    firewall_log_retention_days: int = 90              # all other (security) rows
+    firewall_log_retention_interval_hours: int = 6
+
     log_level: str = "INFO"
 
     dashboard_title: str = "Warroom Security Dashboard"

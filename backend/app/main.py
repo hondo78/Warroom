@@ -100,6 +100,15 @@ async def lifespan(app: FastAPI):
     from app.email_metrics import collect_email_metrics
     scheduler.add_job(collect_email_metrics, "interval", seconds=900, id="email_metrics")
     scheduler.add_job(collect_email_metrics, "date", id="initial_email_metrics")
+    # Firewall-log retention: prune the fast-growing firewall_logs table
+    # (batched deletes). Runs every N hours + once shortly after start.
+    from app.firewall_retention import purge_firewall_logs
+    scheduler.add_job(
+        purge_firewall_logs, "interval",
+        hours=max(1, settings.firewall_log_retention_interval_hours),
+        id="firewall_retention",
+    )
+    scheduler.add_job(purge_firewall_logs, "date", id="initial_firewall_retention")
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
@@ -3128,6 +3137,9 @@ class AdminSettingsIn(BaseModel):
     collector_interval: int | None = Field(default=None, ge=30, le=86400)
     log_level: str | None = None
     dashboard_title: str | None = None
+    firewall_log_retention_enabled: bool | None = None
+    firewall_log_connection_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    firewall_log_retention_days: int | None = Field(default=None, ge=1, le=3650)
     agent_enabled: bool | None = None
     agent_provider: str | None = None
     agent_base_url: str | None = None
@@ -3563,6 +3575,18 @@ async def agent_failed_login_run_now(window_minutes: int = Query(default=60, ge=
         kwargs={"window_minutes": window_minutes, "force": True},
     )
     return {"ok": True, "window_minutes": window_minutes}
+
+
+@app.post("/api/admin/firewall-retention/run-now")
+async def firewall_retention_run_now():
+    """Trigger a firewall_logs retention purge now (batched, runs in background).
+    Useful for the first big cleanup without waiting for the scheduled run."""
+    from app.firewall_retention import purge_firewall_logs
+    scheduler.add_job(
+        purge_firewall_logs, "date",
+        id="firewall_retention_manual", replace_existing=True,
+    )
+    return {"ok": True}
 
 
 @app.post("/api/admin/test/agent")

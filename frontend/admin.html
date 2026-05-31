@@ -455,6 +455,38 @@
                     </div>
                 </div>
 
+                <!-- Firewall-Log-Retention -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">🧹 Firewall-Log-Retention</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint">Die Tabelle <code>firewall_logs</code> wächst schnell — die hochvolumigen <code>Firewall</code>-Verbindungslogs werden früher gelöscht als sicherheitsrelevante Typen (WAF/IPS/Auth/ATP). Löschung läuft batchweise im Hintergrund (alle 6 h) ohne Schreib-Locks.</p>
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-4"><label class="form-label">Retention aktiv</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch mt-1">
+                                    <input class="form-check-input" type="checkbox" data-key="firewall_log_retention_enabled" data-bool="1">
+                                </div>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Verbindungslogs aufbewahren (Tage)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="firewall_log_connection_retention_days" min="1" max="3650" placeholder="14">
+                                <small class="admin-hint">Gilt für <code>log_type='Firewall'</code> (Verbindungstracking — i. d. R. ~94 % des Volumens). NetFlow deckt Traffic-Analyse separat ab.</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Sicherheitslogs aufbewahren (Tage)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="firewall_log_retention_days" min="1" max="3650" placeholder="90">
+                                <small class="admin-hint">Gilt für alle übrigen Typen (WAF, IPS/IDP, Authentication, ATP, …).</small>
+                            </div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-outline-warning btn-sm" onclick="runFirewallRetention()"><i class="bi bi-trash"></i> Jetzt aufräumen</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallRetention')">Retention speichern</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- System (read-only) -->
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0">System (Read-only)</h3></div>

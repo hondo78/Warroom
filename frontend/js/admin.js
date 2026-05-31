@@ -10,6 +10,7 @@ const SECTIONS = {
         'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
     ],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
+    firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips'],
     agentPrompts: ['agent_system_prompt', 'agent_waf_system_prompt', 'agent_ips_system_prompt', 'agent_failed_login_system_prompt', 'agent_failed_login_distributed_system_prompt', 'agent_triage_system_prompt'],
 };
@@ -154,6 +155,17 @@ async function loadAgentModels() {
         sel.innerHTML = '<option value="">— verfügbare Modelle —</option>' +
             (data.models || []).map(m => `<option value="${m}">${m}</option>`).join('');
         toast(`${(data.models || []).length} Modell(e) gefunden.`, 'success');
+    } catch (err) {
+        toast(`Fehler: ${err.message}`, 'error');
+    }
+}
+
+async function runFirewallRetention() {
+    if (!confirm('Firewall-Log-Retention jetzt ausführen? Alte Logs werden batchweise im Hintergrund gelöscht (kann je nach Rückstand einige Minuten dauern).')) return;
+    try {
+        const resp = await fetch('/api/admin/firewall-retention/run-now', { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        toast('Retention-Lauf angestoßen — Löschung läuft im Hintergrund.', 'success');
     } catch (err) {
         toast(`Fehler: ${err.message}`, 'error');
     }
