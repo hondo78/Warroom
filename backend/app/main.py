@@ -95,6 +95,11 @@ async def lifespan(app: FastAPI):
     # LLM-usage telemetry: flush the in-memory LLM-call counter once a minute
     from app.llm_metrics import flush_to_db as flush_llm_metrics
     scheduler.add_job(flush_llm_metrics, "interval", seconds=60, id="llm_metrics_flush")
+    # Email-API snapshot for the Grafana email dashboard (live API isn't
+    # persisted otherwise). Every 15 min + once shortly after start.
+    from app.email_metrics import collect_email_metrics
+    scheduler.add_job(collect_email_metrics, "interval", seconds=900, id="email_metrics")
+    scheduler.add_job(collect_email_metrics, "date", id="initial_email_metrics")
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")

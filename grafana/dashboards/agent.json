@@ -1,0 +1,125 @@
+{
+  "uid": "warroom-agent",
+  "title": "Warroom — Agent & Telemetrie",
+  "tags": ["warroom", "agent", "llm", "osint"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    { "title": "Warroom Agent-Page", "url": "http://localhost:8448/agent.html", "type": "link", "icon": "external link", "targetBlank": true },
+    { "title": "Warroom Stats-Page", "url": "http://localhost:8448/stats.html", "type": "link", "icon": "external link", "targetBlank": true }
+  ],
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Entscheidungen (Zeitraum)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT COUNT(*) FROM agent_decisions WHERE $__timeFilter(created_at)" } ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Offen (pending)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT COUNT(*) FROM agent_decisions WHERE status='pending'" } ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 20 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Ausgeführt",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT COUNT(*) FROM agent_decisions WHERE status='executed' AND $__timeFilter(created_at)" } ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Abgelehnt",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT COUNT(*) FROM agent_decisions WHERE status='rejected' AND $__timeFilter(created_at)" } ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Entscheidungen über Zeit — nach Quelle",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "targets": [ { "refId": "A", "format": "time_series", "rawSql": "SELECT $__timeGroup(created_at, $__interval) AS time, source_type AS metric, COUNT(*) AS value FROM agent_decisions WHERE $__timeFilter(created_at) GROUP BY 1, source_type ORDER BY 1" } ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal" } }, "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 11, "type": "barchart", "title": "Nach Aktion",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 12, "w": 8, "h": 8 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT action AS \"Aktion\", COUNT(*) AS \"Anzahl\" FROM agent_decisions WHERE $__timeFilter(created_at) GROUP BY action ORDER BY 2 DESC" } ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] }
+    },
+    {
+      "id": 12, "type": "barchart", "title": "Nach Status",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 8, "y": 12, "w": 8, "h": 8 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT status AS \"Status\", COUNT(*) AS \"Anzahl\" FROM agent_decisions WHERE $__timeFilter(created_at) GROUP BY status ORDER BY 2 DESC" } ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "id": 13, "type": "barchart", "title": "Nach Quelle",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 16, "y": 12, "w": 8, "h": 8 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT source_type AS \"Quelle\", COUNT(*) AS \"Anzahl\" FROM agent_decisions WHERE $__timeFilter(created_at) GROUP BY source_type ORDER BY 2 DESC" } ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] }
+    },
+    {
+      "id": 20, "type": "table", "title": "Letzte Entscheidungen",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 10 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT created_at AS \"Zeit\", source_type AS \"Quelle\", action AS \"Aktion\", status AS \"Status\", ROUND((COALESCE(confidence,0)*100)::numeric) AS \"Konf %\", COALESCE(source_ip,'') AS \"IP\", LEFT(COALESCE(reasoning,''),140) AS \"Begründung\" FROM agent_decisions WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 300" } ],
+      "options": { "showHeader": true, "footer": { "show": false }, "cellHeight": "sm" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true }, "color": { "mode": "thresholds" } }, "overrides": [ { "matcher": { "id": "byName", "options": "Zeit" }, "properties": [ { "id": "unit", "value": "dateTimeFromNow" } ] } ] }
+    },
+    {
+      "id": 30, "type": "timeseries", "title": "LLM-Calls pro Tag — nach Quelle",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "targets": [ { "refId": "A", "format": "time_series", "rawSql": "SELECT bucket_day AS time, source AS metric, SUM(count) AS value FROM llm_usage WHERE $__timeFilter(bucket_day) GROUP BY 1, source ORDER BY 1" } ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal" } }, "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "LLM-Tokens pro Tag",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "targets": [ { "refId": "A", "format": "time_series", "rawSql": "SELECT bucket_day AS time, SUM(prompt_tokens) AS \"Prompt\", SUM(completion_tokens) AS \"Completion\" FROM llm_usage WHERE $__timeFilter(bucket_day) GROUP BY 1 ORDER BY 1" } ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal" } }, "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 40, "type": "barchart", "title": "OSINT-Calls nach Provider (ohne Cache-Hits)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 38, "w": 12, "h": 8 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT provider AS \"Provider\", SUM(count) AS \"Calls\" FROM osint_usage WHERE $__timeFilter(bucket_day) AND status <> 'cache_hit' GROUP BY provider ORDER BY 2 DESC" } ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "yellow" } }, "overrides": [] }
+    },
+    {
+      "id": 41, "type": "table", "title": "LLM-Nutzung nach Quelle",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 12, "y": 38, "w": 12, "h": 8 },
+      "targets": [ { "refId": "A", "format": "table", "rawSql": "SELECT source AS \"Quelle\", SUM(count) AS \"Calls\", SUM(prompt_tokens+completion_tokens) AS \"Tokens\", CASE WHEN SUM(count)>0 THEN ROUND(SUM(duration_ms)::numeric/SUM(count)) ELSE 0 END AS \"Ø ms\" FROM llm_usage WHERE $__timeFilter(bucket_day) GROUP BY source ORDER BY 2 DESC" } ],
+      "options": { "showHeader": true, "footer": { "show": false }, "cellHeight": "sm" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true }, "color": { "mode": "thresholds" } }, "overrides": [] }
+    }
+  ]
+}

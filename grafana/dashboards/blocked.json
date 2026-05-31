@@ -7,8 +7,8 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
-  "refresh": "30s",
+  "version": 3,
+  "refresh": "1m",
   "time": {
     "from": "now-30d",
     "to": "now"
@@ -695,6 +695,32 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Blocks nach Quelle über Zeit (Agent / manuell / OSINT)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 56, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "WITH a AS (\n  SELECT blocked_at, SPLIT_PART(comment, ':', 1) AS tag FROM blocked_ips WHERE comment IS NOT NULL AND $__timeFilter(blocked_at)\n  UNION ALL\n  SELECT blocked_at, SPLIT_PART(comment, ':', 1) FROM blocked_domains WHERE comment IS NOT NULL AND $__timeFilter(blocked_at)\n  UNION ALL\n  SELECT blocked_at, SPLIT_PART(comment, ':', 1) FROM blocked_urls WHERE comment IS NOT NULL AND $__timeFilter(blocked_at)\n)\nSELECT $__timeGroup(blocked_at, $__interval) AS time, tag AS metric, COUNT(*) AS value FROM a GROUP BY 1, tag ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal" } },
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     }
   ]

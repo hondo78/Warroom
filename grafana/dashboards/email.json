@@ -1,0 +1,143 @@
+{
+  "uid": "warroom-email",
+  "title": "Warroom — Email",
+  "tags": ["warroom", "email"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Warroom Email-Page",
+      "url": "http://localhost:8448/email.html",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true
+    }
+  ],
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Mailboxen",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT value FROM email_metrics WHERE metric='mailbox_total' ORDER BY bucket DESC LIMIT 1" }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Quarantäne (24h)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT value FROM email_metrics WHERE metric='quarantine_total' ORDER BY bucket DESC LIMIT 1" }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Post-Delivery (24h)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT value FROM email_metrics WHERE metric='postdelivery_total' ORDER BY bucket DESC LIMIT 1" }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Blockierte Mailboxen",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT value FROM email_metrics WHERE metric='mailbox_blocked' ORDER BY bucket DESC LIMIT 1" }
+      ],
+      "options": { "graphMode": "none", "colorMode": "value", "textMode": "value", "reduceOptions": { "calcs": ["last"], "fields": "", "values": false } },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Quarantäne & Post-Delivery — rollierende 24h-Zahl über Zeit",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "targets": [
+        { "refId": "A", "format": "time_series", "rawSql": "SELECT bucket AS time, value AS \"Quarantäne (24h)\" FROM email_metrics WHERE metric='quarantine_total' AND $__timeFilter(bucket) ORDER BY bucket" },
+        { "refId": "B", "format": "time_series", "rawSql": "SELECT bucket AS time, value AS \"Post-Delivery (24h)\" FROM email_metrics WHERE metric='postdelivery_total' AND $__timeFilter(bucket) ORDER BY bucket" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "spanNulls": true, "pointSize": 5 }, "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Quarantäne (24h)" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "Post-Delivery (24h)" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Mailboxen über Zeit",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "format": "time_series", "rawSql": "SELECT bucket AS time, value AS \"Mailboxen\" FROM email_metrics WHERE metric='mailbox_total' AND $__timeFilter(bucket) ORDER BY bucket" },
+        { "refId": "B", "format": "time_series", "rawSql": "SELECT bucket AS time, value AS \"Blockiert\" FROM email_metrics WHERE metric='mailbox_blocked' AND $__timeFilter(bucket) ORDER BY bucket" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }, "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "options": { "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 12,
+      "type": "barchart",
+      "title": "Quarantäne-Gründe (aktuellster Snapshot)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT label AS \"Grund\", value AS \"Anzahl\" FROM email_metrics WHERE metric='quarantine_reason' AND bucket=(SELECT MAX(bucket) FROM email_metrics WHERE metric='quarantine_reason') ORDER BY value DESC LIMIT 15" }
+      ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "stacking": "none", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] }
+    },
+    {
+      "id": 13,
+      "type": "barchart",
+      "title": "Post-Delivery-Gründe (aktuellster Snapshot)",
+      "datasource": { "type": "postgres", "uid": "warroom-postgres" },
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT label AS \"Grund\", value AS \"Anzahl\" FROM email_metrics WHERE metric='postdelivery_reason' AND bucket=(SELECT MAX(bucket) FROM email_metrics WHERE metric='postdelivery_reason') ORDER BY value DESC LIMIT 15" }
+      ],
+      "options": { "orientation": "horizontal", "showValue": "auto", "stacking": "none", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "text",
+      "title": "Hinweis",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "options": {
+        "mode": "markdown",
+        "content": "Die Email-Kennzahlen sind **15-Minuten-Snapshots** der Sophos Email Management API (Hintergrund-Collector), da die Email-Seite selbst ein Live-Proxy ist und nichts persistiert.\n\n- *Quarantäne / Post-Delivery (24h)* = Nachrichten der letzten 24 h zum jeweiligen Snapshot (rollierend).\n- *Mailboxen* = aktuell verwaltete Postfächer.\n\nLeer? Dann sind keine Sophos-Email-Credentials gesetzt oder der Tenant hat keine Mailboxen. Detailansicht & Aktionen unter [/email.html](http://localhost:8448/email.html)."
+      }
+    }
+  ]
+}

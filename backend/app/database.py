@@ -176,6 +176,19 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_bucket ON llm_usage(bucket_day)",
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_source ON llm_usage(source)",
+    # Periodic snapshots of the (live-proxied) Sophos Email API so Grafana can
+    # chart quarantine / mailbox trends. Long format: one row per metric/label.
+    """
+    CREATE TABLE IF NOT EXISTS email_metrics (
+        id BIGSERIAL PRIMARY KEY,
+        bucket TIMESTAMP WITH TIME ZONE NOT NULL,
+        metric VARCHAR(40) NOT NULL,
+        label VARCHAR(160) NOT NULL DEFAULT '',
+        value BIGINT NOT NULL DEFAULT 0
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_email_metrics_bucket ON email_metrics(bucket DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_email_metrics_metric ON email_metrics(metric)",
 ]
 
 

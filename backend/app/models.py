@@ -264,6 +264,24 @@ class LlmUsage(Base):
     last_called_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class EmailMetric(Base):
+    """Periodic snapshot of the Sophos Email API (long format: one row per
+    metric/label per bucket). Populated by ``email_metrics.collect_email_metrics``
+    every 15 min; consumed by the Grafana email dashboard.
+
+    metric ∈ mailbox_total | mailbox_blocked | quarantine_total |
+    postdelivery_total | quarantine_reason | postdelivery_reason. ``label`` holds
+    the reason for the *_reason rows, '' for the scalar totals.
+    """
+    __tablename__ = "email_metrics"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    bucket = Column(DateTime(timezone=True), nullable=False)
+    metric = Column(String(40), nullable=False)
+    label = Column(String(160), nullable=False, default="")
+    value = Column(BigInteger, nullable=False, default=0)
+
+
 class OsintUsage(Base):
     """Per-day call counter for each outbound OSINT provider. Populated by
     ``osint_metrics.record`` (called from inside each provider wrapper) and
