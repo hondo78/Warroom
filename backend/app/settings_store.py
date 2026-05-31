@@ -41,6 +41,8 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_api_key": str,
     "agent_model": str,
     "agent_interval_seconds": int,
+    "agent_temperature": float,
+    "agent_max_tokens": int,
     "agent_auto_execute": bool,
     "agent_auto_execute_threshold": int,
     "agent_system_prompt": str,
@@ -58,6 +60,12 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_failed_login_interval_seconds": int,
     "agent_failed_login_subnet_attempts": int,
     "agent_failed_login_subnet_min_ips": int,
+    "agent_failed_login_distributed_enabled": bool,
+    "agent_failed_login_distributed_window_minutes": int,
+    "agent_failed_login_distributed_attempts": int,
+    "agent_failed_login_distributed_min_ips": int,
+    "agent_failed_login_distributed_system_prompt": str,
+    "agent_triage_system_prompt": str,
     # OSINT-Provider Quotas
     "osint_abuseipdb_daily_limit": int,
     "osint_abuseipdb_monthly_limit": int,
@@ -93,6 +101,11 @@ def _coerce(key: str, raw: str | None) -> Any:
     if t is int:
         try:
             return int(raw)
+        except (ValueError, TypeError):
+            return None
+    if t is float:
+        try:
+            return float(raw)
         except (ValueError, TypeError):
             return None
     return raw

@@ -202,11 +202,7 @@ function setText(id, txt) {
     if (el) el.textContent = txt;
 }
 
-function escapeHtml(s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[c]));
-}
+// escapeHtml() lives in js/common.js
 
 
 // ============================================================

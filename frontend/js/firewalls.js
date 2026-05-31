@@ -244,12 +244,7 @@ function formatBytes(b) {
     return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function escapeAttr(s) { return escapeHtml(s).replace(/`/g, '&#96;'); }
+// escapeHtml() and escapeAttr() live in js/common.js
 
 // generic table filter from existing pattern
 document.addEventListener('DOMContentLoaded', () => {

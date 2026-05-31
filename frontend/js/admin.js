@@ -10,8 +10,8 @@ const SECTIONS = {
         'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
     ],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
-    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips'],
-    agentPrompts: ['agent_system_prompt', 'agent_waf_system_prompt', 'agent_ips_system_prompt', 'agent_failed_login_system_prompt'],
+    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips'],
+    agentPrompts: ['agent_system_prompt', 'agent_waf_system_prompt', 'agent_ips_system_prompt', 'agent_failed_login_system_prompt', 'agent_failed_login_distributed_system_prompt', 'agent_triage_system_prompt'],
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -89,6 +89,9 @@ async function saveSection(section) {
             payload[key] = el.value;
         } else if (el.type === 'checkbox' || el.dataset.bool === '1') {
             payload[key] = el.checked;
+        } else if (el.dataset.float === '1') {
+            const f = parseFloat(el.value);
+            if (!Number.isNaN(f)) payload[key] = f;
         } else if (el.type === 'number') {
             const n = parseInt(el.value, 10);
             if (!Number.isNaN(n)) payload[key] = n;
@@ -171,6 +174,8 @@ const PROMPT_TEXTAREA_IDS = {
     waf:          'agentWafPrompt',
     ips:          'agentIpsPrompt',
     failed_login: 'agentLoginPrompt',
+    failed_login_distributed: 'agentDistPrompt',
+    triage:       'agentTriagePrompt',
 };
 
 async function loadAgentDefaultPrompt(source = 'alert') {

@@ -36,6 +36,8 @@
                     <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
                     <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
                     <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
                     <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
                     <li class="nav-item"><a href="/admin.html" class="nav-link active"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
                 </ul>
@@ -219,6 +221,18 @@
                             <div class="col-md-4"><label class="form-label">Analyse-Intervall (Sekunden)</label></div>
                             <div class="col-md-8"><input type="number" class="form-control form-control-sm" data-key="agent_interval_seconds" min="30" max="86400" autocomplete="off"></div>
 
+                            <div class="col-md-4"><label class="form-label">LLM Temperatur</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="agent_temperature" data-float="1" min="0" max="2" step="0.1" placeholder="0.2" autocomplete="off">
+                                <small class="admin-hint">0 = deterministisch/konsistent, höher = kreativer. Für Security-Entscheidungen niedrig halten (0–0.3).</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">LLM max. Response-Tokens</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="agent_max_tokens" min="1" max="32000" placeholder="3000" autocomplete="off">
+                                <small class="admin-hint">Obergrenze der Antwortlänge. Reasoning-Modelle brauchen Reserve für ihren internen „Think"-Block — großzügig lassen (≈3000).</small>
+                            </div>
+
                             <div class="col-md-4"><label class="form-label">Auto-Execute (block_ip / acknowledge)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
@@ -317,6 +331,31 @@
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_subnet_min_ips" min="2" max="1000" placeholder="3">
                             </div>
 
+                            <div class="col-md-4"><label class="form-label">Verteilter Brute-Force aktiv</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" data-key="agent_failed_login_distributed_enabled" data-bool="1">
+                                    <label class="form-check-label admin-hint">Übergibt <strong>alle</strong> fehlgeschlagenen Login-Versuche des Zeitfensters als JSON an den KI-Agenten. Dieser gruppiert sie selbst nach /24-Netz, zählt pro /24 und entscheidet, ob ein verteilter Brute-Force vorliegt (→ /24 oder die auffälligen IPs blocken). Bezieht sich ausschließlich auf Login-Logs.</label>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Verteilter BF / Zeitfenster (Minuten)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_window_minutes" min="5" max="10080" placeholder="60">
+                                <small class="admin-hint">Welche Login-Versuche der Agent sieht (Default 60 Minuten).</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Verteilter BF / Versuche pro /24 (Richtwert)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_attempts" min="1" max="100000" placeholder="20">
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Verteilter BF / Distinct-IPs pro /24 (Richtwert)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_min_ips" min="2" max="10000" placeholder="4">
+                                <small class="admin-hint">Richtwerte, ab wann ein /24 als koordiniert gilt — werden dem Agenten als Hinweis übergeben; er darf bei klarem Muster begründet abweichen.</small>
+                            </div>
+
                         </div>
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('agent')">Agent-Settings speichern</button>
@@ -335,6 +374,8 @@
                             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptWaf" type="button">WAF</button></li>
                             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptIps" type="button">IPS</button></li>
                             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptLogin" type="button">Failed-Login</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptDist" type="button">Verteilter BF</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#promptTriage" type="button">Triage</button></li>
                         </ul>
                         <div class="tab-content">
                             <div class="tab-pane fade show active" id="promptAlert">
@@ -363,6 +404,22 @@
                                 <div class="d-flex justify-content-end gap-2 mt-1">
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('failed_login')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('failed_login')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="promptDist">
+                                <p class="admin-hint mb-1">Verteilter Brute-Force: Der Agent erhält alle Login-Versuche des Zeitfensters als JSON, gruppiert nach /24, zählt und entscheidet <code>block_subnet</code>/<code>block_ips</code>/<code>no_action</code>.</p>
+                                <textarea class="form-control form-control-sm" data-key="agent_failed_login_distributed_system_prompt" id="agentDistPrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für verteilten Brute-Force)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('failed_login_distributed')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('failed_login_distributed')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="promptTriage">
+                                <p class="admin-hint mb-1">Wird genutzt, wenn ein Wert über die <a href="/osint.html">OSINT-Seite</a> „an KI-Triage übergeben" wird (IP / Domain / URL). Das LLM erhält den Wert + OSINT-Lookup und entscheidet block / no_action.</p>
+                                <textarea class="form-control form-control-sm" data-key="agent_triage_system_prompt" id="agentTriagePrompt" rows="16" style="font-family:Consolas,Courier New,monospace;font-size:.78rem;white-space:pre" placeholder="(leer → eingebauter Default-Prompt für Triage)"></textarea>
+                                <div class="d-flex justify-content-end gap-2 mt-1">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadAgentDefaultPrompt('triage')" type="button"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="clearAgentPrompt('triage')" type="button"><i class="bi bi-eraser"></i> Leeren</button>
                                 </div>
                             </div>
                         </div>

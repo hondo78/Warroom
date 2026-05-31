@@ -728,15 +728,7 @@ function deviceTypeBadge(type) {
     return `<span class="device-type-badge device-type-${t}">${t}</span>`;
 }
 
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// escapeHtml() lives in js/common.js
 
 function ipWithActions(ip, comment) {
     if (!ip) return '';

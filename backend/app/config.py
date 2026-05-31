@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     agent_api_key: str = ""           # optional for local LMStudio
     agent_model: str = ""             # model id reported by /v1/models
     agent_interval_seconds: int = 120
+    # LLM sampling controls used on every decision call (/chat/completions).
+    # temperature: 0 = deterministic, higher = more creative. max_tokens caps
+    # the response length — reasoning models need headroom for their hidden
+    # think block, so keep this generous (≈3000).
+    agent_temperature: float = 0.2
+    agent_max_tokens: int = 3000
     # If true, "block_ip" / "acknowledge" recommendations execute automatically
     # at any confidence; otherwise they stay pending. The threshold below acts
     # as an independent fast-lane: any decision whose confidence (in %) is
@@ -65,6 +71,21 @@ class Settings(BaseSettings):
     # ≥ M distinct IPs, every active IP in that subnet gets blocked.
     agent_failed_login_subnet_attempts: int = 10
     agent_failed_login_subnet_min_ips: int = 3
+    # Distributed brute-force detection: the agent receives ALL failed-login
+    # attempts from the last N minutes as JSON and derives itself whether
+    # attempts cluster in the same /24 network. ``attempts``/``min_ips`` are the
+    # per-/24 thresholds handed to the LLM as a hint for "what counts as
+    # coordinated". This process only ever looks at login logs.
+    agent_failed_login_distributed_enabled: bool = True
+    agent_failed_login_distributed_window_minutes: int = 60
+    agent_failed_login_distributed_attempts: int = 20   # per-/24 attempts hint
+    agent_failed_login_distributed_min_ips: int = 4     # per-/24 distinct-IP hint
+    # Empty ⇒ DEFAULT_DISTRIBUTED_LOGIN_PROMPT in app.agent.
+    agent_failed_login_distributed_system_prompt: str = ""
+
+    # Triage prompt — used by the manual / OSINT-initiated LLM triage path.
+    # Empty ⇒ fall back to DEFAULT_TRIAGE_PROMPT in app.agent.
+    agent_triage_system_prompt: str = ""
 
     # --- OSINT-Provider Quota limits (for the /stats.html cost view) ---
     # Defaults reflect the documented free tiers; 0 disables the warning.

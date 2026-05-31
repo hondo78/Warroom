@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - OSINT</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="osint">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <a class="btn btn-outline-secondary btn-sm" href="/stats.html"><i class="bi bi-speedometer"></i> Provider-Limits</a>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">OSINT</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link active"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0">🔍 OSINT-Abfrage</h3>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">IP, Domain oder URL prüfen</h3></div>
+                    <div class="card-body">
+                        <div class="input-group mb-2">
+                            <select id="osintType" class="form-select" style="max-width:190px">
+                                <option value="auto" selected>Auto-Erkennung</option>
+                                <option value="ip">IP-Adresse</option>
+                                <option value="domain">Domain</option>
+                                <option value="url">URL</option>
+                            </select>
+                            <input type="text" id="osintQuery" class="form-control" placeholder="z. B. 91.206.156.176, evil-domain.com oder https://…" autocomplete="off">
+                            <button class="btn btn-primary" onclick="runOsintQuery()"><i class="bi bi-search"></i> Abfragen</button>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="osintForce">
+                                <label class="form-check-label text-secondary" for="osintForce">Cache umgehen (frische Live-Abfrage)</label>
+                            </div>
+                            <small class="text-secondary">
+                                <strong>IP:</strong> Intelix · AbuseIPDB · VirusTotal · Shodan · GreyNoise · ipinfo &nbsp;|&nbsp;
+                                <strong>Domain:</strong> Intelix · VirusTotal · DNS &nbsp;|&nbsp;
+                                <strong>URL:</strong> Intelix · VirusTotal
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3" id="osintResultCard" style="display:none">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h3 class="card-title mb-0">Ergebnis · <span id="osintResultTitle">—</span></h3>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-danger btn-sm" onclick="blockCurrent()" title="Wert sofort auf die Blocklist setzen"><i class="bi bi-shield-slash"></i> Sofort blocken</button>
+                            <button class="btn btn-primary btn-sm" onclick="triageCurrent()" title="Wert dem KI-Agenten zur Bewertung übergeben"><i class="bi bi-robot"></i> An KI-Triage</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="runOsintQuery(true)" title="Cache umgehen"><i class="bi bi-arrow-clockwise"></i> Neu prüfen</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="osintActionMsg" class="alert d-none mb-3" role="alert"></div>
+                        <div id="osintResults"></div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0">Zuletzt abgefragt</h3>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearOsintHistory()"><i class="bi bi-trash"></i> Leeren</button>
+                    </div>
+                    <div class="card-body" id="osintHistory"><span class="text-secondary">Noch keine Abfragen.</span></div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- OSINT Modal (used by osint.js for the 🔍 sub-lookups, e.g. DNS A-records) -->
+<div class="modal-overlay" id="osintModal">
+    <div class="modal alert-detail-modal">
+        <div class="alert-detail-header">
+            <h3 id="osintModalTitle">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+        </div>
+        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div class="modal-actions">
+            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/osint.js"></script>
+<script src="/js/osint_page.js"></script>
+</body>
+</html>

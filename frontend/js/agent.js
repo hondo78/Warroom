@@ -91,6 +91,7 @@ async function updateAgentList() {
                 waf:           '<span class="severity-badge severity-high" title="WAF rule-based">WAF</span>',
                 ips:           '<span class="severity-badge severity-critical" title="IPS/IDP rule-based">IPS</span>',
                 failed_login:  '<span class="severity-badge severity-high" title="Brute-force rule-based">Login</span>',
+                triage:        '<span class="severity-badge severity-medium" title="OSINT/Manual-Triage">Triage</span>',
             })[d.source_type] || '<span class="severity-badge severity-medium" title="Sophos Alert">Alert</span>';
             const actor = d.decided_by === 'human'
                 ? '<span class="severity-badge severity-low">Mensch</span>'
@@ -106,6 +107,17 @@ async function updateAgentList() {
             let alertCell;
             if (d.alert) {
                 alertCell = `${severityBadge(d.alert.severity)} ${escapeHtml(truncate(d.alert.type || '', 25))}${d.alert.source_ip ? '<br><code style="font-size:.78rem">' + escapeHtml(d.alert.source_ip) + '</code>' + osintBtn(d.alert.source_ip) : ''}`;
+            } else if (d.source_type === 'triage') {
+                const ctx = (d.action_args || {}).context || {};
+                const val = ctx.value || d.source_ip || '?';
+                const isIp = (ctx.value_type || 'ip') === 'ip';
+                alertCell = `<code style="font-size:.78rem">${escapeHtml(truncate(val, 32))}</code>${isIp ? osintBtn(val) : ''}<br><span class="ip-country" style="font-size:.72rem">Triage · ${escapeHtml(ctx.value_type || 'ip')}</span>`;
+            } else if (d.source_type === 'failed_login' && (d.action_args || {}).context && d.action_args.context.distributed_brute_force_indicator) {
+                const ctx = d.action_args.context;
+                const summ = ctx.subnet_summary || [];
+                const top = summ[0];
+                const topTxt = top ? `${top.subnet24} (${top.attempts}× / ${top.distinct_ips} IPs)` : '—';
+                alertCell = `<span class="ip-country" style="font-size:.78rem">👥 verteilter Brute-Force</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} Logins · ${summ.length} /24 · Top: ${escapeHtml(topTxt)}</span>`;
             } else if (['waf','ips','failed_login'].includes(d.source_type) && d.source_ip) {
                 const ctx = (d.action_args || {}).context || {};
                 let sub;
@@ -194,11 +206,16 @@ function renderAgentDetail(d) {
     // alert row attached, so render the context dict stored in action_args.
     const ctx = (d.action_args || {}).context || {};
     let ruleBlock = '';
-    if (['waf', 'ips', 'failed_login'].includes(d.source_type)) {
+    if (['waf', 'ips', 'failed_login', 'triage'].includes(d.source_type)) {
+        const isDistributed = d.source_type === 'failed_login' && ctx.distributed_brute_force_indicator;
+        const isSubnet = d.source_type === 'failed_login' && ctx.subnet_brute_force_indicator;
         const head = ({
             waf:          'WAF-Kontext',
             ips:          'IPS-Kontext',
-            failed_login: 'Failed-Login-Kontext',
+            failed_login: isDistributed ? 'Verteilter-Brute-Force-Kontext'
+                        : isSubnet ? 'Subnet-Brute-Force-Kontext'
+                        : 'Failed-Login-Kontext',
+            triage:       'Triage-Kontext',
         })[d.source_type];
         const rows = [
             ['Regel', escapeHtml(ctx.rule || '-')],
@@ -219,29 +236,59 @@ function renderAgentDetail(d) {
                 ['Signaturen', (ctx.signatures || []).map(s => '<code style="font-size:.78rem">' + escapeHtml(s) + '</code>').join(', ') || '-'],
                 ['Kategorien', (ctx.categories || []).map(escapeHtml).join(', ') || '-'],
             );
+        } else if (d.source_type === 'triage') {
+            rows.push(
+                ['Wert', '<code style="font-size:.8rem">' + escapeHtml(ctx.value || '-') + '</code>'],
+                ['Typ', escapeHtml(ctx.value_type || '-')],
+                ['Operator-Hinweis', ctx.note ? escapeHtml(ctx.note) : '—'],
+            );
+        } else if (isDistributed) {
+            const summ = ctx.subnet_summary || [];
+            const aa = d.action_args || {};
+            const targetTxt = aa.target_subnet
+                ? '<code style="font-size:.8rem">' + escapeHtml(aa.target_subnet) + '</code>'
+                : (Array.isArray(aa.target_ips) ? '<strong>' + aa.target_ips.length + ' IP(s)</strong>: ' + aa.target_ips.slice(0, 15).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') : '—');
+            rows.push(
+                ['Login-Versuche im Fenster', ctx.total_login_attempts ?? '-'],
+                ['Zeitfenster', (ctx.window_minutes ?? '-') + ' min'],
+                ['Betroffene /24-Netze', summ.length],
+                ['Block-Ziel', targetTxt],
+                ['Top /24 (Versuche / IPs)', summ.slice(0, 10).map(s => '<code style="font-size:.78rem">' + escapeHtml(s.subnet24) + '</code> (' + s.attempts + '× / ' + s.distinct_ips + ' IPs)').join('<br>') || '-'],
+            );
+        } else if (isSubnet) {
+            rows.push(
+                ['Subnet', '<code style="font-size:.8rem">' + escapeHtml(ctx.subnet || '?') + '</code>'],
+                ['Versuche im Subnet (24h)', ctx.subnet_attempts ?? '-'],
+                ['Distinct IPs im Subnet', ctx.subnet_distinct_ips ?? '-'],
+                ['Block-Umfang', '<strong>alle 254 Hosts im /24</strong> (Network/Broadcast ausgenommen)'],
+                ['Gesehene Angreifer-IPs', (ctx.observed_ips || []).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
+                ['Weitere Subnet-IPs (Sample)', (ctx.subnet_ip_sample || []).slice(0, 10).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
+            );
         } else {
-            // failed_login: subnet rule has different fields
-            if (ctx.rule === 'subnet_brute_force') {
-                rows.push(
-                    ['Subnet', '<code style="font-size:.8rem">' + escapeHtml(ctx.subnet || '?') + '</code>'],
-                    ['Versuche im Subnet (24h)', ctx.subnet_attempts ?? '-'],
-                    ['Distinct IPs im Subnet', ctx.subnet_distinct_ips ?? '-'],
-                    ['Block-Umfang', '<strong>alle 254 Hosts im /24</strong> (Network/Broadcast ausgenommen)'],
-                    ['Gesehene Angreifer-IPs', (ctx.observed_ips || []).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
-                    ['Weitere Subnet-IPs (Sample)', (ctx.subnet_ip_sample || []).slice(0, 10).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
-                );
-            } else {
-                rows.push(
-                    ['Failed-Logins in 24h', ctx.count_24h ?? '-'],
-                    ['Versuchte User', (ctx.users || []).map(u => '<code style="font-size:.78rem">' + escapeHtml(u) + '</code>').join(', ') || '-'],
-                    ['Komponenten', (ctx.components || []).map(escapeHtml).join(', ') || '-'],
-                );
-            }
+            rows.push(
+                ['Failed-Logins in 24h', ctx.count_24h ?? '-'],
+                ['Versuchte User', (ctx.users || []).map(u => '<code style="font-size:.78rem">' + escapeHtml(u) + '</code>').join(', ') || '-'],
+                ['Komponenten', (ctx.components || []).map(escapeHtml).join(', ') || '-'],
+            );
         }
+        const osintSum = ctx.osint_summary || {};
         if (ctx.osint_reasons) rows.push(['OSINT-Treffer', (ctx.osint_reasons || []).map(escapeHtml).join(', ')]);
+        if (osintSum.intelix_category || osintSum.abuseipdb_score != null || osintSum.virustotal_malicious != null) {
+            const bits = [];
+            if (osintSum.intelix_category) bits.push('Intelix: ' + escapeHtml(String(osintSum.intelix_category)));
+            if (osintSum.abuseipdb_score != null) bits.push('AbuseIPDB: ' + escapeHtml(String(osintSum.abuseipdb_score)));
+            if (osintSum.virustotal_malicious != null) bits.push('VT mal.: ' + escapeHtml(String(osintSum.virustotal_malicious)));
+            if (osintSum.greynoise_classification) bits.push('GreyNoise: ' + escapeHtml(String(osintSum.greynoise_classification)));
+            if (bits.length) rows.push(['OSINT-Summary', bits.join(' · ')]);
+        }
+        // Header label: rule sources without a single source_ip (distributed /
+        // triage of a domain/URL) shouldn't show a dangling "· ?".
+        const headLabel = d.source_ip
+            ? escapeHtml(d.source_ip) + (typeof osintButton === 'function' ? osintButton(d.source_ip) : '')
+            : (d.source_type === 'triage' ? escapeHtml(ctx.value || '') : '');
         ruleBlock = `
         <div class="detail-section">
-            <h4>${head} · ${escapeHtml(d.source_ip || '?')}${typeof osintButton === 'function' ? osintButton(d.source_ip) : ''}</h4>
+            <h4>${head}${headLabel ? ' · ' + headLabel : ''}</h4>
             <dl class="detail-grid">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${v}</dd>`).join('')}</dl>
         </div>`;
     }
@@ -462,10 +509,7 @@ function formatTime(isoStr) {
     return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// escapeHtml() lives in js/common.js
 
 function truncate(s, n) {
     if (!s) return '-';

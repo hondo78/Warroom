@@ -386,16 +386,4 @@ function formatTime(isoStr) {
     });
 }
 
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function escapeAttr(str) {
-    return escapeHtml(str).replace(/`/g, '&#96;');
-}
+// escapeHtml() and escapeAttr() live in js/common.js

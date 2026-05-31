@@ -333,5 +333,176 @@ class SophosClient:
         resp.raise_for_status()
         return resp.json()
 
+    # ------------------------------------------------------------------
+    # Email Management API  (/email/v1)
+    # https://developer.sophos.com/docs/email-v1/1/overview
+    #
+    # Covers the Mailbox-, Quarantine- and Post-Delivery-Quarantine APIs.
+    # All endpoints live under the tenant data-region host and need the
+    # X-Tenant-ID header (provided by _auth_headers). A 404 means the tenant
+    # has no Email Security license / the resource doesn't exist — callers
+    # treat that as "unavailable" rather than an error, mirroring
+    # get_account_health().
+    # ------------------------------------------------------------------
+
+    async def _email_get(
+        self, path: str, params: dict | None = None, timeout: float | None = None
+    ) -> dict | None:
+        """GET a single Email-API resource. Returns None on 404."""
+        await self._ensure_auth()
+        kwargs: dict = {"headers": self._auth_headers(), "params": params or {}}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = await _request(
+            self._get_client(), "get", f"{self._base_url()}{path}", **kwargs
+        )
+        if resp.status_code == 404:
+            logger.info(f"Email endpoint {path} not available (404)")
+            return None
+        resp.raise_for_status()
+        return resp.json() if resp.content else {}
+
+    async def _email_write(self, method: str, path: str, body: dict | None = None) -> dict:
+        """POST/PATCH/DELETE against the Email API. Raises on HTTP error so the
+        route layer can surface a 502. Returns {} for empty (204) bodies."""
+        await self._ensure_auth()
+        kwargs: dict = {"headers": self._auth_headers()}
+        if body is not None:
+            kwargs["json"] = body
+        resp = await _request(
+            self._get_client(), method, f"{self._base_url()}{path}", **kwargs
+        )
+        resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"ok": True}
+        return resp.json()
+
+    # ---- Mailboxes ----
+
+    async def email_list_mailboxes(
+        self, search: str | None = None, page_size: int = 200
+    ) -> list[dict]:
+        await self._ensure_auth()
+        params: dict = {"pageSize": page_size}
+        if search:
+            params["search"] = search
+        mailboxes = await self._paginate(
+            self._get_client(),
+            "/email/v1/mailboxes",
+            params,
+            style="page_key",
+            timeout=60,
+        )
+        logger.info(f"Fetched {len(mailboxes)} email mailboxes from Sophos Central")
+        return mailboxes
+
+    async def email_get_mailbox(self, mailbox_id: str) -> dict | None:
+        return await self._email_get(f"/email/v1/mailboxes/{mailbox_id}")
+
+    async def email_create_mailbox(self, body: dict) -> dict:
+        return await self._email_write("post", "/email/v1/mailboxes", body)
+
+    async def email_update_mailbox(self, mailbox_id: str, body: dict) -> dict:
+        return await self._email_write("patch", f"/email/v1/mailboxes/{mailbox_id}", body)
+
+    async def email_delete_mailbox(self, mailbox_id: str) -> dict:
+        return await self._email_write("delete", f"/email/v1/mailboxes/{mailbox_id}")
+
+    # ---- Quarantine + Post-Delivery Quarantine ----
+    # The two APIs are structurally identical; ``base`` switches between them.
+
+    @staticmethod
+    def _quarantine_base(post_delivery: bool) -> str:
+        return (
+            "/email/v1/post-delivery-quarantine"
+            if post_delivery
+            else "/email/v1/quarantine"
+        )
+
+    async def _email_search(
+        self, path: str, body: dict, timeout: float = 60.0, max_items: int = 5000
+    ) -> list[dict]:
+        """Walk a POST .../search endpoint. Response is {pages:{nextKey,...},
+        items:[...]}; the next page key is fed back in the body as pageFromKey
+        (same convention as the GET list endpoints). Returns [] on 404."""
+        await self._ensure_auth()
+        items: list[dict] = []
+        page_body = dict(body)
+        while True:
+            resp = await _request(
+                self._get_client(),
+                "post",
+                f"{self._base_url()}{path}",
+                headers=self._auth_headers(),
+                json=page_body,
+                timeout=timeout,
+            )
+            if resp.status_code == 404:
+                logger.info(f"Email endpoint {path} not available (404)")
+                return items
+            resp.raise_for_status()
+            data = resp.json()
+            items.extend(data.get("items", []))
+            next_key = (data.get("pages") or {}).get("nextKey")
+            if next_key and len(items) < max_items:
+                page_body["pageFromKey"] = next_key
+            else:
+                break
+        return items
+
+    async def email_list_quarantine(
+        self,
+        post_delivery: bool = False,
+        begin_date: datetime | None = None,
+        end_date: datetime | None = None,
+        page_size: int = 100,
+    ) -> list[dict]:
+        # The quarantine list is a POST search with a mandatory beginDate/endDate
+        # window (verified against the live API; the documented field names are
+        # beginDate/endDate, not from/to). pageSize max is 100 for the
+        # post-delivery endpoint, so we page through via pages.nextKey.
+        end_date = end_date or datetime.now(timezone.utc)
+        begin_date = begin_date or (end_date - timedelta(days=7))
+        body = {
+            "beginDate": _iso_z(begin_date),
+            "endDate": _iso_z(end_date),
+            "pageSize": page_size,
+        }
+        base = self._quarantine_base(post_delivery)
+        msgs = await self._email_search(f"{base}/messages/search", body)
+        logger.info(
+            f"Fetched {len(msgs)} {'post-delivery ' if post_delivery else ''}"
+            f"quarantine messages from Sophos Central"
+        )
+        return msgs
+
+    async def email_quarantine_attachments(
+        self, message_id: str, post_delivery: bool = False
+    ) -> dict | None:
+        base = self._quarantine_base(post_delivery)
+        return await self._email_get(f"{base}/messages/{message_id}/attachments")
+
+    async def email_release_quarantine(
+        self, message_ids: list[str], allow_sender: bool = False, post_delivery: bool = False
+    ) -> dict:
+        # Verified body schema: {"items": [{"id": ...}], "allowListSender": bool}.
+        # Returns 202 with an {"errors": [...]} array for any ids that failed.
+        base = self._quarantine_base(post_delivery)
+        body = {
+            "items": [{"id": mid} for mid in message_ids],
+            "allowListSender": allow_sender,
+        }
+        return await self._email_write("post", f"{base}/messages/release", body)
+
+    async def email_delete_quarantine(
+        self, message_ids: list[str], block_sender: bool = False, post_delivery: bool = False
+    ) -> dict:
+        base = self._quarantine_base(post_delivery)
+        body = {
+            "items": [{"id": mid} for mid in message_ids],
+            "blockListSender": block_sender,
+        }
+        return await self._email_write("post", f"{base}/messages/delete", body)
+
 
 sophos_client = SophosClient()

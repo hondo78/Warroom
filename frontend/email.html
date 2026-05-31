@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Email</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="email">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <span id="emailApiStatus" class="badge text-bg-secondary">API: —</span>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEmail()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Email</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link active"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0">✉️ Email Management — Sophos Central</h3>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <div id="emailUnavailable" class="alert alert-warning d-none" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>Email Management API nicht erreichbar.</strong>
+                    <span id="emailUnavailableMsg"></span>
+                    Diese Seite nutzt die in <a href="/admin.html" class="alert-link">Admin</a> hinterlegten
+                    Sophos-Central-Zugangsdaten. Eine <code>404</code> bedeutet meist, dass der Tenant keine
+                    Email-Security-Lizenz hat.
+                </div>
+
+                <div class="dashboard-stat-grid mb-3">
+                    <div class="small-box bg-info"><div class="inner"><h3 id="statMailboxes">-</h3><p>Mailboxen</p></div><div class="small-box-footer">verwaltete Postfächer</div><span class="icon"><i class="bi bi-person-rolodex"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="statQuarantine">-</h3><p>Quarantäne</p></div><div class="small-box-footer">Nachrichten im Zeitfenster</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="statPostDelivery">-</h3><p>Post-Delivery</p></div><div class="small-box-footer">nachträglich isoliert</div><span class="icon"><i class="bi bi-envelope-x"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="statSelected">0</h3><p>Ausgewählt</p></div><div class="small-box-footer">für Bulk-Aktionen</div><span class="icon"><i class="bi bi-check2-square"></i></span></div>
+                </div>
+
+                <ul class="nav nav-tabs mb-3" id="emailTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="tab-mailboxes" data-bs-toggle="tab" data-bs-target="#pane-mailboxes" type="button" role="tab"><i class="bi bi-person-rolodex"></i> Mailboxen</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-quarantine" data-bs-toggle="tab" data-bs-target="#pane-quarantine" type="button" role="tab"><i class="bi bi-shield-lock"></i> Quarantäne</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-postdelivery" data-bs-toggle="tab" data-bs-target="#pane-postdelivery" type="button" role="tab"><i class="bi bi-envelope-x"></i> Post-Delivery</button>
+                    </li>
+                </ul>
+
+                <div class="tab-content">
+
+                    <!-- ===== Mailboxes ===== -->
+                    <div class="tab-pane fade show active" id="pane-mailboxes" role="tabpanel">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h3 class="card-title mb-0">Mailbox-Verwaltung</h3>
+                                <button class="btn btn-success btn-sm" onclick="openMailboxModal()"><i class="bi bi-plus-lg"></i> Neue Mailbox</button>
+                            </div>
+                            <div class="card-body">
+                                <div class="filter-row">
+                                    <input type="text" id="mbSearch" class="form-control form-control-sm" placeholder="Suche (E-Mail, Name…) — Enter">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadMailboxes()"><i class="bi bi-search"></i></button>
+                                </div>
+                                <div class="table-scroll">
+                                    <table class="table table-sm table-hover align-middle">
+                                        <thead><tr>
+                                            <th>E-Mail</th><th>Anzeigename</th><th>Typ</th><th>Domain</th><th>Status</th><th>Aktionen</th>
+                                        </tr></thead>
+                                        <tbody id="mailboxTable"><tr><td colspan="6" class="text-center text-secondary py-4">Lade…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== Quarantine ===== -->
+                    <div class="tab-pane fade" id="pane-quarantine" role="tabpanel">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <h3 class="card-title mb-0">Quarantäne</h3>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(false)"><i class="bi bi-box-arrow-up"></i> Freigeben</button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(false)"><i class="bi bi-trash"></i> Löschen</button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="filter-row">
+                                    <input type="text" id="qSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter">
+                                    <select id="qHours" class="form-select form-select-sm" style="max-width:160px">
+                                        <option value="24">Letzte 24 h</option>
+                                        <option value="168" selected>Letzte 7 Tage</option>
+                                        <option value="720">Letzte 30 Tage</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadQuarantine(false)"><i class="bi bi-search"></i></button>
+                                </div>
+                                <div class="table-scroll">
+                                    <table class="table table-sm table-hover align-middle">
+                                        <thead><tr>
+                                            <th style="width:32px"><input type="checkbox" onclick="toggleAll(this, false)"></th>
+                                            <th>Empfangen</th><th>Absender</th><th>Empfänger</th><th>Betreff</th><th>Grund</th><th>Aktionen</th>
+                                        </tr></thead>
+                                        <tbody id="quarantineTable"><tr><td colspan="7" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===== Post-Delivery Quarantine ===== -->
+                    <div class="tab-pane fade" id="pane-postdelivery" role="tabpanel">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <h3 class="card-title mb-0">Post-Delivery Quarantäne</h3>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(true)"><i class="bi bi-box-arrow-up"></i> Freigeben</button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(true)"><i class="bi bi-trash"></i> Löschen</button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="filter-row">
+                                    <input type="text" id="pdSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter">
+                                    <select id="pdHours" class="form-select form-select-sm" style="max-width:160px">
+                                        <option value="24">Letzte 24 h</option>
+                                        <option value="168" selected>Letzte 7 Tage</option>
+                                        <option value="720">Letzte 30 Tage</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadQuarantine(true)"><i class="bi bi-search"></i></button>
+                                </div>
+                                <div class="table-scroll">
+                                    <table class="table table-sm table-hover align-middle">
+                                        <thead><tr>
+                                            <th style="width:32px"><input type="checkbox" onclick="toggleAll(this, true)"></th>
+                                            <th>Empfangen</th><th>Absender</th><th>Empfänger</th><th>Betreff</th><th>Grund</th><th>Aktionen</th>
+                                        </tr></thead>
+                                        <tbody id="postdeliveryTable"><tr><td colspan="7" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Detail modal (quarantine message / mailbox) -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailTitle">Detail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="detailBody"><div class="text-secondary">Lade…</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- Mailbox create/edit modal -->
+<div class="modal fade" id="mailboxModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mailboxModalTitle">Neue Mailbox</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mbId">
+                <div class="mb-3">
+                    <label class="form-label">E-Mail-Adresse</label>
+                    <input type="email" id="mbEmail" class="form-control" placeholder="user@example.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Anzeigename</label>
+                    <input type="text" id="mbDisplayName" class="form-control" placeholder="Max Mustermann">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Typ</label>
+                    <select id="mbType" class="form-select">
+                        <option value="user">user</option>
+                        <option value="distributionList">distributionList</option>
+                        <option value="publicFolder">publicFolder</option>
+                    </select>
+                </div>
+                <div class="text-secondary small">Felder werden 1:1 an die Sophos Mailbox-API übergeben. Pflichtfelder hängen von der Tenant-Konfiguration ab.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="mbSaveBtn" onclick="saveMailbox()">Speichern</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/email.js"></script>
+</body>
+</html>

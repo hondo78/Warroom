@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, Depends, Header, HTTPException, Query, status
+from fastapi import Body, FastAPI, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, text, case, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +15,7 @@ from app.cache import cached
 from app.collector import collect_all
 from app.config import settings
 from app.database import async_session, ensure_schema, get_db
-from app.geoip_service import get_redis
+from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
 from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, WhitelistedIp
@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
     yield
     scheduler.shutdown()
     await sophos_client.aclose()
+    await close_redis()
 
 
 app = FastAPI(title="Warroom API", lifespan=lifespan, dependencies=[Depends(verify_api_key)])
@@ -1666,6 +1667,141 @@ async def sophos_health_check():
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Email Management API proxy  (/api/email/*)
+#
+# Thin pass-through to the Sophos Email Security API (/email/v1) via
+# SophosClient. List endpoints return {"available": bool, "items": [...]} so
+# the frontend can distinguish "no Email license / not reachable" from "licensed
+# but empty". Write actions hit the live mail tenant — they release/delete real
+# quarantined mail and create/delete real mailboxes — so they confirm on the
+# frontend and surface Sophos rejections as 502.
+# ---------------------------------------------------------------------------
+
+
+async def _email_list(coro_factory, label: str) -> dict:
+    """Run an Email-API list coroutine, normalising errors into the
+    {"available": ...} envelope instead of bubbling a 500."""
+    try:
+        items = await coro_factory()
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"Email {label} HTTP error: {e.response.status_code}")
+        return {"available": False, "items": [], "error": f"HTTP {e.response.status_code}"}
+    except Exception as e:
+        logger.warning(f"Email {label} failed: {e}")
+        return {"available": False, "items": [], "error": str(e)}
+    return {"available": True, "items": items, "count": len(items)}
+
+
+class QuarantineActionIn(BaseModel):
+    ids: list[str] = Field(..., min_length=1, max_length=500)
+    post_delivery: bool = False
+    # release -> optionally allowlist the sender; delete -> optionally blocklist.
+    allow_sender: bool = False
+    block_sender: bool = False
+
+
+# ---- Mailboxes ----
+
+@app.get("/api/email/mailboxes")
+async def email_mailboxes(search: str | None = Query(default=None, max_length=200)):
+    return await _email_list(
+        lambda: sophos_client.email_list_mailboxes(search=search), "mailboxes"
+    )
+
+
+@app.get("/api/email/mailboxes/{mailbox_id}")
+async def email_mailbox_detail(mailbox_id: str):
+    try:
+        mb = await sophos_client.email_get_mailbox(mailbox_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    if mb is None:
+        raise HTTPException(status_code=404, detail="mailbox not found or Email API unavailable")
+    return mb
+
+
+@app.post("/api/email/mailboxes")
+async def email_mailbox_create(body: dict = Body(...)):
+    if not body:
+        raise HTTPException(status_code=400, detail="empty mailbox body")
+    try:
+        return await sophos_client.email_create_mailbox(body)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API rejected create: {e.response.status_code}")
+
+
+@app.patch("/api/email/mailboxes/{mailbox_id}")
+async def email_mailbox_update(mailbox_id: str, body: dict = Body(...)):
+    if not body:
+        raise HTTPException(status_code=400, detail="empty mailbox body")
+    try:
+        return await sophos_client.email_update_mailbox(mailbox_id, body)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API rejected update: {e.response.status_code}")
+
+
+@app.delete("/api/email/mailboxes/{mailbox_id}")
+async def email_mailbox_delete(mailbox_id: str):
+    try:
+        return await sophos_client.email_delete_mailbox(mailbox_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API rejected delete: {e.response.status_code}")
+
+
+# ---- Quarantine + Post-Delivery Quarantine ----
+
+@app.get("/api/email/quarantine")
+async def email_quarantine(
+    post_delivery: bool = Query(default=False),
+    hours: int = Query(default=168, ge=1, le=8760),
+):
+    begin_date = datetime.now(timezone.utc) - timedelta(hours=hours)
+    label = "post-delivery quarantine" if post_delivery else "quarantine"
+    return await _email_list(
+        lambda: sophos_client.email_list_quarantine(
+            post_delivery=post_delivery, begin_date=begin_date
+        ),
+        label,
+    )
+
+
+@app.get("/api/email/quarantine/{message_id}/attachments")
+async def email_quarantine_attachments(
+    message_id: str, post_delivery: bool = Query(default=False)
+):
+    # The Email API has no single-message GET (returns 404); the search result
+    # already carries the full message, so the detail view only needs the
+    # separately-paged attachment list.
+    try:
+        attachments = await sophos_client.email_quarantine_attachments(message_id, post_delivery)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    return {"attachments": attachments or {}}
+
+
+@app.post("/api/email/quarantine/release")
+async def email_quarantine_release(body: QuarantineActionIn):
+    try:
+        result = await sophos_client.email_release_quarantine(
+            body.ids, allow_sender=body.allow_sender, post_delivery=body.post_delivery
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API rejected release: {e.response.status_code}")
+    return {"ok": True, "released": len(body.ids), "sophos": result}
+
+
+@app.post("/api/email/quarantine/delete")
+async def email_quarantine_delete(body: QuarantineActionIn):
+    try:
+        result = await sophos_client.email_delete_quarantine(
+            body.ids, block_sender=body.block_sender, post_delivery=body.post_delivery
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API rejected delete: {e.response.status_code}")
+    return {"ok": True, "deleted": len(body.ids), "sophos": result}
+
+
 @app.get("/api/detections/recent")
 @cached(ttl=60)
 async def get_recent_detections(
@@ -2993,6 +3129,8 @@ class AdminSettingsIn(BaseModel):
     agent_api_key: str | None = None
     agent_model: str | None = None
     agent_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_temperature: float | None = Field(default=None, ge=0, le=2)
+    agent_max_tokens: int | None = Field(default=None, ge=1, le=32000)
     agent_auto_execute: bool | None = None
     agent_auto_execute_threshold: int | None = Field(default=None, ge=0, le=101)
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
@@ -3010,6 +3148,12 @@ class AdminSettingsIn(BaseModel):
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     agent_failed_login_subnet_attempts: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_subnet_min_ips: int | None = Field(default=None, ge=2, le=1000)
+    agent_failed_login_distributed_enabled: bool | None = None
+    agent_failed_login_distributed_window_minutes: int | None = Field(default=None, ge=5, le=10080)
+    agent_failed_login_distributed_attempts: int | None = Field(default=None, ge=1, le=100000)
+    agent_failed_login_distributed_min_ips: int | None = Field(default=None, ge=2, le=10000)
+    agent_failed_login_distributed_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_triage_system_prompt: str | None = Field(default=None, max_length=20000)
     osint_abuseipdb_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_abuseipdb_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_virustotal_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
@@ -3317,6 +3461,61 @@ async def manual_agent_decision(body: HumanDecisionIn, db: AsyncSession = Depend
     return _serialize_decision(rec, alert)
 
 
+class TriageIn(BaseModel):
+    value: str = Field(..., min_length=1, max_length=2048)
+    type: str = Field("auto", max_length=10)  # auto | ip | domain | url
+    note: str | None = Field(None, max_length=500)
+
+
+def _detect_indicator_type(value: str) -> str:
+    """Best-effort classification of an OSINT/triage indicator."""
+    v = value.strip()
+    if re.match(r"^https?://", v, re.IGNORECASE):
+        return "url"
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", v):
+        return "ip"
+    if ":" in v and re.match(r"^[0-9a-fA-F:]+$", v):
+        return "ip"  # IPv6
+    if "/" in v or "?" in v:
+        return "url"
+    return "domain"
+
+
+@app.post("/api/agent/triage")
+async def agent_triage(body: TriageIn):
+    """Hand a single indicator (IP / domain / URL) to the LLM for triage.
+    Runs OSINT enrichment, asks the model whether to block, and records a
+    pending agent decision (auto-executed if the auto-execute settings allow).
+    Used by the OSINT page's 'an KI-Triage übergeben' action."""
+    import ipaddress
+
+    value = body.value.strip()
+    vtype = body.type if body.type in {"ip", "domain", "url"} else _detect_indicator_type(value)
+
+    if vtype == "ip":
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid IP address")
+    elif vtype == "domain":
+        try:
+            value = _normalize_domain(value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
+    elif vtype == "url":
+        try:
+            value = _normalize_url(value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"invalid url: {e}")
+
+    from app.agent import triage_value
+    try:
+        result = await triage_value(value, vtype, body.note)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"triage failed: {e}")
+    return {"ok": True, "type": vtype, "value": value, **result}
+
+
 @app.post("/api/agent/run-now")
 async def agent_run_now():
     """Trigger one immediate pass of the agent loop. Useful for testing
@@ -3385,12 +3584,16 @@ async def get_agent_default_prompt(source: str = Query(default="alert")):
         DEFAULT_WAF_PROMPT,
         DEFAULT_IPS_PROMPT,
         DEFAULT_FAILED_LOGIN_PROMPT,
+        DEFAULT_DISTRIBUTED_LOGIN_PROMPT,
+        DEFAULT_TRIAGE_PROMPT,
     )
     mapping = {
         "alert":        DEFAULT_SYSTEM_PROMPT,
         "waf":          DEFAULT_WAF_PROMPT,
         "ips":          DEFAULT_IPS_PROMPT,
         "failed_login": DEFAULT_FAILED_LOGIN_PROMPT,
+        "failed_login_distributed": DEFAULT_DISTRIBUTED_LOGIN_PROMPT,
+        "triage":       DEFAULT_TRIAGE_PROMPT,
     }
     prompt = mapping.get(source)
     if prompt is None:

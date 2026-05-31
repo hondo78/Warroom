@@ -23,15 +23,29 @@ from sqlalchemy import select, text
 
 from app.config import settings
 from app.database import async_session
-from app.models import AgentDecision, Alert, BlockedIp, FirewallLog, WhitelistedIp
+from app.models import (
+    AgentDecision, Alert, BlockedDomain, BlockedIp, BlockedUrl,
+    FirewallLog, WhitelistedIp,
+)
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_ACTIONS = {"block_ip", "block_subnet", "acknowledge", "isolate", "no_action"}
-AUTO_EXECUTABLE_ACTIONS = {"block_ip", "block_subnet", "acknowledge"}  # isolate stays manual
+ALLOWED_ACTIONS = {
+    "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
+    "acknowledge", "isolate", "no_action",
+}
+# isolate stays manual; every "block_*" action is auto-executable (same risk
+# class) so high-confidence/auto-execute settings act on them uniformly.
+AUTO_EXECUTABLE_ACTIONS = {
+    "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
+    "acknowledge",
+}
 # Hard upper bound for block_subnet to avoid accidentally blocking enormous
 # ranges if the rule ever misfires on a /16 or /8 prefix.
 MAX_SUBNET_HOSTS = 1024  # /22 IPv4
+# Upper bound for block_ips (distributed brute-force): a coordinated attack can
+# span many sources, but cap it so a misfire can't blocklist thousands at once.
+MAX_BULK_IPS = 256
 
 # Human-readable label for the source_type column, used in blocked_ips.comment
 # so a downstream operator immediately sees where the block originated.
@@ -40,6 +54,7 @@ _SOURCE_LABELS: dict[str, str] = {
     "waf":   "WAF",
     "ips":   "IPS",
     "failed_login": "Login",
+    "triage": "Triage",
 }
 
 
@@ -153,33 +168,106 @@ AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
 
 
 DEFAULT_FAILED_LOGIN_PROMPT = """Du bist ein Brute-Force/Login-Security-Analyst für Warroom.
+Du bewertest EINE einzelne Quell-IP mit fehlgeschlagenen Login-Versuchen.
 
 INPUT (JSON):
-  - source_ip       — die IP, um die es geht (kann der erste Vertreter eines
-                       Subnets sein, wenn subnet_brute_force_indicator=true)
-  - context         — bei per-IP: count_24h, users (Liste), components
+  - source_ip       — die IP, um die es geht
+  - context         — count_24h, users (Liste), components
                        (SSL VPN/Admin/User Portal/IPSec), threshold, Land/Stadt
-                     bei Subnet-Brute-Force: subnet (/24-CIDR), subnet_attempts,
-                       subnet_distinct_ips, observed_ips, users, country und
-                       das Flag `subnet_brute_force_indicator = true`
-  - osint
-  - allowed_actions — enthält "block_ip", "block_subnet", "no_action"
+  - osint           — OSINT-Lookup (abuseipdb, virustotal, shodan, greynoise,
+                       intelix, ipinfo). Felder können fehlen.
+  - allowed_actions — "block_ip", "no_action"
 
-ENTSCHEIDUNGSREGELN:
-A) WENN context.subnet_brute_force_indicator = true:
-   → action="block_subnet", args={"target_subnet": context.subnet},
-     confidence=0.92. Das gesamte /24 wird geblockt; die einzelnen IPs sind
-     bereits durch das System koordiniert und der Whitelist-Schutz greift
-     pro Host bei der Ausführung.
-   → reasoning: nenne Subnet, Versuche, distinct_ips.
-
-B) Sonst (per-IP-Pfad):
-   1. count_24h >= threshold                         → "block_ip", confidence=0.95.
-   2. OSINT Sophos-Intelix-Treffer                   → "block_ip", confidence=0.95.
-   3. OSINT-Treffer anderer Provider                 → "block_ip", confidence=0.85.
-   4. Sonst                                          → "no_action", confidence=0.6.
+ENTSCHEIDUNGSREGELN (erste passende greift):
+1. count_24h >= threshold                          → "block_ip", confidence=0.95.
+2. OSINT Sophos-Intelix-Treffer                    → "block_ip", confidence=0.95.
+3. OSINT-Treffer anderer Provider                  → "block_ip", confidence=0.85.
+4. Sonst                                           → "no_action", confidence=0.6.
 
 AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
+"""
+
+
+DEFAULT_DISTRIBUTED_LOGIN_PROMPT = """Du bist ein Analyst für VERTEILTE Brute-Force-Angriffe (Distributed Brute Force) in Warroom.
+
+Du bekommst ALLE fehlgeschlagenen Login-Versuche der letzten Minuten als JSON.
+Deine Aufgabe: Gruppiere die Versuche nach ihrem /24-Netz (die ersten drei
+Oktette der `ip`, Feld `subnet24`) und ZÄHLE pro /24 die Versuche und die
+Anzahl unterschiedlicher IPs. Stelle fest, ob ein /24 koordiniert Logins
+angreift (verteilter Brute-Force aus einem Netzbereich).
+
+INPUT (JSON):
+  - window_minutes        — Beobachtungsfenster in Minuten
+  - total_login_attempts  — Gesamtzahl übergebener Versuche
+  - thresholds            — {min_attempts_per_24, min_distinct_ips_per_24}:
+                            Richtwert, ab wann ein /24 als koordiniert gilt
+  - login_attempts        — Liste der Versuche, je {ip, subnet24, user,
+                            component, country, ts}
+  - allowed_actions       — "block_subnet", "block_ips", "no_action"
+
+VORGEHEN:
+1. Aggregiere login_attempts nach subnet24. Pro /24: Versuche zählen,
+   distinct IPs zählen.
+2. Ein /24 gilt als verteilter Brute-Force, wenn seine Versuche
+   >= thresholds.min_attempts_per_24 UND die distinct IPs
+   >= thresholds.min_distinct_ips_per_24 sind (du darfst bei klarem Muster
+   begründet abweichen).
+3. Entscheidung:
+   - Genau EIN auffälliges /24  → action="block_subnet",
+       args={"target_subnet":"<a.b.c.0/24>"}, confidence ~0.9.
+   - MEHRERE auffällige /24 oder gestreute IPs → action="block_ips",
+       args={"target_ips":[... die auffälligen Quell-IPs ...]}, confidence ~0.88.
+   - Kein /24 über der Schwelle → action="no_action", confidence ~0.6.
+4. reasoning: nenne die betroffenen /24, deren Versuche und distinct IPs.
+
+WICHTIG: Beziehe dich ausschließlich auf diese Login-Versuche. Die Whitelist
+(eigene IPs) wird vom System bei der Ausführung erneut geprüft.
+
+AUSGABE (strikt JSON, ohne Fence/Vortext):
+{
+  "action":     "<einer aus allowed_actions>",
+  "args":       {"target_subnet":"..."} oder {"target_ips":[...]} oder {},
+  "confidence": <float 0..1>,
+  "reasoning":  "<deutsch, max 3 Sätze, nenne die ausschlaggebenden /24 + Zahlen>"
+}
+"""
+
+
+DEFAULT_TRIAGE_PROMPT = """Du bist ein Threat-Intelligence-Triage-Analyst für Warroom.
+Ein Operator hat einen Indikator (IP, Domain oder URL) zur Bewertung übergeben.
+
+INPUT (JSON):
+  - value           — der zu prüfende Wert
+  - value_type      — "ip" | "domain" | "url"
+  - note            — optionaler Hinweis des Operators (Kontext, kann fehlen)
+  - osint           — OSINT-Lookup (bei IP: abuseipdb, virustotal, shodan,
+                       greynoise, intelix, ipinfo; bei domain/url: intelix,
+                       virustotal, ggf. dns). Felder können fehlen.
+  - allowed_actions — erlaubte Werte für `action` (genau eine Block-Aktion
+                       passend zum value_type, plus "no_action")
+
+ENTSCHEIDUNGSREGELN (erste passende greift):
+1. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
+   intelix.score >= 70 ODER intelix.category ∈ {Malicious, Phishing, Spam,
+   High Risk, Bad})                                  → Block, confidence=0.95.
+2. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
+   virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
+                                                      → Block, confidence=0.85.
+3. Eindeutiger Hinweis des Operators in `note`, der bösartiges Verhalten
+   belegt                                             → Block, confidence=0.8.
+4. Sonst (keine belastbaren Indikatoren)              → "no_action", confidence=0.55.
+
+Die Block-Aktion ist genau die in allowed_actions enthaltene
+(block_ip / block_domain / block_url). Bei privaten/reservierten IPs niemals
+block_ip empfehlen.
+
+AUSGABE (strikt JSON, ohne Fence/Vortext):
+{
+  "action":     "<einer aus allowed_actions>",
+  "args":       {} (Ziel wird vom System gesetzt),
+  "confidence": <float 0..1>,
+  "reasoning":  "<deutsche Begründung, max 2-3 Sätze, nenne die ausschlaggebenden Werte>"
+}
 """
 
 
@@ -188,6 +276,8 @@ _RULE_PROMPTS = {
     "waf":          ("agent_waf_system_prompt", DEFAULT_WAF_PROMPT),
     "ips":          ("agent_ips_system_prompt", DEFAULT_IPS_PROMPT),
     "failed_login": ("agent_failed_login_system_prompt", DEFAULT_FAILED_LOGIN_PROMPT),
+    "failed_login_distributed": ("agent_failed_login_distributed_system_prompt", DEFAULT_DISTRIBUTED_LOGIN_PROMPT),
+    "triage":       ("agent_triage_system_prompt", DEFAULT_TRIAGE_PROMPT),
 }
 
 
@@ -197,8 +287,9 @@ def _prompt_for(source_type: str) -> str:
 
 
 def _allowed_actions_for_source(source_type: str) -> list[str]:
-    if source_type == "failed_login":
-        return ["block_ip", "block_subnet", "no_action"]
+    # Per-entity LLM paths (WAF/IPS/per-IP failed-login) only ever block or skip
+    # a single IP. Subnet-/bulk-blocks come from the distributed sweep, which
+    # validates its own action set inline.
     return ["block_ip", "no_action"]
 
 
@@ -279,8 +370,9 @@ async def _call_llm(
     model_name = settings.agent_model or "local-model"
     payload = {
         "model": model_name,
-        "temperature": 0.2,
-        "max_tokens": 3000,  # reasoning models burn 1500-2500 on a hidden think block
+        # Admin-configurable sampling controls (fall back to sane defaults).
+        "temperature": float(getattr(settings, "agent_temperature", 0.2) or 0.0),
+        "max_tokens": int(getattr(settings, "agent_max_tokens", 3000) or 3000),
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -602,6 +694,94 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
                     "total_hosts": len(hosts_to_block),
                 }
 
+            elif rec.action == "block_ips":
+                # Bulk block of a distributed brute-force's source IPs. Each is
+                # re-validated (public, not whitelisted, not already blocked).
+                raw_ips = (rec.action_args or {}).get("target_ips") or []
+                if not isinstance(raw_ips, list) or not raw_ips:
+                    raise ValueError("no target_ips for block_ips")
+                # Dedupe + keep only public IPs, capped at the bulk limit.
+                seen: set[str] = set()
+                candidates: list[str] = []
+                for raw in raw_ips:
+                    ip = str(raw or "").strip()
+                    if ip and ip not in seen and _is_public_ip(ip):
+                        seen.add(ip)
+                        candidates.append(ip)
+                if not candidates:
+                    raise ValueError("no usable public IPs in target_ips")
+                if len(candidates) > MAX_BULK_IPS:
+                    raise ValueError(
+                        f"block_ips list too large ({len(candidates)} IPs, max {MAX_BULK_IPS})"
+                    )
+                wl = set((await db.execute(
+                    select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(candidates))
+                )).scalars().all())
+                existing = set((await db.execute(
+                    select(BlockedIp.ip).where(BlockedIp.ip.in_(candidates))
+                )).scalars().all())
+                now_ts = datetime.now(timezone.utc)
+                src_label = _source_label(rec.source_type)
+                comment = f"agent[{src_label}] distributed-block: {(rec.reasoning or '')[:160]}"
+                added: list[str] = []
+                skipped_wl: list[str] = []
+                for ip in candidates:
+                    if ip in wl:
+                        skipped_wl.append(ip)
+                        continue
+                    if ip in existing:
+                        continue
+                    db.add(BlockedIp(ip=ip, comment=comment, blocked_at=now_ts))
+                    added.append(ip)
+                if skipped_wl:
+                    logger.warning(
+                        f"agent: block_ips skipped {len(skipped_wl)} whitelisted IP(s)"
+                    )
+                logger.info(
+                    f"agent: block_ips +{len(added)} new, {len(existing)} already, "
+                    f"{len(skipped_wl)} whitelisted"
+                )
+                result = {
+                    "blocked": len(added),
+                    "already_blocked": len(existing),
+                    "skipped_whitelist": len(skipped_wl),
+                    "total": len(candidates),
+                }
+
+            elif rec.action == "block_domain":
+                domain = (rec.action_args or {}).get("target_domain")
+                if not domain:
+                    raise ValueError("no target_domain for block_domain")
+                domain = str(domain).strip().lower()
+                existing = await db.execute(
+                    select(BlockedDomain).where(BlockedDomain.domain == domain)
+                )
+                if existing.scalar_one_or_none() is None:
+                    src_label = _source_label(rec.source_type)
+                    db.add(BlockedDomain(
+                        domain=domain,
+                        comment=f"agent[{src_label}]: {(rec.reasoning or '')[:200]}",
+                        blocked_at=datetime.now(timezone.utc),
+                    ))
+                result = {"domain": domain, "source": rec.source_type}
+
+            elif rec.action == "block_url":
+                url = (rec.action_args or {}).get("target_url")
+                if not url:
+                    raise ValueError("no target_url for block_url")
+                url = str(url).strip()
+                existing = await db.execute(
+                    select(BlockedUrl).where(BlockedUrl.url == url)
+                )
+                if existing.scalar_one_or_none() is None:
+                    src_label = _source_label(rec.source_type)
+                    db.add(BlockedUrl(
+                        url=url,
+                        comment=f"agent[{src_label}]: {(rec.reasoning or '')[:200]}",
+                        blocked_at=datetime.now(timezone.utc),
+                    ))
+                result = {"url": url, "source": rec.source_type}
+
             elif rec.action == "acknowledge":
                 if rec.alert_id:
                     a = await db.get(Alert, rec.alert_id)
@@ -729,9 +909,9 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
 
 
 async def _store_rule_decision(
-    source_type: str, ip: str, action: str, reasoning: str, confidence: float,
+    source_type: str, ip: str | None, action: str, reasoning: str, confidence: float,
     args: dict[str, Any], context: dict[str, Any],
-) -> None:
+) -> int:
     """Persist a rule-based agent decision (WAF/IPS/failed-login).
     Auto-executes block_ip if enabled and the IP isn't whitelisted
     (whitelist check happens earlier and execute_decision rechecks)."""
@@ -759,6 +939,7 @@ async def _store_rule_decision(
             await execute_decision(rec.id)
         except Exception as e:
             logger.warning(f"agent[{source_type}]: auto-execute failed for {ip}: {e}")
+    return rec.id
 
 
 async def _llm_decide_rule(
@@ -845,6 +1026,80 @@ async def _llm_decide_rule(
             "osint_summary": _osint_summary(osint),
         },
     )
+
+
+async def triage_value(
+    value: str, value_type: str, note: str | None = None
+) -> dict[str, Any]:
+    """Operator-/OSINT-initiated LLM triage of a single indicator (IP, domain
+    or URL). Pulls OSINT, asks the LLM (triage prompt) whether to block, and
+    persists a decision (``source_type='triage'``) via the shared rule path —
+    which also honours the auto-execute settings. Returns the decision id +
+    the parsed verdict so the caller can surface it."""
+    value = (value or "").strip()
+    if not value:
+        raise ValueError("empty value")
+    value_type = value_type if value_type in {"ip", "domain", "url"} else "ip"
+
+    block_action = {"ip": "block_ip", "domain": "block_domain", "url": "block_url"}[value_type]
+    target_key   = {"ip": "target_ip", "domain": "target_domain", "url": "target_url"}[value_type]
+    allowed = [block_action, "no_action"]
+
+    # 1) OSINT enrichment by type (private IPs skip the IP lookup)
+    osint: dict[str, Any] = {}
+    try:
+        from app import osint as osint_mod
+        if value_type == "ip" and _is_public_ip(value):
+            osint = await osint_mod.lookup(value)
+        elif value_type == "domain":
+            osint = await osint_mod.lookup_domain(value)
+        elif value_type == "url":
+            osint = await osint_mod.lookup_url(value)
+    except Exception as e:
+        logger.warning(f"agent[triage]: OSINT lookup for {value} failed: {e}")
+        osint = {"error": str(e)[:200]}
+
+    # 2) Ask the LLM
+    payload = {
+        "value": value,
+        "value_type": value_type,
+        "note": note,
+        "osint": osint,
+        "allowed_actions": allowed,
+    }
+    user_msg = "Triage-Anfrage:\n" + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    decision = await _call_llm(user_msg, system_prompt=_prompt_for("triage"), source="triage")
+
+    # 3) Coerce to an action the value-type actually supports
+    action = decision["action"] if decision["action"] in allowed else "no_action"
+
+    # 4) The system — never the LLM — sets the concrete block target
+    args: dict[str, Any] = {}
+    if action == block_action:
+        args[target_key] = value
+
+    # 5) Persist (handles auto-execute) and return the new decision id
+    decision_id = await _store_rule_decision(
+        source_type="triage",
+        ip=(value if value_type == "ip" else None),
+        action=action,
+        reasoning=decision.get("reasoning") or "",
+        confidence=decision.get("confidence", 0.0),
+        args=args,
+        context={
+            "triage": True,
+            "value": value,
+            "value_type": value_type,
+            "note": note,
+            "osint_summary": _osint_summary(osint),
+        },
+    )
+    return {
+        "decision_id": decision_id,
+        "action": action,
+        "confidence": decision.get("confidence", 0.0),
+        "reasoning": decision.get("reasoning") or "",
+    }
 
 
 async def _filter_candidates(db, candidate_ips: list[str], source_type: str,
@@ -985,113 +1240,199 @@ _FAILED_LOGIN_SQL_FRAG = (
 )
 
 
-async def agent_failed_login_loop(window_minutes: int | None = None, force: bool = False) -> None:
-    """Two-stage failed-login workflow, both stages delegating the decision
-    to the LLM (``agent_failed_login_system_prompt``):
+async def _distributed_login_sweep(
+    now: datetime, window_minutes: int | None, handled_ips: set[str]
+) -> None:
+    """Hand ALL failed-login attempts of the last N minutes to the LLM as one
+    JSON payload and let it group them by /24, count per subnet, and decide
+    whether a distributed brute-force is underway.
 
-      * **Stage 1 — Subnet sweep**: aggregate fails per /24. Subnets that
-        clear ``subnet_attempts`` × ``subnet_min_ips`` are presented to the
-        LLM with ``subnet_brute_force_indicator=true`` and the LLM may
-        emit ``block_subnet`` covering all 254 hosts. Observed IPs are
-        marked handled so they don't re-enter Stage 2.
-      * **Stage 2 — Per-IP**: remaining candidates (auth/admin/SSL-VPN/
-        IPsec/User-Portal failures) go through the standard per-IP path."""
+    This stage looks ONLY at login logs (``_FAILED_LOGIN_SQL_FRAG``). IPs the
+    resulting decision covers are added to ``handled_ips`` so the per-IP stage
+    skips them. A 1h cooldown prevents re-deciding the same picture every loop.
+    """
+    from collections import defaultdict
+
+    # Window: setting default (60 min), widened if an ad-hoc scan asked for more.
+    dist_minutes = max(
+        int(settings.agent_failed_login_distributed_window_minutes or 60),
+        int(window_minutes or 0),
+    )
+    since = now - timedelta(minutes=max(1, dist_minutes))
+    block_cooldown = now - timedelta(hours=1)
+    per24_attempts = int(settings.agent_failed_login_distributed_attempts or 20)
+    per24_min_ips = int(settings.agent_failed_login_distributed_min_ips or 4)
+    MAX_ROWS = 1500
+
+    async with async_session() as db:
+        # Cooldown: at most one distributed decision per hour (the 60-min picture
+        # changes slowly; re-running every loop would spam identical decisions).
+        recent = (await db.execute(
+            select(AgentDecision.id).where(
+                AgentDecision.source_type == "failed_login",
+                AgentDecision.action_args["context"]["distributed_brute_force_indicator"].astext == "true",
+                AgentDecision.created_at >= block_cooldown,
+            )
+        )).first()
+        if recent is not None:
+            return
+
+        rows = (await db.execute(text(f"""
+            SELECT source_ip,
+                   split_part(source_ip, '.', 1) || '.' ||
+                   split_part(source_ip, '.', 2) || '.' ||
+                   split_part(source_ip, '.', 3) || '.0/24' AS subnet24,
+                   user_name,
+                   raw_data->>'log_component' AS component,
+                   attacker_country,
+                   created_at
+            FROM firewall_logs
+            WHERE created_at >= :since
+              AND source_ip IS NOT NULL
+              AND source_ip ~ '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'
+              -- Only external sources: a distributed brute-force is by definition
+              -- public, and we must never recommend blocking an internal /24.
+              AND NOT (source_ip::inet <<= inet '10.0.0.0/8'
+                    OR source_ip::inet <<= inet '172.16.0.0/12'
+                    OR source_ip::inet <<= inet '192.168.0.0/16'
+                    OR source_ip::inet <<= inet '127.0.0.0/8'
+                    OR source_ip::inet <<= inet '169.254.0.0/16'
+                    OR source_ip::inet <<= inet '100.64.0.0/10')
+              AND {_FAILED_LOGIN_SQL_FRAG}
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """), {"since": since, "lim": MAX_ROWS})).fetchall()
+
+    if not rows:
+        return
+
+    attempts = [
+        {
+            "ip": r[0], "subnet24": r[1], "user": r[2],
+            "component": r[3], "country": r[4],
+            "ts": r[5].isoformat() if r[5] else None,
+        }
+        for r in rows
+    ]
+    # System-side /24 summary for the audit trail / UI (the LLM derives its own
+    # grouping from the raw attempts above — this is just for display).
+    by24: dict[str, dict] = defaultdict(lambda: {"attempts": 0, "ips": set()})
+    for a in attempts:
+        s = by24[a["subnet24"]]
+        s["attempts"] += 1
+        s["ips"].add(a["ip"])
+    summary = sorted(
+        [{"subnet24": k, "attempts": v["attempts"], "distinct_ips": len(v["ips"])} for k, v in by24.items()],
+        key=lambda x: -x["attempts"],
+    )
+
+    payload = {
+        "window_minutes": dist_minutes,
+        "total_login_attempts": len(attempts),
+        "thresholds": {
+            "min_attempts_per_24": per24_attempts,
+            "min_distinct_ips_per_24": per24_min_ips,
+        },
+        "login_attempts": attempts,
+        "allowed_actions": ["block_subnet", "block_ips", "no_action"],
+    }
+    user_msg = (
+        f"Fehlgeschlagene Login-Versuche der letzten {dist_minutes} Minuten:\n"
+        + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    )
+
+    try:
+        decision = await _call_llm(
+            user_msg,
+            system_prompt=_prompt_for("failed_login_distributed"),
+            source="failed_login",
+        )
+    except Exception as e:
+        logger.warning(f"agent[failed_login distributed]: LLM call failed: {e}")
+        return
+
+    allowed = {"block_subnet", "block_ips", "no_action"}
+    action = decision["action"] if decision["action"] in allowed else "no_action"
+    args = dict(decision.get("args") or {})
+
+    # Work out which observed IPs the decision covers (for handled_ips) and
+    # validate the action's args before persisting.
+    covered: set[str] = set()
+    if action == "block_subnet":
+        cidr = args.get("target_subnet")
+        if not cidr:
+            logger.warning("agent[failed_login distributed]: block_subnet without target_subnet; dropping")
+            return
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            logger.warning(f"agent[failed_login distributed]: invalid target_subnet {cidr!r}; dropping")
+            return
+        for a in attempts:
+            try:
+                if ipaddress.ip_address(a["ip"]) in net:
+                    covered.add(a["ip"])
+            except ValueError:
+                pass
+    elif action == "block_ips":
+        tips = args.get("target_ips") or []
+        covered = {str(ip).strip() for ip in tips if str(ip).strip()}
+        if not covered:
+            logger.warning("agent[failed_login distributed]: block_ips without target_ips; dropping")
+            return
+
+    await _store_rule_decision(
+        source_type="failed_login", ip=None, action=action,
+        reasoning=decision.get("reasoning") or "",
+        confidence=decision.get("confidence", 0.0),
+        args=args,
+        context={
+            "distributed_brute_force_indicator": True,
+            "rule": "llm-distributed",
+            "window_minutes": dist_minutes,
+            "total_login_attempts": len(attempts),
+            "subnet_summary": summary[:30],
+            "thresholds": {
+                "min_attempts_per_24": per24_attempts,
+                "min_distinct_ips_per_24": per24_min_ips,
+            },
+        },
+    )
+    handled_ips.update(covered)
+    logger.info(
+        f"agent[failed_login distributed]: {len(attempts)} login attempt(s) over "
+        f"{len(summary)} /24(s) -> {action}"
+    )
+
+
+async def agent_failed_login_loop(window_minutes: int | None = None, force: bool = False) -> None:
+    """Two-stage failed-login workflow, both delegating the decision to the LLM:
+
+      * **Stage 1 — Distributed sweep**: ALL failed-login attempts from the last
+        ``distributed_window_minutes`` (default 60) are handed to the LLM as one
+        JSON payload. The model groups them by /24, counts per subnet, and
+        decides whether a coordinated (distributed) brute-force is underway →
+        ``block_subnet`` (one /24) or ``block_ips`` (scattered offenders). Only
+        login logs feed this stage. Covered IPs are marked handled.
+      * **Stage 2 — Per-IP**: remaining fresh candidates go through the standard
+        per-IP path (``agent_failed_login_system_prompt``)."""
     if (not settings.agent_enabled or not settings.agent_failed_login_enabled) and not force:
         return
 
     threshold = int(settings.agent_failed_login_threshold or 5)
-    sn_attempts = int(settings.agent_failed_login_subnet_attempts or 10)
-    sn_min_ips  = int(settings.agent_failed_login_subnet_min_ips or 3)
     interval = int(settings.agent_failed_login_interval_seconds or 60)
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(minutes=int(window_minutes)) if window_minutes else now - timedelta(seconds=max(interval * 3, 180))
-    # The aggregation window is normally fixed at 24h ("in den letzten 24 h").
-    # For ad-hoc admin scans the user usually wants the wider lookback to
-    # cover historical bursts, so widen if explicitly requested.
+    # Per-IP context counts look back 24h (widened for ad-hoc admin scans).
     agg_minutes = max(1440, int(window_minutes)) if window_minutes else 1440
     h24_ago = now - timedelta(minutes=agg_minutes)
     block_cooldown = now - timedelta(hours=1)
     noaction_cooldown = now - timedelta(hours=24)
 
-    # --- Step 1: subnet-level sweep ------------------------------------
-    # Build /24 prefixes from the 24-h failed-login history and find the
-    # ones with enough volume + breadth to qualify as coordinated.
-    handled_by_subnet: set[str] = set()
-    async with async_session() as db:
-        sn_q = await db.execute(text(f"""
-            WITH src AS (
-                SELECT source_ip,
-                       split_part(source_ip, '.', 1) || '.' ||
-                       split_part(source_ip, '.', 2) || '.' ||
-                       split_part(source_ip, '.', 3) || '.0/24' AS prefix24,
-                       attacker_country, attacker_city, user_name
-                FROM firewall_logs
-                WHERE created_at >= :since
-                  AND source_ip IS NOT NULL
-                  AND source_ip ~ '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'
-                  AND {_FAILED_LOGIN_SQL_FRAG}
-            )
-            SELECT prefix24,
-                   COUNT(*) AS attempts,
-                   COUNT(DISTINCT source_ip) AS distinct_ips,
-                   array_agg(DISTINCT source_ip) AS ips,
-                   MAX(attacker_country) AS country,
-                   (array_agg(DISTINCT user_name) FILTER (WHERE user_name IS NOT NULL))[1:5] AS users
-            FROM src
-            GROUP BY prefix24
-            HAVING COUNT(*) >= :att AND COUNT(DISTINCT source_ip) >= :mips
-            ORDER BY attempts DESC
-            LIMIT 20
-        """), {"since": h24_ago, "att": sn_attempts, "mips": sn_min_ips})
-        suspicious_subnets = sn_q.fetchall()
-
-        for prefix24, attempts, distinct_ips, ips, country, users in suspicious_subnets:
-            # We still run the candidate filter to track which observed IPs
-            # to skip in the per-IP path, but the block itself covers the
-            # whole /24 — the whitelist is re-checked at execute time.
-            observed_candidates = await _filter_candidates(
-                db, list(ips or []), "failed_login", block_cooldown, noaction_cooldown
-            )
-            # Even if all observed IPs are in cooldown, we still block the
-            # subnet on first detection. Skip only if we already decided on
-            # this subnet recently.
-            recent_subnet_decision = (await db.execute(
-                select(AgentDecision).where(
-                    AgentDecision.source_type == "failed_login",
-                    AgentDecision.action == "block_subnet",
-                    AgentDecision.action_args["target_subnet"].astext == prefix24,
-                    AgentDecision.created_at >= block_cooldown,
-                )
-            )).scalar_one_or_none()
-            if recent_subnet_decision is not None:
-                # Mark observed IPs as handled so they don't re-enter the per-IP path
-                for ip in observed_candidates:
-                    handled_by_subnet.add(ip)
-                continue
-
-            users_clean = [u for u in (users or []) if u]
-            rep_ip = (observed_candidates[0] if observed_candidates else (list(ips or []) or [None])[0])
-            await _llm_decide_rule(
-                source_type="failed_login", ip=rep_ip,
-                context={
-                    "subnet_brute_force_indicator": True,
-                    "subnet": prefix24,
-                    "subnet_attempts": int(attempts),
-                    "subnet_distinct_ips": int(distinct_ips),
-                    "subnet_ip_sample": list(ips or [])[:20],
-                    "observed_ips": observed_candidates,
-                    "users": users_clean,
-                    "country": country,
-                },
-                # Inject the CIDR so the LLM doesn't have to fabricate it —
-                # we know it for certain from the SQL aggregation.
-                extra_args={"target_subnet": prefix24},
-            )
-            for ip in observed_candidates:
-                handled_by_subnet.add(ip)
-
-    if suspicious_subnets:
-        logger.info(f"agent[failed_login]: detected {len(suspicious_subnets)} suspicious subnet(s)")
+    # --- Stage 1: distributed brute-force sweep (LLM groups by /24) ------
+    handled_ips: set[str] = set()
+    if settings.agent_failed_login_distributed_enabled:
+        await _distributed_login_sweep(now, window_minutes, handled_ips)
 
     # --- Step 2: per-IP rule for the rest --------------------------------
     async with async_session() as db:
@@ -1103,7 +1444,7 @@ async def agent_failed_login_loop(window_minutes: int | None = None, force: bool
               AND {_FAILED_LOGIN_SQL_FRAG}
             LIMIT 100
         """), {"since": window_start})
-        candidate_ips = [r[0] for r in candidates_q.fetchall() if r[0] not in handled_by_subnet]
+        candidate_ips = [r[0] for r in candidates_q.fetchall() if r[0] not in handled_ips]
         candidate_ips = await _filter_candidates(db, candidate_ips, "failed_login", block_cooldown, noaction_cooldown)
         if not candidate_ips:
             return

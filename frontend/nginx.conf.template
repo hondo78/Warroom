@@ -5,6 +5,22 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # --- Security headers -----------------------------------------------------
+    # NOTE on CSP: script-src keeps 'unsafe-inline' because the dashboard still
+    # uses inline onclick handlers (see docs/REVIEW.md P3 #11). Once those are
+    # moved to addEventListener, drop 'unsafe-inline' from script-src for a
+    # strict policy. style-src needs 'unsafe-inline' for Bootstrap/AdminLTE.
+    # External origins: jsDelivr + unpkg (JS/CSS/fonts), Carto + unpkg (map
+    # tiles / Leaflet marker images).
+    #
+    # nginx does NOT inherit add_header into a location that defines its own
+    # add_header, so the static-asset location below repeats this block.
+    set $warroom_csp "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: https://*.basemaps.cartocdn.com https://unpkg.com; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'";
+    add_header Content-Security-Policy $warroom_csp always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+
     location /api/ {
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;
@@ -40,6 +56,11 @@ server {
     location ~* \.(js|css|html)$ {
         add_header Cache-Control "no-cache, no-store, must-revalidate";
         add_header Pragma "no-cache";
+        # Repeated because a location-level add_header drops the server-level ones.
+        add_header Content-Security-Policy $warroom_csp always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
     }
 
     location / {

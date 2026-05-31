@@ -2,10 +2,14 @@
 
 Security-Operations-Dashboard für kleine bis mittlere Sophos-Umgebungen.
 Bündelt Daten aus **Sophos Central** (Alerts, Events, Endpoints, Firewalls),
-**Sophos Firewall (SFOS) Syslog** (IPS, WAF, Auth, Traffic) sowie **NetFlow v9**
-und reichert IPs per **GeoIP + AbuseIPDB / VirusTotal / Shodan / Sophos Intelix**
-an. Geblockte IPs werden als **IOC-Feed** (TXT) bereitgestellt, den Firewalls
-über eine URL abrufen können.
+**Sophos Firewall (SFOS) Syslog** (IPS, WAF, Auth, Traffic) sowie **NetFlow
+v5/v9/IPFIX** und reichert IPs per **GeoIP + AbuseIPDB / VirusTotal / Shodan /
+Sophos Intelix / GreyNoise** an. Geblockte IPs, Domains und URLs werden als
+**IOC-Feeds** (TXT) bereitgestellt, die Firewalls per URL abrufen.
+
+> **In einem Satz:** Logs reinschütten, Angreifer auf einer Karte sehen,
+> mit einem Klick (oder per KI-Agent) blocken – und die Firewall zieht die
+> Blockliste selbst.
 
 ```
 ┌──────────────────┐  Syslog 5514     ┌──────────┐
@@ -34,191 +38,302 @@ an. Geblockte IPs werden als **IOC-Feed** (TXT) bereitgestellt, den Firewalls
                                             └─────────┘    Blocklist
 ```
 
-## Features
+---
 
-- **Dashboard**: Alerts/Events/Detections aus Sophos Central, Live-Karte mit
-  Angreifer-Geolokation, Firewall-Logs (IPS / WAF / Auth / Failed-Logins)
-- **NetFlow-Auswertung** (v5/v9/IPFIX) inkl. Top-Talkers und
-  Interface-Throughput
-- **IP-, Domain- und URL-Blocking via IOC-Feeds**: Geblockte IPs unter
-  `GET /ioc_IP`, Domains unter `GET /ioc_domain`, vollständige URLs unter
-  `GET /ioc_url` — jeweils als TXT-Datei. Firewalls ziehen die Listen selbst —
-  **kein Push, keine XML-API mehr**
-- **OSINT-Anreicherung**: AbuseIPDB, VirusTotal, Shodan, Sophos Intelix,
-  GreyNoise, ipinfo
-- **Endpoint-Management**: Health-States, Isolation-Toggle über Sophos Central
-- **Admin-UI**: API-Keys, Intervalle, Log-Level live editierbar (kein Restart)
+## Inhalt
 
-## Stack
+> 📖 Ausführliche **Projektbeschreibung, Architektur & Nutzung**: [`docs/PROJEKTBESCHREIBUNG.md`](docs/PROJEKTBESCHREIBUNG.md)
 
-| Component | Tech |
-|-----------|------|
-| Backend   | FastAPI 0.115, SQLAlchemy 2 async, APScheduler |
-| Database  | PostgreSQL 16 |
-| Cache     | Redis 7 |
-| Frontend  | Vanilla JS + Nginx (CSP-light, kein Build-Step) |
-| Syslog    | Custom Python receiver (UDP/TCP 5514) |
-| NetFlow   | Custom Python collector (UDP 2055) |
-| GeoIP     | MaxMind GeoLite2 (Fallback: ip-api.com) |
+- [Was kann Warroom? (User-Sicht)](#was-kann-warroom-user-sicht)
+- [Voraussetzungen](#voraussetzungen)
+- [Setup in 6 Schritten](#setup-in-6-schritten)
+- [Was muss ich besorgen? (Checkliste)](#was-muss-ich-besorgen-checkliste)
+- [Datenquellen anbinden](#datenquellen-anbinden)
+- [IOC-Feeds für Firewalls](#ioc-feeds-für-firewalls)
+- [Block-API (Web-UI)](#block-api-web-ui)
+- [KI-Agent (optional)](#ki-agent-optional)
+- [Sicherheit & Härtung](#sicherheit--härtung)
+- [Stack & Services](#stack--services)
+- [Troubleshooting](#troubleshooting)
 
-## Quickstart
+---
+
+## Was kann Warroom? (User-Sicht)
+
+Nach dem Login (Dashboard unter `http://<host>:8448`) stehen folgende Seiten
+zur Verfügung:
+
+| Seite | URL | Das kannst du dort tun |
+|-------|-----|------------------------|
+| **Dashboard** | `/` | Alerts, Events & Detections aus Sophos Central; Live-Karte mit Angreifer-Geolokation; Firewall-Logs (IPS / WAF / Auth / Failed-Logins); KI-Agent-Empfehlungen; Endpoint-Übersicht. IPs direkt per Klick blocken, Alerts quittieren, Endpoints isolieren. |
+| **Blocklist** | `/blocked.html` | IPs, Domains und URLs manuell blocken/entblocken; Whitelist pflegen; die fertigen IOC-Feeds einsehen. |
+| **NetFlow** | `/netflow.html` | Traffic-Analyse: Top-Talker, Ziele, Ports, Protokoll-Mix, Interface-Durchsatz. |
+| **Firewalls** | `/firewalls.html` | Firewall-Standorte auf der Karte, Interface-Statistiken, Whitelist-Verwaltung. |
+| **Agent** | `/agent.html` | Entscheidungs-Log des KI-Agenten; Empfehlungen genehmigen/ablehnen; LLM-Statistik. Erkennt u. a. **verteilte Brute-Force-Angriffe** (viele Quell-IPs über mehrere /24-Netze gegen dasselbe Konto → `block_ips`) und nimmt **Triage-Eingaben** entgegen. |
+| **Email** | `/email.html` | Sophos Email Management API: Mailboxen verwalten (anlegen/ändern/löschen), Quarantäne & Post-Delivery-Quarantäne durchsuchen, Nachrichten freigeben/löschen (optional Absender erlauben/blocken). |
+| **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo & DNS parallel; Verlauf & Cache-Bypass. Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. |
+| **Stats** | `/stats.html` | Verbrauch der OSINT-Provider (Tages-/Monatslimits), LLM-Calls & Tokens, Cache-Trefferquote. |
+| **Admin** | `/admin.html` | Alle API-Keys, Intervalle, Loglevel und Agent-Einstellungen **live** editieren – ohne Container-Neustart. |
+| **Grafana** | `:3030` | Vorgefertigte Dashboards (Warroom, NetFlow, Blocklist) direkt auf der PostgreSQL-DB. |
+
+---
+
+## Voraussetzungen
+
+Auf dem Host brauchst du nur:
+
+- **Docker** und **Docker Compose v2** (`docker compose version` ≥ 2.x)
+- **Git**
+- Freie Ports auf dem Host: **8448** (Dashboard), **3030** (Grafana),
+  **5514/udp+tcp** (Syslog), **2055/udp** (NetFlow)
+- Optional, aber empfohlen: ein zweites Gerät, das Syslog/NetFlow sendet
+  (Sophos Firewall o. Ä.)
+
+Es gibt **keinen Build-Step** für das Frontend (Vanilla JS) und keine lokale
+Python-Installation nötig – alles läuft in Containern.
+
+---
+
+## Setup in 6 Schritten
 
 ```bash
+# 1) Klonen
 git clone https://github.com/hondo78/Warroom.git
 cd Warroom
 
+# 2) Konfiguration anlegen
 cp .env.example .env
-# WARROOM_API_KEY setzen (openssl rand -hex 32), Sophos-Credentials eintragen
 
-# GeoIP-Datenbanken nach ./geoip/ legen (GeoLite2-City.mmdb, GeoLite2-ASN.mmdb)
-# Optional - ohne läuft Warroom mit ip-api.com Fallback
+# 3) .env ausfüllen – mindestens:
+#    - POSTGRES_PASSWORD + DATABASE_URL (gleiches Passwort!)
+#    - WARROOM_API_KEY   (openssl rand -hex 32)   [dringend empfohlen]
+#    - GRAFANA_ADMIN_PASSWORD
+#    - SOPHOS_CLIENT_ID / SOPHOS_CLIENT_SECRET     [für Sophos-Central-Daten]
+$EDITOR .env
 
+# 4) (Optional) GeoIP-Datenbanken bereitstellen – siehe Checkliste unten.
+#    Ohne läuft Warroom mit ip-api.com-Fallback.
+#    GeoLite2-City.mmdb und GeoLite2-ASN.mmdb nach ./geoip/ legen.
+
+# 5) Starten
 docker compose up -d
+
+# 6) Status prüfen
+docker compose ps
+docker compose logs -f backend
 ```
 
-Dashboard: <http://localhost:8448>
-Admin: <http://localhost:8448/admin.html>
+Danach erreichbar:
+
+- **Dashboard:** <http://localhost:8448>
+- **Admin-UI:** <http://localhost:8448/admin.html>
+- **Grafana:** <http://localhost:3030> (Login mit `GRAFANA_ADMIN_*`)
+
+Den Rest der Konfiguration (OSINT-Keys, Agent, Intervalle) kannst du bequem
+in der **Admin-UI** nachtragen – ein Neustart ist nicht nötig.
+
+---
+
+## Was muss ich besorgen? (Checkliste)
+
+| # | Was | Pflicht? | Woher | Wohin |
+|---|-----|----------|-------|-------|
+| 1 | **DB-Passwort** | ✅ | selbst ausdenken | `POSTGRES_PASSWORD` **und** `DATABASE_URL` in `.env` |
+| 2 | **WARROOM_API_KEY** | ⭐ dringend empfohlen | `openssl rand -hex 32` | `WARROOM_API_KEY` in `.env` |
+| 3 | **Grafana-Passwort** | ⭐ empfohlen | selbst ausdenken | `GRAFANA_ADMIN_PASSWORD` in `.env` |
+| 4 | **Sophos-Central-Credentials** | für Central-Daten | Sophos Central → Global Settings → API Credentials Management → *Add Credential* | `SOPHOS_CLIENT_ID` / `SOPHOS_CLIENT_SECRET` |
+| 5 | **GeoLite2-City.mmdb + GeoLite2-ASN.mmdb** | optional | [MaxMind GeoLite2](https://www.maxmind.com/en/geolite2/signup) (kostenlos) | Dateien in `./geoip/` |
+| 6 | **AbuseIPDB-Key** | optional | <https://www.abuseipdb.com> | `ABUSEIPDB_API_KEY` |
+| 7 | **VirusTotal-Key** | optional | <https://www.virustotal.com> | `VIRUSTOTAL_API_KEY` |
+| 8 | **Shodan-Key** | optional | <https://account.shodan.io> | `SHODAN_API_KEY` |
+| 9 | **Sophos-Intelix-Credentials** | optional | <https://api.labs.sophos.com> | `SOPHOS_INTELIX_CLIENT_ID/SECRET` |
+| 10 | **LLM-Endpoint** (für KI-Agent) | optional | LMStudio / Ollama / vLLM / OpenAI | `AGENT_*` in `.env` |
+
+> **Hinweis GeoIP:** `geoip/*.mmdb`, `*.tar.gz` und `*.zip` sind in
+> `.gitignore` ausgeschlossen (die Dateien sind groß und unterliegen der
+> MaxMind-Lizenz). Lade sie nach der Registrierung herunter und entpacke
+> `GeoLite2-City.mmdb` sowie `GeoLite2-ASN.mmdb` direkt nach `./geoip/`.
+> Backend und Syslog-Service mounten dieses Verzeichnis automatisch.
+
+---
+
+## Datenquellen anbinden
+
+### Sophos Firewall Syslog
+
+*System → Administration → Notification settings → Syslog Server:*
+
+- **Host:** IP des Warroom-Hosts
+- **Port:** 5514 (UDP oder TCP)
+- **Format:** Standard / Device-Syslog
+- Aktivierte Kategorien: **Firewall** (Traffic), **IPS**, **WAF**,
+  **Authentication**, **Admin**, **System**
+
+### NetFlow
+
+NetFlow-Export (v5/v9/IPFIX) der Firewall/des Routers auf
+**`<warroom-host>:2055/udp`** richten. Buckets werden minütlich aggregiert,
+Retention standardmäßig 30 Tage (`RETENTION_DAYS` im `netflow`-Service).
+
+### Sophos Central
+
+Sobald `SOPHOS_CLIENT_ID`/`SECRET` gesetzt sind, ruft der `collector` alle
+`COLLECTOR_INTERVAL` Sekunden (Default 300) Alerts, Events, Endpoints und
+Firewall-Status ab.
+
+---
 
 ## IOC-Feeds für Firewalls
 
-Pflege beider Listen erfolgt unter <http://localhost:8448/blocked.html>.
+Gepflegt werden die Listen unter <http://localhost:8448/blocked.html>. Jede
+Block-/Unblock-Aktion ist **sofort** im Feed sichtbar (live aus der DB, kein
+Push, kein Reconcile, kein Cache).
 
-**IP-Feed**
+| Feed | Endpoint | Format |
+|------|----------|--------|
+| IPs | `GET /ioc_IP` | eine IPv4/IPv6 pro Zeile, sortiert |
+| Domains | `GET /ioc_domain` | Hostnamen, Wildcards `*.evil.tld` erlaubt |
+| URLs | `GET /ioc_url` | vollständige URLs inkl. `http(s)://` und Pfad |
+
+Alle Feeds erwarten den Header `X-API-Key: <WARROOM_API_KEY>` (außer im Open
+Mode).
 
 ```
 GET https://<warroom-host>:8448/ioc_IP
 Header: X-API-Key: <WARROOM_API_KEY>
 ```
 
-**Format**: `text/plain`, eine IPv4/IPv6 pro Zeile, sortiert.
-
-```
-103.235.46.39
-104.167.19.182
-185.220.101.42
-...
-```
-
-**Domain-Feed** (nur Hostnamen, Wildcards `*.evil.tld` erlaubt)
-
-```
-GET https://<warroom-host>:8448/ioc_domain
-Header: X-API-Key: <WARROOM_API_KEY>
-```
-
-```
-*.adsrv.example
-evil.example.com
-phishing.invalid
-...
-```
-
-**URL-Feed** (vollständige URLs inkl. `http(s)://` und Pfad)
-
-```
-GET https://<warroom-host>:8448/ioc_url
-Header: X-API-Key: <WARROOM_API_KEY>
-```
-
-```
-http://example.invalid/malware.exe
-https://phish.example/login?id=1
-https://evil.example.com/c2
-...
-```
-
-Alle drei Listen werden live aus der DB gelesen — jedes Block/Unblock auf
-der Blocklist-Seite ist **sofort** im Feed sichtbar (kein Push, kein
-Reconcile, keine Caches).
-
 ### Firewall-Anbindung
 
-**Sophos XG / XGS Firewall**
-*Hosts and Services → IP List → Add* → URL eintragen, "Custom HTTP Headers"
-nutzen für `X-API-Key`. Update-Intervall nach Bedarf (z.B. 5 Min).
+**Sophos XG / XGS** — *Hosts and Services → IP List → Add* → URL eintragen,
+„Custom HTTP Headers" für `X-API-Key` nutzen, Update-Intervall z. B. 5 Min.
 
-**Fortinet FortiGate**
-*Security Fabric → External Connectors → Threat Feeds → IP Address* →
-URL eintragen, HTTP-Header `X-API-Key` setzen.
+**Fortinet FortiGate** — *Security Fabric → External Connectors → Threat Feeds
+→ IP Address* → URL eintragen, HTTP-Header `X-API-Key` setzen.
 
-**pfSense / OPNsense (pfBlockerNG)**
-URL als IPv4-Feed-Source hinzufügen. pfBlockerNG sendet keine Custom-Header —
-in diesem Fall den Backend-Endpoint hinter einen Proxy mit IP-Whitelist legen
-oder Open-Mode (WARROOM_API_KEY leer) nur für die Firewall-IP per
-Nginx-Config zulassen.
+**pfSense / OPNsense (pfBlockerNG)** — URL als IPv4-Feed-Source hinzufügen.
+pfBlockerNG sendet keine Custom-Header → entweder den Endpoint hinter einen
+Proxy mit IP-Whitelist legen oder Open Mode (`WARROOM_API_KEY` leer) nur für
+die Firewall-IP per nginx-Config erlauben.
+
+---
 
 ## Block-API (Web-UI)
 
 Die Block-Buttons im Dashboard und die Blocklist-Seite rufen folgende
 Endpoints auf:
 
-| Methode | Route                            | Body                                          |
-|---------|----------------------------------|-----------------------------------------------|
-| POST    | `/api/firewall/block-ip`         | `{"ip": "1.2.3.4", "comment": "..."}`         |
-| POST    | `/api/firewall/block-ips`        | `{"ips": ["1.2.3.4", ...]}`                   |
-| POST    | `/api/firewall/unblock-ip`       | `{"ip": "1.2.3.4"}`                           |
-| GET     | `/api/firewall/blocked-ips`      | -                                             |
-| POST    | `/api/firewall/block-domain`     | `{"domain": "evil.tld", "comment": "..."}`    |
-| POST    | `/api/firewall/block-domains`    | `{"domains": ["evil.tld", "*.adsrv.tld"]}`    |
-| POST    | `/api/firewall/unblock-domain`   | `{"domain": "evil.tld"}`                      |
-| GET     | `/api/firewall/blocked-domains`  | -                                             |
-| POST    | `/api/firewall/block-url`        | `{"url": "https://evil.tld/x", "comment":""}` |
-| POST    | `/api/firewall/block-urls`       | `{"urls": ["https://a/b", "http://c/d"]}`     |
-| POST    | `/api/firewall/unblock-url`      | `{"url": "https://evil.tld/x"}`               |
-| GET     | `/api/firewall/blocked-urls`     | -                                             |
+| Methode | Route | Body |
+|---------|-------|------|
+| POST | `/api/firewall/block-ip` | `{"ip": "1.2.3.4", "comment": "..."}` |
+| POST | `/api/firewall/block-ips` | `{"ips": ["1.2.3.4", ...]}` |
+| POST | `/api/firewall/unblock-ip` | `{"ip": "1.2.3.4"}` |
+| GET | `/api/firewall/blocked-ips` | – |
+| POST | `/api/firewall/block-domain` | `{"domain": "evil.tld", "comment": "..."}` |
+| POST | `/api/firewall/block-domains` | `{"domains": ["evil.tld", "*.adsrv.tld"]}` |
+| POST | `/api/firewall/unblock-domain` | `{"domain": "evil.tld"}` |
+| GET | `/api/firewall/blocked-domains` | – |
+| POST | `/api/firewall/block-url` | `{"url": "https://evil.tld/x", "comment":""}` |
+| POST | `/api/firewall/block-urls` | `{"urls": ["https://a/b", "http://c/d"]}` |
+| POST | `/api/firewall/unblock-url` | `{"url": "https://evil.tld/x"}` |
+| GET | `/api/firewall/blocked-urls` | – |
 
-IPs landen in `blocked_ips`, Hostnamen in `blocked_domains`, vollständige
-URLs in `blocked_urls`. Die Feeds `/ioc_IP`, `/ioc_domain` und `/ioc_url`
-lesen diese Tabellen live → keine Sync-Logik.
+IPs landen in `blocked_ips`, Hostnamen in `blocked_domains`, URLs in
+`blocked_urls`. Die Feeds lesen diese Tabellen live → keine Sync-Logik.
 
-## Konfiguration
+---
 
-Alle Einstellungen können nach dem ersten Start über die **Admin-UI**
-(`/admin.html`) editiert werden. Änderungen werden in der DB überlagert,
-ein Container-Restart ist nicht nötig.
+## KI-Agent (optional)
 
-Initiale Werte aus `.env` (siehe `.env.example`):
+Der Agent analysiert Firewall-Logs (WAF/IPS/Failed-Login) per LLM und schlägt
+Blocks vor – oder führt sie automatisch aus. Standardmäßig **aus**.
 
-| Variable                   | Zweck                                          |
-|----------------------------|------------------------------------------------|
-| `WARROOM_API_KEY`          | Pflicht für Production. Schützt `/api/*` und `/ioc_IP` |
-| `SOPHOS_CLIENT_ID/SECRET`  | Sophos Central OAuth2 Credentials              |
-| `MAXMIND_LICENSE_KEY`      | Optional, sonst ip-api.com als Fallback        |
-| `ABUSEIPDB_API_KEY`        | Optional, für IP-Reputation-Lookups            |
-| `COLLECTOR_INTERVAL`       | Wie oft Sophos-Central abgefragt wird (s)      |
+1. LLM-Endpoint bereitstellen (LMStudio/Ollama/vLLM lokal oder OpenAI).
+   `host.docker.internal` zeigt aus dem Container auf den Docker-Host.
+2. In der Admin-UI oder `.env`: `AGENT_ENABLED=true`, `AGENT_BASE_URL`,
+   `AGENT_MODEL` setzen.
+3. Standardmäßig bleiben Empfehlungen **pending** und müssen unter
+   `/agent.html` genehmigt werden. `AGENT_AUTO_EXECUTE=true` oder die
+   Konfidenz-Fast-Lane (`AGENT_AUTO_EXECUTE_THRESHOLD`) führen sie automatisch
+   aus.
 
-## Services
+> Die mitgelieferten System-Prompts sind auf **Deutsch**. Wenn du ein
+> englischsprachiges Modell nutzt, passe die Prompts in der Admin-UI an.
 
-| Container         | Port (host)      | Beschreibung                            |
-|-------------------|------------------|-----------------------------------------|
-| `frontend`        | `8448`           | Nginx, Static-Files + Reverse-Proxy     |
-| `backend`         | (intern: 8000)   | FastAPI, REST + IOC-Feed                |
-| `syslog`          | `5514/udp+tcp`   | Sophos Firewall Syslog-Empfänger        |
-| `netflow`         | `2055/udp`       | NetFlow v5/v9/IPFIX Collector           |
-| `postgres`        | (intern: 5432)   | Daten-Persistenz                        |
-| `redis`           | (intern: 6379)   | Cache (Summary, OSINT-Lookups)          |
+---
 
-## Sophos Firewall Syslog konfigurieren
+## Sicherheit & Härtung
 
-System → Administration → Notification settings → Syslog Server:
+Warroom ist als **internes Tool hinter VPN/Firewall** gedacht. Vor einem
+Einsatz mit echten Daten unbedingt beachten:
 
-- Host: IP des Warroom-Hosts
-- Port: 5514 (UDP oder TCP)
-- Facility: nach Wahl
-- Severity: alle benötigten
-- Format: Standard / Device-Syslog
+- **`WARROOM_API_KEY` setzen.** Ohne läuft das Backend im *Open Mode* – jeder
+  mit Netzwerkzugriff kann das Dashboard bedienen, IPs blocken/entblocken und
+  Endpoints isolieren. Es gibt **kein Benutzer-Login**; der API-Key ist die
+  einzige Zugangskontrolle.
+- **`.env` enthält Klartext-Secrets** (DB-Passwort, Sophos-Secret, API-Keys).
+  Die Datei ist in `.gitignore` und darf **nie** committet werden. Auch in der
+  DB (`app_settings`) werden Secrets unverschlüsselt abgelegt → DB-Zugriff
+  schützen.
+- **Grafana** ist mit `admin/admin` vorbelegt und erlaubt **anonymen
+  Viewer-Zugriff** (alle Logs/Karten ohne Login sichtbar). Passwort ändern und
+  ggf. `GF_AUTH_ANONYMOUS_ENABLED=false` setzen, falls nicht erwünscht.
+- **Kein HTTPS out-of-the-box** – nginx lauscht auf Port 80 (gemappt auf 8448).
+  Für Produktion einen TLS-Reverse-Proxy davorsetzen.
+- **Exponierte Ports** (5514, 2055, 3030, 8448) nur im vertrauenswürdigen Netz
+  freigeben.
 
-Aktivierte Log-Kategorien: **Firewall** (Traffic), **IPS**, **WAF**,
-**Authentication**, **Admin**, **System**.
+Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
+[`docs/REVIEW.md`](docs/REVIEW.md).
 
-## Datenfluss
+---
 
-1. **Sophos Central API** → `collector.py` (alle 300s default) → DB
+## Stack & Services
+
+| Komponente | Tech |
+|------------|------|
+| Backend | FastAPI 0.115, SQLAlchemy 2 async, APScheduler |
+| Database | PostgreSQL 16 |
+| Cache | Redis 7 |
+| Frontend | Vanilla JS + Nginx (kein Build-Step) |
+| Syslog | Custom Python Receiver (UDP/TCP 5514) |
+| NetFlow | Custom Python Collector (UDP 2055) |
+| GeoIP | MaxMind GeoLite2 (Fallback: ip-api.com) |
+| Dashboards | Grafana 11 |
+
+| Container | Port (Host) | Beschreibung |
+|-----------|-------------|--------------|
+| `frontend` | `8448` | Nginx, Static-Files + Reverse-Proxy |
+| `backend` | (intern 8000) | FastAPI, REST + IOC-Feeds |
+| `syslog` | `5514/udp+tcp` | Sophos-Firewall-Syslog-Empfänger |
+| `netflow` | `2055/udp` | NetFlow v5/v9/IPFIX Collector |
+| `postgres` | (intern 5432) | Daten-Persistenz |
+| `redis` | (intern 6379) | Cache (Summary, OSINT-Lookups) |
+| `grafana` | `3030` | Dashboards |
+
+### Datenfluss
+
+1. **Sophos Central API** → `collector.py` (alle 300 s default) → DB
 2. **Sophos Firewall Syslog** → `syslog`-Service → DB (`firewall_logs`)
 3. **NetFlow** → `netflow`-Service → DB (`netflow_buckets`)
 4. **Dashboard** → Backend liest aus DB → Frontend rendert
-5. **Block-Aktion (UI)** → `blocked_ips`-Tabelle wird beschrieben
-6. **Firewall pulls** `/ioc_IP` → Backend liest `blocked_ips` live
+5. **Block-Aktion (UI/Agent)** → `blocked_ips` / `_domains` / `_urls`
+6. **Firewall pullt** `/ioc_*` → Backend liest die Tabellen live
+
+---
+
+## Troubleshooting
+
+| Symptom | Ursache / Lösung |
+|---------|------------------|
+| Dashboard leer, keine Alerts | Sophos-Credentials fehlen/falsch → `docker compose logs backend`. Ohne Sophos bleiben nur Syslog/NetFlow/Blocklist befüllt. |
+| `401 invalid or missing X-API-Key` beim Feed-Abruf | Firewall sendet den `X-API-Key`-Header nicht oder falsch. |
+| Karte zeigt keine Standorte | GeoIP-DB fehlt und ip-api.com ist rate-limitiert → mmdb-Dateien nach `./geoip/` legen. |
+| Syslog/NetFlow kommt nicht an | Ports 5514/2055 auf dem Host freigegeben? Firewall sendet an die richtige IP? |
+| Postgres startet nicht | `POSTGRES_PASSWORD` ≠ Passwort in `DATABASE_URL`. Müssen identisch sein. |
+| Änderung in `.env` greift nicht | `.env`-Werte sind nur Startwerte. Laufende Änderungen über `/admin.html` oder `docker compose up -d` neu anwenden. |
+
+---
 
 ## Lizenz
 

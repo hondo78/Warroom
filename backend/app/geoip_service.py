@@ -28,6 +28,14 @@ async def get_redis() -> redis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """Close the shared Redis client on shutdown so the pool drains cleanly."""
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
+
+
 def _get_city_reader():
     global _city_reader
     if _city_reader is None and GEOIP_CITY_PATH.exists():
