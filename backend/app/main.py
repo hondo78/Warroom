@@ -3148,6 +3148,7 @@ class AdminSettingsIn(BaseModel):
     agent_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     agent_temperature: float | None = Field(default=None, ge=0, le=2)
     agent_max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    agent_structured_output: bool | None = None
     agent_auto_execute: bool | None = None
     agent_auto_execute_threshold: int | None = Field(default=None, ge=0, le=101)
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
@@ -3531,6 +3532,123 @@ async def agent_triage(body: TriageIn):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"triage failed: {e}")
     return {"ok": True, "type": vtype, "value": value, **result}
+
+
+@app.get("/api/agent/workflow")
+async def get_agent_workflow():
+    """Structured description of the LLM-agent workflow for the workflow admin
+    page: the decision pipeline plus each stage's editable config (enable,
+    thresholds, interval, allowed actions, prompt status). Writes go through the
+    normal PUT /api/admin/settings; prompts via /api/admin/agent/default-prompt."""
+
+    def _set(v):  # is this prompt overridden (custom) vs. using the default?
+        return bool((getattr(settings, v, "") or "").strip())
+
+    glob = {
+        "enabled": settings.agent_enabled,
+        "model": settings.agent_model or "local-model",
+        "base_url": settings.agent_base_url,
+        "provider": settings.agent_provider,
+        "structured_output": settings.agent_structured_output,
+        "temperature": settings.agent_temperature,
+        "max_tokens": settings.agent_max_tokens,
+        "auto_execute": settings.agent_auto_execute,
+        "auto_execute_threshold": settings.agent_auto_execute_threshold,
+        "interval_seconds": settings.agent_interval_seconds,
+    }
+
+    pipeline = [
+        {"step": "Kandidaten", "detail": "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)"},
+        {"step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo)"},
+        {"step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
+        {"step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
+        {"step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},
+        {"step": "Ausführung", "detail": "Auto-Execute (Master-Switch oder Konfidenz ≥ Schwelle) — sonst pending zur Freigabe"},
+    ]
+
+    stages = [
+        {
+            "key": "alert", "label": "Sophos Alerts",
+            "trigger": "Neue Alarme aus Sophos Central (letzte 24 h)",
+            "enabled_key": "agent_enabled",
+            "enabled": settings.agent_enabled,
+            "prompt_source": "alert", "prompt_key": "agent_system_prompt",
+            "prompt_overridden": _set("agent_system_prompt"),
+            "allowed_actions": ["block_ip", "acknowledge", "isolate", "no_action"],
+            "settings": [
+                {"key": "agent_interval_seconds", "label": "Intervall (s)", "value": settings.agent_interval_seconds, "type": "int", "min": 30, "max": 86400},
+            ],
+            "run_now": "/api/agent/run-now",
+        },
+        {
+            "key": "waf", "label": "WAF",
+            "trigger": "Frische 4xx/5xx-WAF-Events pro IP",
+            "enabled_key": "agent_waf_enabled",
+            "enabled": settings.agent_waf_enabled,
+            "prompt_source": "waf", "prompt_key": "agent_waf_system_prompt",
+            "prompt_overridden": _set("agent_waf_system_prompt"),
+            "allowed_actions": ["block_ip", "no_action"],
+            "settings": [
+                {"key": "agent_waf_threshold", "label": "Schwelle (24 h)", "value": settings.agent_waf_threshold, "type": "int", "min": 1, "max": 10000},
+                {"key": "agent_waf_interval_seconds", "label": "Intervall (s)", "value": settings.agent_waf_interval_seconds, "type": "int", "min": 30, "max": 86400},
+            ],
+            "run_now": "/api/agent/waf-run-now",
+        },
+        {
+            "key": "ips", "label": "IPS / IDP",
+            "trigger": "IDP/IPS-Intrusion-Events pro IP",
+            "enabled_key": "agent_ips_enabled",
+            "enabled": settings.agent_ips_enabled,
+            "prompt_source": "ips", "prompt_key": "agent_ips_system_prompt",
+            "prompt_overridden": _set("agent_ips_system_prompt"),
+            "allowed_actions": ["block_ip", "no_action"],
+            "settings": [
+                {"key": "agent_ips_threshold", "label": "Schwelle (24 h)", "value": settings.agent_ips_threshold, "type": "int", "min": 1, "max": 10000},
+                {"key": "agent_ips_interval_seconds", "label": "Intervall (s)", "value": settings.agent_ips_interval_seconds, "type": "int", "min": 30, "max": 86400},
+            ],
+            "run_now": "/api/agent/ips-run-now",
+        },
+        {
+            "key": "failed_login", "label": "Failed-Login (per IP)",
+            "trigger": "Fehlgeschlagene Logins pro Quell-IP",
+            "enabled_key": "agent_failed_login_enabled",
+            "enabled": settings.agent_failed_login_enabled,
+            "prompt_source": "failed_login", "prompt_key": "agent_failed_login_system_prompt",
+            "prompt_overridden": _set("agent_failed_login_system_prompt"),
+            "allowed_actions": ["block_ip", "no_action"],
+            "settings": [
+                {"key": "agent_failed_login_threshold", "label": "Schwelle (24 h)", "value": settings.agent_failed_login_threshold, "type": "int", "min": 1, "max": 10000},
+                {"key": "agent_failed_login_interval_seconds", "label": "Intervall (s)", "value": settings.agent_failed_login_interval_seconds, "type": "int", "min": 30, "max": 86400},
+            ],
+            "run_now": "/api/agent/failed-login-run-now",
+        },
+        {
+            "key": "failed_login_distributed", "label": "Verteilter Brute-Force",
+            "trigger": "Alle Login-Versuche des Fensters → LLM gruppiert nach /24",
+            "enabled_key": "agent_failed_login_distributed_enabled",
+            "enabled": settings.agent_failed_login_distributed_enabled,
+            "prompt_source": "failed_login_distributed", "prompt_key": "agent_failed_login_distributed_system_prompt",
+            "prompt_overridden": _set("agent_failed_login_distributed_system_prompt"),
+            "allowed_actions": ["block_subnet", "block_ips", "no_action"],
+            "settings": [
+                {"key": "agent_failed_login_distributed_window_minutes", "label": "Fenster (min)", "value": settings.agent_failed_login_distributed_window_minutes, "type": "int", "min": 5, "max": 10080},
+                {"key": "agent_failed_login_distributed_attempts", "label": "Versuche/​/24 (Richtwert)", "value": settings.agent_failed_login_distributed_attempts, "type": "int", "min": 1, "max": 100000},
+                {"key": "agent_failed_login_distributed_min_ips", "label": "Distinct-IPs/​/24", "value": settings.agent_failed_login_distributed_min_ips, "type": "int", "min": 2, "max": 10000},
+            ],
+            "run_now": "/api/agent/failed-login-run-now",
+        },
+        {
+            "key": "triage", "label": "Triage (OSINT-Übergabe)",
+            "trigger": "Manuelle Übergabe eines Werts von der OSINT-Seite",
+            "enabled_key": None, "enabled": True,
+            "prompt_source": "triage", "prompt_key": "agent_triage_system_prompt",
+            "prompt_overridden": _set("agent_triage_system_prompt"),
+            "allowed_actions": ["block_ip", "block_domain", "block_url", "no_action"],
+            "settings": [],
+            "run_now": None,
+        },
+    ]
+    return {"global": glob, "pipeline": pipeline, "stages": stages}
 
 
 @app.post("/api/agent/run-now")

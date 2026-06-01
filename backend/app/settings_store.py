@@ -46,6 +46,7 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_interval_seconds": int,
     "agent_temperature": float,
     "agent_max_tokens": int,
+    "agent_structured_output": bool,
     "agent_auto_execute": bool,
     "agent_auto_execute_threshold": int,
     "agent_system_prompt": str,

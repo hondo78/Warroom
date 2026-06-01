@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # think block, so keep this generous (≈3000).
     agent_temperature: float = 0.2
     agent_max_tokens: int = 3000
+    # Use OpenAI-style structured outputs (response_format json_schema). The
+    # decision schema is derived from the Pydantic LLMDecision model. Disable
+    # for servers/models that don't support response_format (then the tolerant
+    # parser handles plain JSON / reasoning output).
+    agent_structured_output: bool = True
     # If true, "block_ip" / "acknowledge" recommendations execute automatically
     # at any confidence; otherwise they stay pending. The threshold below acts
     # as an independent fast-lane: any decision whose confidence (in %) is

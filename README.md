@@ -70,6 +70,7 @@ zur Verfügung:
 | **NetFlow** | `/netflow.html` | Traffic-Analyse: Top-Talker, Ziele, Ports, Protokoll-Mix, Interface-Durchsatz. |
 | **Firewalls** | `/firewalls.html` | Firewall-Standorte auf der Karte, Interface-Statistiken, Whitelist-Verwaltung. |
 | **Agent** | `/agent.html` | Entscheidungs-Log des KI-Agenten; Empfehlungen genehmigen/ablehnen; LLM-Statistik. Erkennt u. a. **verteilte Brute-Force-Angriffe** (viele Quell-IPs über mehrere /24-Netze gegen dasselbe Konto → `block_ips`) und nimmt **Triage-Eingaben** entgegen. |
+| **Agent-Workflow** | `/agent-workflow.html` | Visualisiert die Entscheidungs-Pipeline und macht **jede Stufe** (Trigger, Schwellen, Intervall, erlaubte Aktionen, System-Prompt, Auto-Execute) live editierbar. Das LLM wird mit **strukturierten Ausgaben** (Pydantic-Schema via `response_format`) angesprochen und typisiert validiert. |
 | **Email** | `/email.html` | Sophos Email Management API: Mailboxen verwalten (anlegen/ändern/löschen), Quarantäne & Post-Delivery-Quarantäne durchsuchen, Nachrichten freigeben/löschen (optional Absender erlauben/blocken). |
 | **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo & DNS parallel; Verlauf & Cache-Bypass. Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. |
 | **Stats** | `/stats.html` | Verbrauch der OSINT-Provider (Tages-/Monatslimits), LLM-Calls & Tokens, Cache-Trefferquote. |

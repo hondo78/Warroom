@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, text
 
 from app.config import settings
@@ -60,6 +61,80 @@ _SOURCE_LABELS: dict[str, str] = {
 
 def _source_label(source_type: str | None) -> str:
     return _SOURCE_LABELS.get((source_type or "").lower(), source_type or "?")
+
+
+# --- Pydantic: typed contract for every LLM decision -----------------------
+# A single model is the source of truth both for VALIDATING the model's reply
+# and for the JSON schema we hand it via response_format (structured outputs).
+
+
+class LLMDecision(BaseModel):
+    """Validated shape of an agent decision returned by the LLM."""
+
+    action: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.0
+    reasoning: str = ""
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_confidence(cls, v: Any) -> float:
+        try:
+            return max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @field_validator("reasoning", mode="before")
+    @classmethod
+    def _coerce_reasoning(cls, v: Any) -> str:
+        return str(v or "")[:2000]
+
+    @field_validator("args", mode="before")
+    @classmethod
+    def _coerce_args(cls, v: Any) -> dict:
+        return v if isinstance(v, dict) else {}
+
+
+def _decision_response_format(allowed_actions: list[str]) -> dict[str, Any]:
+    """OpenAI-compatible ``response_format`` spec for structured outputs. The
+    ``action`` enum is narrowed to the actions this stage may emit, so the model
+    physically cannot return an out-of-scope action. ``strict`` is off because
+    ``args`` is intentionally free-form."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "agent_decision",
+            "strict": False,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": list(allowed_actions)},
+                    "args": {"type": "object"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["action", "confidence", "reasoning"],
+                "additionalProperties": True,
+            },
+        },
+    }
+
+
+def _validate_decision(content: str) -> dict[str, Any]:
+    """Turn raw model output into a validated decision dict.
+
+    With structured outputs the content is already clean JSON and validates
+    directly via Pydantic. For models that wrap JSON in prose / <think> blocks
+    or emit a draft + final object, fall back to the tolerant extractor
+    (``_parse_decision``), then re-validate through the same model."""
+    try:
+        dec = LLMDecision.model_validate_json(content or "")
+        if dec.action.strip() in ALLOWED_ACTIONS:
+            return dec.model_dump()
+    except Exception:
+        pass
+    raw = _parse_decision(content)  # tolerant; raises if truly unparseable
+    return LLMDecision.model_validate(raw).model_dump()
 
 
 def _should_auto_execute(action: str, confidence: float | None) -> tuple[bool, str]:
@@ -347,12 +422,16 @@ async def _call_llm(
     prompt: str,
     system_prompt: str | None = None,
     source: str = "alert",
+    allowed_actions: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Send a /chat/completions request and parse the decision JSON.
+    """Send a /chat/completions request and return a Pydantic-validated decision.
 
-    Telemetry: every call (success or error) is recorded into
-    ``llm_metrics`` for the /stats.html page. The recorder failure is
-    swallowed — telemetry must never break the agent pipeline.
+    Uses OpenAI-style **structured outputs** (``response_format`` with a JSON
+    schema derived from ``LLMDecision`` and the stage's ``allowed_actions``) so
+    the model returns clean, schema-constrained JSON. Servers that reject
+    ``response_format`` (400/422) transparently fall back to a plain request +
+    tolerant parsing. Every call is recorded into ``llm_metrics``; recorder
+    failures are swallowed so telemetry never breaks the pipeline.
     """
     import time
     from app import llm_metrics
@@ -368,7 +447,8 @@ async def _call_llm(
     if system_prompt is None:
         system_prompt = (settings.agent_system_prompt or "").strip() or DEFAULT_SYSTEM_PROMPT
     model_name = settings.agent_model or "local-model"
-    payload = {
+    allowed = list(allowed_actions) if allowed_actions else sorted(ALLOWED_ACTIONS)
+    payload: dict[str, Any] = {
         "model": model_name,
         # Admin-configurable sampling controls (fall back to sane defaults).
         "temperature": float(getattr(settings, "agent_temperature", 0.2) or 0.0),
@@ -378,11 +458,22 @@ async def _call_llm(
             {"role": "user", "content": prompt},
         ],
     }
+    use_structured = bool(getattr(settings, "agent_structured_output", True))
     started = time.monotonic()
     prompt_tokens = completion_tokens = 0
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(url, headers=headers, json=payload)
+            send = dict(payload)
+            if use_structured:
+                send["response_format"] = _decision_response_format(allowed)
+            r = await client.post(url, headers=headers, json=send)
+            # Some servers/models don't support response_format → retry plain.
+            if use_structured and r.status_code in (400, 422):
+                logger.info(
+                    "agent: server rejected response_format "
+                    f"(HTTP {r.status_code}); retrying without structured output"
+                )
+                r = await client.post(url, headers=headers, json=payload)
         if r.status_code != 200:
             raise RuntimeError(f"LLM HTTP {r.status_code}: {r.text[:200]}")
         data = r.json()
@@ -393,7 +484,7 @@ async def _call_llm(
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as e:
             raise RuntimeError(f"Unexpected response shape: {e}") from e
-        decision = _parse_decision(content)
+        decision = _validate_decision(content)
     except Exception:
         duration_ms = int((time.monotonic() - started) * 1000)
         try:
@@ -545,7 +636,10 @@ async def analyze_alert(alert: Alert) -> dict[str, Any] | None:
         )).scalars().all()
     prompt = _build_user_prompt(alert, already_blocked=blocked, whitelisted=whitelisted, whitelist_sample=list(wl_sample))
     try:
-        return await _call_llm(prompt, source="alert")
+        return await _call_llm(
+            prompt, source="alert",
+            allowed_actions=["block_ip", "acknowledge", "isolate", "no_action"],
+        )
     except Exception as e:
         logger.warning(f"agent: analyze_alert({alert.id}) failed: {e}")
         return None
@@ -989,6 +1083,7 @@ async def _llm_decide_rule(
             user_msg,
             system_prompt=_prompt_for(source_type),
             source=source_type,
+            allowed_actions=_allowed_actions_for_source(source_type),
         )
     except Exception as e:
         logger.warning(f"agent[{source_type}]: LLM call failed for ip={ip}: {e}")
@@ -1068,7 +1163,10 @@ async def triage_value(
         "allowed_actions": allowed,
     }
     user_msg = "Triage-Anfrage:\n" + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
-    decision = await _call_llm(user_msg, system_prompt=_prompt_for("triage"), source="triage")
+    decision = await _call_llm(
+        user_msg, system_prompt=_prompt_for("triage"), source="triage",
+        allowed_actions=allowed,
+    )
 
     # 3) Coerce to an action the value-type actually supports
     action = decision["action"] if decision["action"] in allowed else "no_action"
@@ -1346,6 +1444,7 @@ async def _distributed_login_sweep(
             user_msg,
             system_prompt=_prompt_for("failed_login_distributed"),
             source="failed_login",
+            allowed_actions=["block_subnet", "block_ips", "no_action"],
         )
     except Exception as e:
         logger.warning(f"agent[failed_login distributed]: LLM call failed: {e}")

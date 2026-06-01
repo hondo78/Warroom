@@ -12,7 +12,7 @@ const SECTIONS = {
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips'],
-    agentPrompts: ['agent_system_prompt', 'agent_waf_system_prompt', 'agent_ips_system_prompt', 'agent_failed_login_system_prompt', 'agent_failed_login_distributed_system_prompt', 'agent_triage_system_prompt'],
+    // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -179,41 +179,6 @@ async function agentRunNow() {
     } catch (err) {
         toast(`Fehler: ${err.message}`, 'error');
     }
-}
-
-const PROMPT_TEXTAREA_IDS = {
-    alert:        'agentSystemPrompt',
-    waf:          'agentWafPrompt',
-    ips:          'agentIpsPrompt',
-    failed_login: 'agentLoginPrompt',
-    failed_login_distributed: 'agentDistPrompt',
-    triage:       'agentTriagePrompt',
-};
-
-async function loadAgentDefaultPrompt(source = 'alert') {
-    const targetId = PROMPT_TEXTAREA_IDS[source];
-    if (!targetId) return;
-    try {
-        const r = await fetch(`/api/admin/agent/default-prompt?source=${encodeURIComponent(source)}`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const d = await r.json();
-        const ta = document.getElementById(targetId);
-        if (!ta) return;
-        if (ta.value && !confirm(`Den aktuellen ${source}-Prompt mit dem Default überschreiben?`)) return;
-        ta.value = d.default || '';
-        toast(`Default-Prompt (${source}) geladen — noch nicht gespeichert.`, 'info');
-    } catch (err) {
-        toast(`Fehler: ${err.message}`, 'error');
-    }
-}
-
-function clearAgentPrompt(source = 'alert') {
-    const targetId = PROMPT_TEXTAREA_IDS[source];
-    if (!targetId) return;
-    const ta = document.getElementById(targetId);
-    if (!ta) return;
-    if (ta.value && !confirm('Feld leeren? Beim Speichern wird der eingebaute Default-Prompt verwendet.')) return;
-    ta.value = '';
 }
 
 let toastTimer = null;
