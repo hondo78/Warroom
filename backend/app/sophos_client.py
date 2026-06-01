@@ -295,6 +295,115 @@ class SophosClient:
         resp.raise_for_status()
         return resp.json()
 
+    # --- Endpoint Management API (/endpoint/v1) -----------------------------
+
+    async def get_endpoint(self, endpoint_id: str) -> dict | None:
+        """Full single-endpoint record (health, services, tamper, etc.).
+        404 → caller treats as 'not found'."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "get",
+            f"{self._base_url()}/endpoint/v1/endpoints/{endpoint_id}",
+            headers=self._auth_headers(),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def scan_endpoint(self, endpoint_id: str) -> dict:
+        """Trigger an on-demand scan: POST /endpoint/v1/endpoints/{id}/scans."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "post",
+            f"{self._base_url()}/endpoint/v1/endpoints/{endpoint_id}/scans",
+            headers=self._auth_headers(), json={},
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {"ok": True}
+
+    async def delete_endpoint(self, endpoint_id: str) -> dict:
+        """De-register an endpoint from Sophos Central."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "delete",
+            f"{self._base_url()}/endpoint/v1/endpoints/{endpoint_id}",
+            headers=self._auth_headers(),
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {"ok": True}
+
+    async def get_endpoint_groups(self) -> list[dict]:
+        await self._ensure_auth()
+        return await self._paginate(
+            self._get_client(), "/endpoint/v1/endpoint-groups",
+            {"pageSize": 100}, style="page_key",
+        )
+
+    async def get_endpoint_downloads(self) -> dict | None:
+        """Available installer packages + licensed products
+        (GET /endpoint/v1/downloads). The route is occasionally flaky with a
+        transient 500 — _request retries 5xx automatically."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "get",
+            f"{self._base_url()}/endpoint/v1/downloads",
+            headers=self._auth_headers(),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    # Generic helpers for the many /endpoint/v1 sub-resources (policies,
+    # groups, settings/*). All share the same paginated-list / get / create /
+    # delete / patch shape, so the route layer just passes the path.
+
+    async def endpoint_list(self, path: str, page_size: int = 200) -> list[dict]:
+        await self._ensure_auth()
+        return await self._paginate(
+            self._get_client(), path, {"pageSize": page_size},
+            style="page_key", timeout=60,
+        )
+
+    async def endpoint_get_raw(self, path: str) -> dict | None:
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "get", f"{self._base_url()}{path}",
+            headers=self._auth_headers(),
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def endpoint_create(self, path: str, body: dict) -> dict:
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "post", f"{self._base_url()}{path}",
+            headers=self._auth_headers(), json=body,
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {"ok": True}
+
+    async def endpoint_delete_path(self, path: str) -> dict:
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "delete", f"{self._base_url()}{path}",
+            headers=self._auth_headers(),
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {"ok": True}
+
+    async def endpoint_patch(self, path: str, body: dict) -> dict:
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "patch", f"{self._base_url()}{path}",
+            headers=self._auth_headers(), json=body,
+        )
+        resp.raise_for_status()
+        return resp.json() if resp.content else {"ok": True}
+
     async def get_account_health(self) -> dict | None:
         """Sophos Central Account Health Check — returns overall security score.
 

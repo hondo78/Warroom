@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Endpoints</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        /* Click-to-sort column headers (delegated handler in endpoints.js) */
+        .tab-content thead th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .tab-content thead th::after { content: attr(data-sort-ind); margin-left: .3rem; color: var(--text-secondary, #9aa); font-size: .8em; }
+    </style>
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="endpoints">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEndpoints()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Endpoints</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/endpoints.html" class="nav-link active"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid"><h3 class="mb-0">💻 Endpoint-Verwaltung — Sophos Central</h3></div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <div class="dashboard-stat-grid mb-3">
+                    <div class="small-box bg-info"><div class="inner"><h3 id="epTotal">-</h3><p>Endpoints</p></div><div class="small-box-footer">verwaltete Geräte</div><span class="icon"><i class="bi bi-pc-display"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="epOnline">-</h3><p>Online</p></div><div class="small-box-footer">aktuell verbunden</div><span class="icon"><i class="bi bi-wifi"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="epBad">-</h3><p>Health „bad"</p></div><div class="small-box-footer">Handlungsbedarf</div><span class="icon"><i class="bi bi-exclamation-octagon"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="epIsolated">-</h3><p>Isoliert</p></div><div class="small-box-footer">vom Netz getrennt</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
+                </div>
+
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane-inv" type="button"><i class="bi bi-pc-display"></i> Inventar</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-groups" data-bs-toggle="tab" data-bs-target="#pane-groups" type="button"><i class="bi bi-collection"></i> Gruppen</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-policies" data-bs-toggle="tab" data-bs-target="#pane-policies" type="button"><i class="bi bi-file-earmark-ruled"></i> Policies</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-settings" data-bs-toggle="tab" data-bs-target="#pane-settings" type="button"><i class="bi bi-sliders"></i> Einstellungen</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-exploits" data-bs-toggle="tab" data-bs-target="#pane-exploits" type="button"><i class="bi bi-bug"></i> Exploits</button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-downloads" data-bs-toggle="tab" data-bs-target="#pane-dl" type="button"><i class="bi bi-download"></i> Downloads / Installer</button></li>
+                </ul>
+
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="pane-inv">
+                        <div class="card mb-3">
+                            <div class="card-header"><h3 class="card-title mb-0">Geräte-Inventar</h3></div>
+                            <div class="card-body">
+                                <div class="filter-row">
+                                    <input type="text" id="epSearch" class="form-control form-control-sm" placeholder="Hostname suchen — Enter">
+                                    <select id="epHealth" class="form-select form-select-sm" style="max-width:160px" onchange="loadEndpoints()">
+                                        <option value="">Alle Health</option><option value="good">good</option><option value="suspicious">suspicious</option><option value="bad">bad</option>
+                                    </select>
+                                    <select id="epIsolation" class="form-select form-select-sm" style="max-width:170px" onchange="loadEndpoints()">
+                                        <option value="">Alle Isolation</option><option value="isolated">isoliert</option><option value="notIsolated">nicht isoliert</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="loadEndpoints()"><i class="bi bi-search"></i></button>
+                                </div>
+                                <div class="table-scroll">
+                                    <table class="table table-sm table-hover align-middle">
+                                        <thead><tr>
+                                            <th>Hostname</th><th>Typ</th><th>OS</th><th>IPv4</th><th>Health</th><th>Isolation</th><th>Tamper</th><th>Zuletzt</th><th>Aktionen</th>
+                                        </tr></thead>
+                                        <tbody id="epTable"><tr><td colspan="9" class="text-center text-secondary py-4">Lade…</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="pane-groups">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <h3 class="card-title mb-0">Endpoint-Gruppen</h3>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <input id="grpName" class="form-control form-control-sm" placeholder="Neue Gruppe…" style="max-width:200px">
+                                    <select id="grpType" class="form-select form-select-sm" style="max-width:130px"><option value="computer">computer</option><option value="server">server</option></select>
+                                    <button class="btn btn-success btn-sm" onclick="createGroup()"><i class="bi bi-plus-lg"></i> Anlegen</button>
+                                </div>
+                            </div>
+                            <div class="card-body table-scroll">
+                                <table class="table table-sm table-hover align-middle"><thead><tr><th>Name</th><th>Typ</th><th>Endpoints</th><th>Erstellt</th><th>Aktionen</th></tr></thead>
+                                <tbody id="grpTable"><tr><td colspan="5" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="pane-policies">
+                        <div class="card mb-3">
+                            <div class="card-header"><h3 class="card-title mb-0">Richtlinien (Policies)</h3></div>
+                            <div class="card-body table-scroll">
+                                <table class="table table-sm table-hover align-middle"><thead><tr><th>Name</th><th>Priorität</th><th>gesperrt</th><th></th></tr></thead>
+                                <tbody id="polTable"><tr><td colspan="4" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="pane-settings">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h3 class="card-title mb-0">Tamper-Protection (global)</h3>
+                                <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="tamperToggle" onchange="setTamper(this)"></div>
+                            </div>
+                            <div class="card-body"><small class="text-secondary" id="tamperStatus">—</small></div>
+                        </div>
+                        <div id="col-allowed-items"></div>
+                        <div id="col-blocked-items"></div>
+                        <div id="col-exclusions"></div>
+                        <div id="col-local-sites"></div>
+                    </div>
+
+                    <div class="tab-pane fade" id="pane-exploits">
+                        <div class="card mb-3">
+                            <div class="card-header"><h3 class="card-title mb-0">Erkannte Exploits (Exploit-Mitigation)</h3></div>
+                            <div class="card-body">
+                                <p class="admin-hint mb-2">Erkennungen durch Exploit-Mitigation (CryptoGuard / WipeGuard / Exploit-Blocks). Quelle: <code>/endpoint/v1/settings/exploit-mitigation/detected-exploits</code>.</p>
+                                <div class="table-scroll">
+                                    <table class="table table-sm table-hover align-middle"><thead><tr><th>Beschreibung</th><th>Anzahl</th><th>Thumbprint</th><th>Zuletzt</th></tr></thead>
+                                    <tbody id="exTable"><tr><td colspan="4" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="pane-dl">
+                        <div class="card mb-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h3 class="card-title mb-0">Installer-Pakete</h3>
+                                <span id="epLicensed"></span>
+                            </div>
+                            <div class="card-body">
+                                <div id="epDownloads"><div class="text-secondary">Tab öffnen zum Laden…</div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+
+<div class="modal fade" id="epDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="epDetailTitle">Endpoint</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="epDetailBody"><div class="text-secondary">Lade…</div></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/endpoints.js"></script>
+</body>
+</html>

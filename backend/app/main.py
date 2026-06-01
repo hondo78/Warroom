@@ -834,6 +834,217 @@ async def _set_endpoint_isolation(
     return {"ok": True, "enabled": enabled, "sophos": sophos_resp}
 
 
+# --- Endpoint Management API proxy (/endpoint/v1) ---------------------------
+# NOTE: the literal GET routes (downloads, groups) MUST be declared before the
+# catch-all GET /{endpoint_id}, or FastAPI would treat "downloads" as an id.
+
+@app.get("/api/endpoints/downloads")
+async def endpoints_downloads():
+    """Available installer packages + licensed products (Endpoint API
+    /downloads). Returns {available, licensedProducts, installers}."""
+    try:
+        data = await sophos_client.get_endpoint_downloads()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    except Exception as e:
+        logger.warning(f"endpoint downloads failed: {e}")
+        return {"available": False, "error": str(e)[:200]}
+    if data is None:
+        return {"available": False}
+    return {"available": True, **data}
+
+
+@app.get("/api/endpoints/groups")
+async def endpoints_groups():
+    try:
+        groups = await sophos_client.get_endpoint_groups()
+    except Exception as e:
+        logger.warning(f"endpoint groups failed: {e}")
+        return {"available": False, "items": [], "error": str(e)[:200]}
+    return {"available": True, "items": groups, "count": len(groups)}
+
+
+# Endpoint settings collections that share the list/create/delete shape.
+_EP_COLLECTIONS = {
+    "allowed-items": "/endpoint/v1/settings/allowed-items",
+    "blocked-items": "/endpoint/v1/settings/blocked-items",
+    "exclusions":    "/endpoint/v1/settings/exclusions/scanning",
+    "local-sites":   "/endpoint/v1/settings/web-control/local-sites",
+}
+
+
+async def _ep_list_envelope(coro_factory, label: str) -> dict:
+    try:
+        items = await coro_factory()
+    except httpx.HTTPStatusError as e:
+        return {"available": False, "items": [], "error": f"HTTP {e.response.status_code}"}
+    except Exception as e:
+        logger.warning(f"endpoint {label} failed: {e}")
+        return {"available": False, "items": [], "error": str(e)[:200]}
+    return {"available": True, "items": items, "count": len(items)}
+
+
+@app.get("/api/endpoints/policies")
+async def endpoint_policies():
+    return await _ep_list_envelope(lambda: sophos_client.endpoint_list("/endpoint/v1/policies"), "policies")
+
+
+@app.get("/api/endpoints/policies/{policy_id}")
+async def endpoint_policy_detail(policy_id: str):
+    try:
+        p = await sophos_client.endpoint_get_raw(f"/endpoint/v1/policies/{policy_id}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    if p is None:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return p
+
+
+@app.get("/api/endpoints/migrations")
+async def endpoint_migrations():
+    return await _ep_list_envelope(lambda: sophos_client.endpoint_list("/endpoint/v1/migrations"), "migrations")
+
+
+@app.get("/api/endpoints/detected-exploits")
+async def endpoint_detected_exploits():
+    """Exploit-mitigation detections (CryptoGuard / WipeGuard / exploit blocks)."""
+    return await _ep_list_envelope(
+        lambda: sophos_client.endpoint_list(
+            "/endpoint/v1/settings/exploit-mitigation/detected-exploits", page_size=100
+        ),
+        "detected-exploits",
+    )
+
+
+@app.get("/api/endpoints/settings/tamper-protection")
+async def endpoint_tamper_get():
+    try:
+        d = await sophos_client.endpoint_get_raw("/endpoint/v1/settings/tamper-protection")
+    except Exception as e:
+        logger.warning(f"endpoint tamper-protection failed: {e}")
+        return {"available": False, "error": str(e)[:200]}
+    return {"available": True, **(d or {})} if d is not None else {"available": False}
+
+
+class TamperIn(BaseModel):
+    enabled: bool
+
+
+@app.patch("/api/endpoints/settings/tamper-protection")
+async def endpoint_tamper_set(body: TamperIn):
+    try:
+        return await sophos_client.endpoint_patch(
+            "/endpoint/v1/settings/tamper-protection", {"enabled": body.enabled}
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected change: {e.response.status_code}")
+
+
+@app.get("/api/endpoints/settings/{collection}")
+async def endpoint_setting_list(collection: str):
+    path = _EP_COLLECTIONS.get(collection)
+    if not path:
+        raise HTTPException(status_code=404, detail="unknown settings collection")
+    # Settings collections cap pageSize lower than the 200 default → use 100
+    # and let _paginate follow pages.nextKey for the rest.
+    return await _ep_list_envelope(lambda: sophos_client.endpoint_list(path, page_size=100), f"settings/{collection}")
+
+
+@app.post("/api/endpoints/settings/{collection}")
+async def endpoint_setting_create(collection: str, body: dict = Body(...)):
+    path = _EP_COLLECTIONS.get(collection)
+    if not path:
+        raise HTTPException(status_code=404, detail="unknown settings collection")
+    if not body:
+        raise HTTPException(status_code=400, detail="empty body")
+    try:
+        return await sophos_client.endpoint_create(path, body)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected create: {e.response.status_code}")
+
+
+@app.delete("/api/endpoints/settings/{collection}/{item_id}")
+async def endpoint_setting_delete(collection: str, item_id: str):
+    path = _EP_COLLECTIONS.get(collection)
+    if not path:
+        raise HTTPException(status_code=404, detail="unknown settings collection")
+    try:
+        return await sophos_client.endpoint_delete_path(f"{path}/{item_id}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected delete: {e.response.status_code}")
+
+
+class EndpointGroupIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    type: str = Field("computer", max_length=20)  # computer | server
+
+
+@app.post("/api/endpoints/groups")
+async def endpoint_group_create(body: EndpointGroupIn):
+    try:
+        return await sophos_client.endpoint_create(
+            "/endpoint/v1/endpoint-groups", {"name": body.name, "type": body.type}
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected create: {e.response.status_code}")
+
+
+@app.get("/api/endpoints/groups/{group_id}")
+async def endpoint_group_detail(group_id: str):
+    try:
+        g = await sophos_client.endpoint_get_raw(f"/endpoint/v1/endpoint-groups/{group_id}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    if g is None:
+        raise HTTPException(status_code=404, detail="group not found")
+    return g
+
+
+@app.delete("/api/endpoints/groups/{group_id}")
+async def endpoint_group_delete(group_id: str):
+    try:
+        return await sophos_client.endpoint_delete_path(f"/endpoint/v1/endpoint-groups/{group_id}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected delete: {e.response.status_code}")
+
+
+@app.get("/api/endpoints/{endpoint_id}")
+async def endpoint_detail(endpoint_id: str):
+    """Live full endpoint record from Sophos (health, services, tamper, …)."""
+    try:
+        ep = await sophos_client.get_endpoint(endpoint_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos API error: {e.response.status_code}")
+    if ep is None:
+        raise HTTPException(status_code=404, detail="endpoint not found")
+    return ep
+
+
+@app.post("/api/endpoints/{endpoint_id}/scan")
+async def endpoint_scan(endpoint_id: str):
+    """Trigger an on-demand scan on the endpoint."""
+    try:
+        result = await sophos_client.scan_endpoint(endpoint_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected scan: {e.response.status_code}")
+    return {"ok": True, "sophos": result}
+
+
+@app.delete("/api/endpoints/{endpoint_id}")
+async def endpoint_delete(endpoint_id: str, db: AsyncSession = Depends(get_db)):
+    """De-register the endpoint from Sophos Central and drop the local row."""
+    try:
+        result = await sophos_client.delete_endpoint(endpoint_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Sophos rejected delete: {e.response.status_code}")
+    row = await db.execute(select(Endpoint).where(Endpoint.id == endpoint_id))
+    ep = row.scalar_one_or_none()
+    if ep is not None:
+        await db.delete(ep)
+        await db.commit()
+    return {"ok": True, "sophos": result}
+
+
 class BlockIpIn(BaseModel):
     ip: str = Field(..., min_length=7, max_length=45)
     comment: str | None = Field(None, max_length=500)
