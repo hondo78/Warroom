@@ -25,6 +25,18 @@ MANAGED_KEYS: dict[str, type] = {
     "sophos_client_id": str,
     "sophos_client_secret": str,
     "sophos_tenant_id": str,
+    "o365_tenant_id": str,
+    "o365_client_id": str,
+    "o365_client_secret": str,
+    "entra_block_enabled": bool,
+    "entra_named_location_id": str,
+    "entra_ca_policy_id": str,
+    "entra_block_sync_interval_minutes": int,
+    "entra_ca_exclude_users": str,
+    "telegram_enabled": bool,
+    "telegram_bot_token": str,
+    "telegram_chat_id": str,
+    "telegram_poll_interval_seconds": int,
     "maxmind_license_key": str,
     "abuseipdb_api_key": str,
     "virustotal_api_key": str,
@@ -87,6 +99,8 @@ MANAGED_KEYS: dict[str, type] = {
 
 SECRET_KEYS: set[str] = {
     "sophos_client_secret",
+    "o365_client_secret",
+    "telegram_bot_token",
     "maxmind_license_key",
     "abuseipdb_api_key",
     "virustotal_api_key",
@@ -185,6 +199,18 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"sophos_client reload failed: {e}")
 
+    try:
+        from app.o365_client import o365_client
+        o365_client.reload()
+    except Exception as e:
+        logger.warning(f"o365_client reload failed: {e}")
+
+    try:
+        from app.entra_client import entra_client
+        entra_client.reload()
+    except Exception as e:
+        logger.warning(f"entra_client reload failed: {e}")
+
     if interval_changed:
         try:
             from app.main import scheduler
@@ -222,6 +248,26 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
                 logger.info(f"Rescheduled {job_id} to {getattr(settings, val_attr)}s")
             except Exception as e:
                 logger.warning(f"{job_id} reschedule failed: {e}")
+
+    if "telegram_poll_interval_seconds" in sane:
+        try:
+            from app.main import scheduler
+            scheduler.reschedule_job(
+                "telegram_poll", trigger="interval",
+                seconds=max(2, settings.telegram_poll_interval_seconds),
+            )
+        except Exception as e:
+            logger.warning(f"telegram_poll reschedule failed: {e}")
+
+    if "entra_block_sync_interval_minutes" in sane:
+        try:
+            from app.main import scheduler
+            scheduler.reschedule_job(
+                "entra_sync", trigger="interval",
+                minutes=max(1, settings.entra_block_sync_interval_minutes),
+            )
+        except Exception as e:
+            logger.warning(f"entra_sync reschedule failed: {e}")
 
     return sane
 

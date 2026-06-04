@@ -1,5 +1,8 @@
 const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
+    o365: ['o365_tenant_id', 'o365_client_id', 'o365_client_secret'],
+    entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
+    telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
     osintQuota: [
         'osint_abuseipdb_daily_limit', 'osint_abuseipdb_monthly_limit',
@@ -17,6 +20,7 @@ const SECTIONS = {
 
 document.addEventListener('DOMContentLoaded', () => {
     loadSettings();
+    loadCaPolicyState();
     const feed = document.getElementById('iocFeedUrl');
     if (feed) feed.textContent = `${window.location.origin}/ioc_IP`;
     const feedDomain = document.getElementById('iocFeedDomainUrl');
@@ -24,6 +28,94 @@ document.addEventListener('DOMContentLoaded', () => {
     const feedUrl = document.getElementById('iocFeedUrlUrl');
     if (feedUrl) feedUrl.textContent = `${window.location.origin}/ioc_url`;
 });
+
+// admin.html doesn't load common.js, so provide a local HTML-escape.
+function adminEsc(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+// --- Conditional-Access block policy on/off ---
+async function loadCaPolicyState() {
+    const status = document.getElementById('caPolicyStatus');
+    const toggle = document.getElementById('caPolicyToggle');
+    const label = document.getElementById('caPolicyToggleLabel');
+    if (!status || !toggle) return;
+    try {
+        const r = await fetch('/api/admin/entra/ca-policy');
+        const d = await r.json();
+        if (!d.configured) {
+            status.innerHTML = 'M365-App nicht konfiguriert.';
+            toggle.disabled = true; label.textContent = '—';
+            return;
+        }
+        if (!d.found) {
+            status.innerHTML = d.error
+                ? `Keine Policy gefunden (${adminEsc(d.error)}).`
+                : 'Keine Warroom-Policy gefunden. Lege sie im Entra-Portal an oder nutze „Jetzt syncen“.';
+            toggle.disabled = true; label.textContent = '—';
+            return;
+        }
+        toggle.disabled = false;
+        toggle.checked = d.enabled;
+        toggle.dataset.excludes = d.exclude_users || '';
+        label.textContent = d.enabled ? 'Erzwingung AN' : 'Erzwingung AUS';
+        const stateBadge = d.state === 'enabled'
+            ? '<span class="health-badge health-bad">erzwingend</span>'
+            : d.state === 'disabled'
+                ? '<span class="health-badge health-good">deaktiviert</span>'
+                : `<span class="health-badge">${adminEsc(d.state)}</span>`;
+        status.innerHTML = `Policy: <strong>${adminEsc(d.displayName || "—")}</strong> &nbsp; ${stateBadge}`;
+    } catch (err) {
+        status.textContent = `Status nicht abrufbar: ${err.message}`;
+        toggle.disabled = true;
+    }
+}
+
+async function toggleCaPolicy(el) {
+    const enabled = el.checked;
+    const payload = { enabled };
+
+    // When ACTIVATING (enforcing), ask for / confirm the break-glass accounts
+    // that must never be blocked. Pre-fill with whatever is already stored.
+    if (enabled) {
+        const current = el.dataset.excludes || '';
+        const input = prompt(
+            'Erzwingung aktivieren — ausgeschlossene Konten (Break-Glass), die nie geblockt werden.\n' +
+            'UPN(s) oder Objekt-ID(s), kommagetrennt. Mindestens eines ist erforderlich:',
+            current
+        );
+        if (input === null) {            // user cancelled → revert toggle, do nothing
+            el.checked = false;
+            return;
+        }
+        if (!input.trim()) {
+            toast('Mindestens ein Break-Glass-Konto erforderlich — Aktivierung abgebrochen.', 'error');
+            el.checked = false;
+            return;
+        }
+        payload.exclude_users = input.trim();
+    }
+
+    el.disabled = true;
+    try {
+        const r = await fetch('/api/admin/entra/ca-policy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        toast(`Policy ${enabled ? 'aktiviert (erzwingend)' : 'deaktiviert'}.`, 'success');
+    } catch (err) {
+        toast(`Umschalten fehlgeschlagen: ${err.message}`, 'error');
+        el.checked = !enabled; // revert visual state
+    } finally {
+        el.disabled = false;
+        loadCaPolicyState();
+    }
+}
 
 async function loadSettings() {
     try {
@@ -138,6 +230,18 @@ async function testConnection(target) {
         }
     } catch (err) {
         toast(`Test-Fehler: ${err.message}`, 'error');
+    }
+}
+
+async function entraSyncNow() {
+    toast('Entra-Sync läuft…', 'info');
+    try {
+        const resp = await fetch('/api/admin/entra/sync-now', { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        toast(`✓ ${data.ranges} IP-Range(s) zu Entra synchronisiert.`, 'success');
+    } catch (err) {
+        toast(`Entra-Sync fehlgeschlagen: ${err.message}`, 'error');
     }
 }
 

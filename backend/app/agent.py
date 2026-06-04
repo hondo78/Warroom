@@ -674,6 +674,25 @@ async def agent_loop() -> None:
         await _persist_decision(alert, decision)
 
 
+async def _notify_telegram_pending(decision_id: int) -> None:
+    """Push an interactive approval prompt for a freshly-stored pending
+    decision. Best-effort — never blocks the agent if Telegram is down.
+    The push is also retried by the telegram_push_pending scheduler job."""
+    try:
+        from app.telegram_client import send_decision_request
+        from app.models import AgentDecision as _AD
+        async with async_session() as db:
+            rec = await db.get(_AD, decision_id)
+            if rec is None or rec.status != "pending" or rec.telegram_message_id is not None:
+                return
+            mid = await send_decision_request(rec)
+            if mid is not None:
+                rec.telegram_message_id = mid
+                await db.commit()
+    except Exception as e:
+        logger.debug(f"telegram approval push skipped: {e}")
+
+
 async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
     """Store the LLM's recommendation. Auto-executes safe actions if enabled."""
     record = AgentDecision(
@@ -697,6 +716,8 @@ async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
             await execute_decision(record.id)
         except Exception as e:
             logger.warning(f"agent: auto-execute failed for decision {record.id}: {e}")
+    else:
+        await _notify_telegram_pending(record.id)
 
 
 async def execute_decision(decision_id: int) -> dict[str, Any]:
@@ -1033,6 +1054,8 @@ async def _store_rule_decision(
             await execute_decision(rec.id)
         except Exception as e:
             logger.warning(f"agent[{source_type}]: auto-execute failed for {ip}: {e}")
+    else:
+        await _notify_telegram_pending(rec.id)
     return rec.id
 
 

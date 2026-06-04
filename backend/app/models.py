@@ -30,6 +30,30 @@ class Alert(Base):
     acknowledged_action = Column(String(50), nullable=True)
 
 
+class O365AuditLog(Base):
+    """Microsoft 365 login audit records (Management Activity API,
+    Audit.AzureActiveDirectory — UserLoggedIn / UserLoginFailed)."""
+
+    __tablename__ = "o365_audit_logs"
+
+    id = Column(String(255), primary_key=True)  # audit record GUID
+    operation = Column(String(255))             # UserLoggedIn | UserLoginFailed
+    workload = Column(String(100))
+    user_id = Column(String(255))               # UPN
+    client_ip = Column(String(64))
+    result_status = Column(String(50))
+    logon_error = Column(String(255))
+    user_agent = Column(String(512))
+    application_id = Column(String(255))
+    created_at = Column(DateTime(timezone=True))
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now())
+    raw_data = Column(JSONB)
+    attacker_lat = Column(Float)
+    attacker_lon = Column(Float)
+    attacker_country = Column(String(100))
+    attacker_city = Column(String(255))
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -214,6 +238,9 @@ class AgentDecision(Base):
     # 'alert' = Sophos Central alert; 'waf' = WAF-event rule-based.
     source_type = Column(String(20), nullable=False, default="alert")
     source_ip = Column(String(45))                         # filled for WAF decisions (alerts use alert_id)
+    # Telegram approval: message id of the sent approval prompt (also the
+    # "already notified" guard — NULL means not yet pushed to Telegram).
+    telegram_message_id = Column(BigInteger, nullable=True)
 
 
 class NetflowBucket(Base):

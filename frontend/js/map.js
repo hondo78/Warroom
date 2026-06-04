@@ -10,6 +10,8 @@ const ATTACK_CATEGORIES = [
     {key: 'web',        label: 'Web / URL-Filter',    color: '#be185d'},
     {key: 'scan',       label: 'Scan / Recon',        color: '#fb7185'},
     {key: 'fwblock',    label: 'Firewall Drop',       color: '#c2410c'},
+    {key: 'm365_fail',  label: 'M365 Login fehlgeschlagen', color: '#f59e0b'},
+    {key: 'm365_ok',    label: 'M365 Login OK',       color: '#22c55e'},
     {key: 'other',      label: 'Sonstiger Angriff',   color: '#ef4444'},
 ];
 const ATTACK_COLOR_BY_KEY = Object.fromEntries(
@@ -150,6 +152,12 @@ function categorizeAttack(atk) {
 
     const hasAny = (...words) => words.some(w => haystack.includes(w));
 
+    // M365 logins carry explicit category markers from the map API — check
+    // them first so 'login' doesn't fall through to the bruteforce bucket.
+    if (hasAny('m365_fail', 'o365loginfailed'))
+        return 'm365_fail';
+    if (hasAny('m365_ok', 'o365loginok'))
+        return 'm365_ok';
     if (hasAny('malware', 'anti-virus', 'antivirus', 'sandstorm', 'ransom', 'trojan', 'atp', 'c2', 'command-and-control', 'callback'))
         return 'malware';
     if (hasAny('idp', 'ips', 'intrusion', 'exploit', 'cve', 'vulnerab'))

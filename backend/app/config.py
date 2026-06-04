@@ -9,6 +9,33 @@ class Settings(BaseSettings):
     sophos_client_secret: str = ""
     sophos_tenant_id: str = ""
 
+    # --- Microsoft 365 audit-log collector (Management Activity API) ---
+    # Entra ID app registration with application permission ActivityFeed.Read
+    # on "Office 365 Management APIs" (+ admin consent). Empty = collector idles.
+    o365_tenant_id: str = ""
+    o365_client_id: str = ""
+    o365_client_secret: str = ""
+
+    # --- Entra ID conditional-access IP blocking (reuses the O365 app reg;
+    # additionally needs Graph application permissions Policy.ReadWrite.
+    # ConditionalAccess + Policy.Read.All, admin-consented). When enabled,
+    # blocked_ips are synced into a named location bound to a CA block policy
+    # so M365 logins from those IPs are rejected by Microsoft directly. ---
+    entra_block_enabled: bool = False
+    entra_named_location_id: str = ""   # auto-created on first sync if empty
+    entra_ca_policy_id: str = ""        # auto-created (report-only) if empty
+    entra_block_sync_interval_minutes: int = 10
+    # Break-glass accounts excluded from the auto-created block policy
+    # (comma-separated UPNs or object ids). Required by Microsoft's
+    # BlockEveryonePolicy guard — without an exclusion the create is rejected.
+    entra_ca_exclude_users: str = ""
+
+    # --- Telegram approval / notifications ---
+    telegram_enabled: bool = False
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""          # numeric chat or group id
+    telegram_poll_interval_seconds: int = 5
+
     maxmind_license_key: str = ""
     abuseipdb_api_key: str = ""
     virustotal_api_key: str = ""

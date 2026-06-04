@@ -189,6 +189,33 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_email_metrics_bucket ON email_metrics(bucket DESC)",
     "CREATE INDEX IF NOT EXISTS idx_email_metrics_metric ON email_metrics(metric)",
+    # Microsoft 365 login audit records (Management Activity API).
+    """
+    CREATE TABLE IF NOT EXISTS o365_audit_logs (
+        id VARCHAR(255) PRIMARY KEY,
+        operation VARCHAR(255),
+        workload VARCHAR(100),
+        user_id VARCHAR(255),
+        client_ip VARCHAR(64),
+        result_status VARCHAR(50),
+        logon_error VARCHAR(255),
+        user_agent VARCHAR(512),
+        application_id VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE,
+        ingested_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        raw_data JSONB,
+        attacker_lat FLOAT,
+        attacker_lon FLOAT,
+        attacker_country VARCHAR(100),
+        attacker_city VARCHAR(255)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_o365_audit_created ON o365_audit_logs(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_o365_audit_user ON o365_audit_logs(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_o365_audit_ip ON o365_audit_logs(client_ip)",
+    "CREATE INDEX IF NOT EXISTS idx_o365_audit_operation ON o365_audit_logs(operation)",
+    # Telegram approval message id on agent decisions (idempotent add).
+    "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT",
 ]
 
 

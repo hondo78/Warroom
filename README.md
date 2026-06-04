@@ -52,6 +52,9 @@ Sophos Intelix / GreyNoise** an. Geblockte IPs, Domains und URLs werden als
 - [IOC-Feeds für Firewalls](#ioc-feeds-für-firewalls)
 - [Block-API (Web-UI)](#block-api-web-ui)
 - [KI-Agent (optional)](#ki-agent-optional)
+- [Microsoft 365 Audit-Logs (optional)](#microsoft-365-audit-logs-optional)
+- [Entra ID Login-Blocking (optional)](#entra-id-login-blocking-optional)
+- [Telegram-Approvals (optional)](#telegram-approvals-optional)
 - [Sicherheit & Härtung](#sicherheit--härtung)
 - [Stack & Services](#stack--services)
 - [Troubleshooting](#troubleshooting)
@@ -73,6 +76,7 @@ zur Verfügung:
 | **Agent** | `/agent.html` | Entscheidungs-Log des KI-Agenten; Empfehlungen genehmigen/ablehnen; LLM-Statistik. Erkennt u. a. **verteilte Brute-Force-Angriffe** (viele Quell-IPs über mehrere /24-Netze gegen dasselbe Konto → `block_ips`) und nimmt **Triage-Eingaben** entgegen. |
 | **Agent-Workflow** | `/agent-workflow.html` | Visualisiert die Entscheidungs-Pipeline und macht **jede Stufe** (Trigger, Schwellen, Intervall, erlaubte Aktionen, System-Prompt, Auto-Execute) live editierbar. Das LLM wird mit **strukturierten Ausgaben** (Pydantic-Schema via `response_format`) angesprochen und typisiert validiert. |
 | **Email** | `/email.html` | Sophos Email Management API: Mailboxen verwalten (anlegen/ändern/löschen), Quarantäne & Post-Delivery-Quarantäne durchsuchen, Nachrichten freigeben/löschen (optional Absender erlauben/blocken). |
+| **Microsoft 365** | `/o365.html` | M365-Login-Audit (Management Activity API): erfolgreiche & fehlgeschlagene Anmeldungen mit App, **Gerät** (Name/OS/Browser/Compliance), Quell-IP, Standort. Spalten **sortier- und filterbar**; OSINT-Drilldown pro IP; fehlgeschlagene Logins direkt blockbar (whitelistete IPs geschützt). |
 | **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo & DNS parallel; Verlauf & Cache-Bypass. Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. |
 | **Stats** | `/stats.html` | Verbrauch der OSINT-Provider (Tages-/Monatslimits), LLM-Calls & Tokens, Cache-Trefferquote. |
 | **Admin** | `/admin.html` | Alle API-Keys, Intervalle, Loglevel und Agent-Einstellungen **live** editieren – ohne Container-Neustart. |
@@ -264,6 +268,70 @@ Blocks vor – oder führt sie automatisch aus. Standardmäßig **aus**.
 
 ---
 
+## Microsoft 365 Audit-Logs (optional)
+
+Zieht **Login-Ereignisse** (UserLoggedIn / UserLoginFailed) aus der Microsoft
+365 Management Activity API und reichert sie mit GeoIP an. Fehlgeschlagene
+Logins erscheinen zusätzlich als Alerts auf der Attack-Map und werden vom
+KI-Agenten mit ausgewertet. Anzeige unter `/o365.html`, Konfiguration unter
+**Admin → Microsoft 365**.
+
+**Azure-App-Registrierung (einmalig):**
+
+1. [entra.microsoft.com](https://entra.microsoft.com) → **App-Registrierungen →
+   Neue Registrierung** (Single Tenant).
+2. **API-Berechtigungen → Office 365 Management APIs → Anwendungsberechtigungen →
+   `ActivityFeed.Read`** → **Administratorzustimmung erteilen**.
+3. **Zertifikate & Geheimnisse → Neuer geheimer Clientschlüssel** → Wert kopieren.
+4. In Warroom **Admin → Microsoft 365**: Tenant-ID, Client-ID, Client-Secret
+   eintragen → **Verbindung testen**. Der Collector startet automatisch
+   (Audit-Events treffen mit ~5–30 min Verzögerung ein).
+
+> Bekannte Microsoft-App-IDs werden zu Klarnamen aufgelöst (Azure Portal,
+> Outlook Web App, Teams, …); unbekannte erscheinen als gekürzte GUID.
+
+---
+
+## Entra ID Login-Blocking (optional)
+
+Synct die Warroom-Blocklist zusätzlich in eine Entra **Named Location**, die an
+eine **Conditional-Access-Policy** gebunden ist — M365-Logins von geblockten IPs
+werden dann direkt bei Microsoft abgewiesen (ergänzend zum Firewall-IOC-Feed).
+Konfiguration unter **Admin → Entra ID**.
+
+- **Nutzt dieselbe App-Registrierung** wie der M365-Collector, braucht aber
+  zusätzlich die Graph-Anwendungsberechtigungen
+  `Policy.ReadWrite.ConditionalAccess` + `Policy.Read.All` (Admin-Consent) sowie
+  eine **Entra ID P1**-Lizenz (in Microsoft 365 E3/E5 enthalten).
+- **Named Location & Policy werden automatisch angelegt** (Self-Healing: wird die
+  Policy extern gelöscht, legt der nächste Sync sie neu an). Policy-Name:
+  *„Warroom — Block IPs (managed)"*.
+- **Sicherheits-Default Report-Only:** Die Policy erzwingt zunächst nichts. Über
+  den Admin-Toggle *„Erzwingung AN/AUS"* schaltest du sie scharf — dabei wird
+  zwingend ein **Break-Glass-Konto** abgefragt (UPN oder Objekt-ID), das nie
+  geblockt wird (Schutz gegen Selbst-Aussperrung). UPNs werden permission-frei
+  aus den M365-Audit-Logs zur Objekt-ID aufgelöst.
+
+---
+
+## Telegram-Approvals (optional)
+
+Schickt **jede offene Agent-Entscheidung** als Telegram-Nachricht mit
+**✅ Approve / ❌ Reject**-Buttons; die Entscheidung wird direkt aus Telegram
+ausgeführt (Long-Polling, kein öffentlicher Webhook nötig). Konfiguration unter
+**Admin → Telegram**.
+
+1. Bot via [@BotFather](https://t.me/BotFather) anlegen → Bot-Token kopieren.
+2. `chat_id` ermitteln (z.B. über `@userinfobot`) und den Bot **zuerst einmal
+   anschreiben** bzw. zur Gruppe hinzufügen.
+3. In Warroom **Admin → Telegram**: Token + Chat-ID eintragen, aktivieren,
+   **Testnachricht senden**.
+
+> Nur der konfigurierte Chat darf Approvals ausführen; Taps aus anderen Chats
+> werden abgewiesen.
+
+---
+
 ## Sicherheit & Härtung
 
 Warroom ist als **internes Tool hinter VPN/Firewall** gedacht. Vor einem
@@ -282,8 +350,12 @@ Einsatz mit echten Daten unbedingt beachten:
   ggf. `GF_AUTH_ANONYMOUS_ENABLED=false` setzen, falls nicht erwünscht.
 - **Kein HTTPS out-of-the-box** – nginx lauscht auf Port 80 (gemappt auf 8448).
   Für Produktion einen TLS-Reverse-Proxy davorsetzen.
-- **Exponierte Ports** (5514, 2055, 3030, 8448) nur im vertrauenswürdigen Netz
-  freigeben.
+- **Exponierte Ports** (5514, 2055, 3030, 5540, 8448) nur im vertrauenswürdigen
+  Netz freigeben. **RedisInsight (5540)** läuft ohne Auth und erlaubt vollen
+  Lese-/Schreibzugriff auf den Cache → hinter Firewall/Proxy absichern.
+- **M365/Telegram-Secrets** (Client-Secret, Bot-Token) liegen wie alle anderen
+  unverschlüsselt in `app_settings`. Die Entra-App sollte nur die minimal nötigen
+  Graph-Berechtigungen besitzen.
 
 Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 [`docs/REVIEW.md`](docs/REVIEW.md).
@@ -302,6 +374,8 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 | NetFlow | Custom Python Collector (UDP 2055) |
 | GeoIP | MaxMind GeoLite2 (Fallback: ip-api.com) |
 | Dashboards | Grafana 11 |
+| Redis-GUI | RedisInsight (Cache-Inspektion) |
+| Cloud-APIs | Sophos Central/Email, Microsoft 365 (Management Activity + Graph), Telegram |
 
 | Container | Port (Host) | Beschreibung |
 |-----------|-------------|--------------|
@@ -311,6 +385,7 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 | `netflow` | `2055/udp` | NetFlow v5/v9/IPFIX Collector |
 | `postgres` | (intern 5432) | Daten-Persistenz |
 | `redis` | (intern 6379) | Cache (Summary, OSINT-Lookups) |
+| `redisinsight` | `5540` | RedisInsight — Redis-GUI (Cache vorkonfiguriert) |
 | `grafana` | `3030` | Dashboards |
 
 ### Datenfluss
@@ -318,9 +393,11 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 1. **Sophos Central API** → `collector.py` (alle 300 s default) → DB
 2. **Sophos Firewall Syslog** → `syslog`-Service → DB (`firewall_logs`)
 3. **NetFlow** → `netflow`-Service → DB (`netflow_buckets`)
-4. **Dashboard** → Backend liest aus DB → Frontend rendert
-5. **Block-Aktion (UI/Agent)** → `blocked_ips` / `_domains` / `_urls`
-6. **Firewall pullt** `/ioc_*` → Backend liest die Tabellen live
+4. **Microsoft 365 Activity API** → `o365_client.py` → DB (`o365_audit_logs`)
+5. **Dashboard** → Backend liest aus DB → Frontend rendert
+6. **Block-Aktion (UI/Agent/Telegram)** → `blocked_ips` / `_domains` / `_urls`
+7. **Firewall pullt** `/ioc_*` → Backend liest die Tabellen live
+8. **Optional: Entra-Sync** → Blocklist → Named Location + Conditional-Access-Policy
 
 ---
 
@@ -334,6 +411,10 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 | Syslog/NetFlow kommt nicht an | Ports 5514/2055 auf dem Host freigegeben? Firewall sendet an die richtige IP? |
 | Postgres startet nicht | `POSTGRES_PASSWORD` ≠ Passwort in `DATABASE_URL`. Müssen identisch sein. |
 | Änderung in `.env` greift nicht | `.env`-Werte sind nur Startwerte. Laufende Änderungen über `/admin.html` oder `docker compose up -d` neu anwenden. |
+| M365-Seite leer / „nicht konfiguriert" | Entra-App-Credentials unter Admin → Microsoft 365 fehlen oder `ActivityFeed.Read`-Consent nicht erteilt. Audit-Events kommen zudem mit Verzögerung. |
+| Entra-Sync `403 not licensed` | Tenant ohne Entra ID P1 (in M365 E3/E5 enthalten) — Lizenz einem Benutzer zuweisen. CA-Policy lässt sich ohne P1 nicht anlegen/aktivieren. |
+| Entra-Policy lässt sich nicht aktivieren | Kein Break-Glass-Konto gesetzt (Microsofts „BlockEveryonePolicy"-Schutz) bzw. UPN nicht auflösbar → Objekt-ID eintragen. |
+| Telegram-Approval kommt nicht an | Bot nicht aktiviert, falsche `chat_id`, oder Bot wurde nie angeschrieben / nicht in der Gruppe. „Testnachricht senden" prüfen. |
 
 ---
 

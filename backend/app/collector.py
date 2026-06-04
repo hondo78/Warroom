@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.geoip_service import lookup_ip
-from app.models import Alert, Event, Detection, Endpoint, FirewallLocation
+from app.models import Alert, Event, Detection, Endpoint, FirewallLocation, O365AuditLog
+from app.o365_client import o365_client
 from app.sophos_client import sophos_client
 
 logger = logging.getLogger(__name__)
@@ -308,6 +309,122 @@ def _nested_status(parent: dict | None, key: str) -> str | None:
     if isinstance(sub, str):
         return sub
     return None
+
+
+def _clean_o365_ip(raw: str | None) -> str | None:
+    """O365 ClientIP comes as '1.2.3.4', '1.2.3.4:5678' or '[2a02::1]:443' —
+    strip the port so GeoIP and blocklists get a plain address."""
+    if not raw:
+        return None
+    ip = raw.strip()
+    if ip.startswith("["):                       # [ipv6]:port
+        ip = ip[1:].split("]", 1)[0]
+    elif ip.count(":") == 1 and "." in ip:       # v4:port
+        ip = ip.split(":", 1)[0]
+    return ip or None
+
+
+def _o365_extended_prop(item: dict, name: str) -> str | None:
+    for prop in item.get("ExtendedProperties") or []:
+        if isinstance(prop, dict) and prop.get("Name") == name:
+            return prop.get("Value")
+    return None
+
+
+async def collect_o365():
+    """Poll Microsoft 365 login audit records (Management Activity API).
+
+    Scheduled like collect_all but independent of the Sophos credentials —
+    idles silently when the O365 app registration isn't configured yet.
+    """
+    if not o365_client.configured:
+        logger.debug("O365 credentials not configured, skipping collection")
+        return
+
+    logger.info("Starting O365 audit-log collection...")
+    async with async_session() as db:
+        last = await db.execute(select(func.max(O365AuditLog.created_at)))
+        last_time = last.scalar()
+
+        now = datetime.now(timezone.utc)
+        # Audit blobs trail real time by up to ~30 min, so look back past the
+        # newest stored record. The API allows at most a 24h window.
+        if last_time:
+            start = max(last_time - timedelta(minutes=45), now - timedelta(hours=24))
+        else:
+            start = now - timedelta(hours=24)   # first run: 24h backfill
+
+        try:
+            records = await o365_client.get_login_records(start, now)
+            await _process_o365_logins(db, records)
+        except Exception as e:
+            logger.error(f"Failed to collect O365 audit logs: {e}")
+
+    logger.info("O365 collection cycle complete")
+
+
+async def _process_o365_logins(db: AsyncSession, records: list[dict]):
+    new_count = 0
+    for item in records:
+        rec_id = item.get("Id")
+        if not rec_id:
+            continue
+
+        existing = await db.execute(select(O365AuditLog).where(O365AuditLog.id == rec_id))
+        if existing.scalar_one_or_none():
+            continue
+
+        operation = item.get("Operation") or ""
+        client_ip = _clean_o365_ip(item.get("ClientIP") or item.get("ClientIPAddress"))
+        geo = await lookup_ip(client_ip, db) if client_ip else None
+        created = _parse_dt(item.get("CreationTime"))
+        user_id = item.get("UserId")
+        logon_error = item.get("LogonError")
+        failed = operation == "UserLoginFailed"
+
+        db.add(O365AuditLog(
+            id=rec_id,
+            operation=operation,
+            workload=item.get("Workload"),
+            user_id=user_id,
+            client_ip=client_ip,
+            result_status=item.get("ResultStatus"),
+            logon_error=logon_error,
+            user_agent=(_o365_extended_prop(item, "UserAgent") or "")[:512] or None,
+            application_id=item.get("ApplicationId"),
+            created_at=created,
+            raw_data=item,
+            attacker_lat=geo["lat"] if geo else None,
+            attacker_lon=geo["lon"] if geo else None,
+            attacker_country=geo["country"] if geo else None,
+            attacker_city=geo["city"] if geo else None,
+        ))
+
+        # Failed logins additionally become Alerts so they show up on the
+        # attack map and get picked up by the generic AI-agent loop.
+        if failed:
+            db.add(Alert(
+                id=f"o365-{rec_id}",
+                alert_type="O365LoginFailed",
+                severity="medium",
+                category="o365",
+                description=(
+                    f"M365 login failed: {user_id or 'unknown user'} "
+                    f"from {client_ip or 'unknown IP'}"
+                    + (f" ({logon_error})" if logon_error else "")
+                ),
+                source_ip=client_ip,
+                created_at=created,
+                raw_data=item,
+                attacker_lat=geo["lat"] if geo else None,
+                attacker_lon=geo["lon"] if geo else None,
+                attacker_country=geo["country"] if geo else None,
+                attacker_city=geo["city"] if geo else None,
+            ))
+        new_count += 1
+
+    await db.commit()
+    logger.info(f"Processed {len(records)} O365 login records ({new_count} new)")
 
 
 async def _sync_firewalls(db: AsyncSession, firewalls: list[dict]):

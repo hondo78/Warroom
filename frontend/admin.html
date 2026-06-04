@@ -39,6 +39,7 @@
                     <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
                     <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
                     <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
                     <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
                     <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
                     <li class="nav-item"><a href="/admin.html" class="nav-link active"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
@@ -77,6 +78,114 @@
                         </div>
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('sophos')">Sophos-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Microsoft 365 -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0">Microsoft 365 Audit-Log</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('o365')"><i class="bi bi-plug"></i> Verbindung testen</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint">
+                            Entra-ID-App-Registrierung mit Application-Berechtigung <code>ActivityFeed.Read</code>
+                            auf den <em>Office 365 Management APIs</em> (Admin-Consent erforderlich).
+                            Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche
+                            landen zusätzlich als Alerts auf der Attack-Map. Anzeige unter
+                            <a href="/o365.html" class="osint-link">Microsoft 365</a>.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label">Tenant ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_tenant_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Client ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_client_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="o365_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('o365')">M365-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Entra ID conditional-access blocking -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0">Entra ID — Login-Blocking (Conditional Access)</h3>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('entra')"><i class="bi bi-plug"></i> Verbindung testen</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="entraSyncNow()"><i class="bi bi-arrow-repeat"></i> Jetzt syncen</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint">
+                            Schiebt geblockte IPs in eine Entra <em>Named Location</em>, die an eine
+                            Conditional-Access-Policy gebunden ist — M365-Logins von diesen IPs werden
+                            dann direkt bei Microsoft abgewiesen. Nutzt dieselbe App-Registrierung wie
+                            der M365-Collector, benötigt aber zusätzlich die Graph-Berechtigungen
+                            <code>Policy.ReadWrite.ConditionalAccess</code> + <code>Policy.Read.All</code>
+                            (Application, Admin-Consent).
+                            <br><strong>Sicherheit:</strong> Die Policy wird im <em>Report-Only</em>-Modus
+                            angelegt — Erzwingung musst du bewusst im Entra-Portal aktivieren.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label">Named-Location-Sync aktiv</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="entra_block_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label">Sync-Intervall (Minuten)</label></div>
+                            <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="entra_block_sync_interval_minutes"></div>
+                            <div class="col-md-4"><label class="form-label">Ausgeschlossene Benutzer (Break-Glass)</label></div>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control form-control-sm" data-key="entra_ca_exclude_users" placeholder="notfall@deinedomain.at, weitere-objektid, …" autocomplete="off">
+                                <small class="admin-hint">Pflicht für die <em>automatische</em> Policy-Anlage — UPN(s) oder Objekt-ID(s), kommagetrennt. Diese Konten werden nie geblockt (Schutz gegen Selbst-Aussperrung).</small>
+                            </div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('entra')">Entra-Settings speichern</button>
+                        </div>
+
+                        <hr>
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <div>
+                                <div class="form-label mb-1">Conditional-Access-Policy (Erzwingung)</div>
+                                <div class="admin-hint mb-0" id="caPolicyStatus">Status wird geladen…</div>
+                            </div>
+                            <div class="form-check form-switch fs-5">
+                                <input class="form-check-input" type="checkbox" role="switch" id="caPolicyToggle" onchange="toggleCaPolicy(this)" disabled>
+                                <label class="form-check-label fs-6" for="caPolicyToggle" id="caPolicyToggleLabel">—</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Telegram approvals -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0">Telegram — Benachrichtigungen & Approvals</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('telegram')"><i class="bi bi-plug"></i> Testnachricht senden</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint">
+                            Schickt jede offene Agent-Entscheidung als Nachricht mit
+                            <strong>✅ Approve / ❌ Reject</strong>-Buttons an einen Telegram-Chat;
+                            die Entscheidung wird direkt aus Telegram ausgeführt (Long-Polling, kein
+                            öffentlicher Webhook nötig). Bot via <code>@BotFather</code> anlegen,
+                            <code>chat_id</code> z.B. über <code>@userinfobot</code> ermitteln und den
+                            Bot zuerst einmal anschreiben/zur Gruppe hinzufügen.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label">Aktiviert</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="telegram_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label">Bot Token</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="telegram_bot_token" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Chat ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="telegram_chat_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Poll-Intervall (Sek.)</label></div>
+                            <div class="col-md-8"><input type="number" min="2" class="form-control form-control-sm" data-key="telegram_poll_interval_seconds"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('telegram')">Telegram-Settings speichern</button>
                         </div>
                     </div>
                 </div>

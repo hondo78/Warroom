@@ -12,13 +12,14 @@ from sqlalchemy import select, func, text, case, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cached
-from app.collector import collect_all
+from app.collector import collect_all, collect_o365
 from app.config import settings
 from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, WhitelistedIp
+from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, WhitelistedIp
+from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
     MANAGED_KEYS,
@@ -61,6 +62,9 @@ async def lifespan(app: FastAPI):
     await apply_overrides_to_settings()
     sophos_client.reload()
     scheduler.add_job(collect_all, "interval", seconds=settings.collector_interval, id="collector")
+    # M365 audit-log collector — separate job so missing Sophos credentials
+    # never block it (and vice versa). Idles until the O365 app is configured.
+    scheduler.add_job(collect_o365, "interval", seconds=settings.collector_interval, id="o365_collector")
     # Keep the heavy dashboard endpoints warm in Redis so the first user after
     # an idle period doesn't pay the cold-query price. Tighter than the lowest
     # @cached TTL (30s) so cache entries always overlap.
@@ -100,6 +104,22 @@ async def lifespan(app: FastAPI):
     from app.email_metrics import collect_email_metrics
     scheduler.add_job(collect_email_metrics, "interval", seconds=900, id="email_metrics")
     scheduler.add_job(collect_email_metrics, "date", id="initial_email_metrics")
+    # Telegram approval bot — push prompts for pending decisions + poll for
+    # button taps. Both no-op while telegram_enabled is off.
+    from app.telegram_client import telegram_push_pending, telegram_poll_updates
+    scheduler.add_job(telegram_push_pending, "interval", seconds=15, id="telegram_push")
+    scheduler.add_job(
+        telegram_poll_updates, "interval",
+        seconds=max(2, settings.telegram_poll_interval_seconds),
+        id="telegram_poll",
+    )
+    # Entra ID conditional-access blocklist sync (no-op while disabled).
+    from app.entra_client import entra_sync_job
+    scheduler.add_job(
+        entra_sync_job, "interval",
+        minutes=max(1, settings.entra_block_sync_interval_minutes),
+        id="entra_sync",
+    )
     # Firewall-log retention: prune the fast-growing firewall_logs table
     # (batched deletes). Runs every N hours + once shortly after start.
     from app.firewall_retention import purge_firewall_logs
@@ -112,10 +132,14 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
+    scheduler.add_job(collect_o365, "date", id="initial_o365_collect")
     logger.info(f"Collector scheduled every {settings.collector_interval}s")
     yield
     scheduler.shutdown()
     await sophos_client.aclose()
+    await o365_client.aclose()
+    from app.entra_client import entra_client
+    await entra_client.aclose()
     await close_redis()
 
 
@@ -379,6 +403,9 @@ async def get_attack_map(
         WHERE created_at >= :since
           AND attacker_lat IS NOT NULL
           AND attacker_lon IS NOT NULL
+          -- M365 logins are fed to the map directly from o365_audit_logs
+          -- (split ok/failed); excluding the O365 alerts avoids double counting.
+          AND (alert_type IS NULL OR alert_type NOT LIKE 'O365%')
         GROUP BY threat_ip, attacker_lat, attacker_lon, attacker_country, attacker_city
         ORDER BY cnt DESC
         LIMIT 500
@@ -489,6 +516,42 @@ async def get_attack_map(
 
     sorted_attackers = sorted(attacker_map.values(), key=lambda x: -x["count"])[:500]
 
+    # Microsoft 365 logins — own source, grouped per IP and split into
+    # successful vs failed so the maps can render them as separate categories
+    # (m365_ok / m365_fail). Auth attempts against the tenant are inbound.
+    o365_sql = text("""
+        SELECT client_ip, attacker_lat, attacker_lon,
+               attacker_country, attacker_city,
+               (operation = 'UserLoginFailed') AS failed,
+               COUNT(*) AS cnt,
+               MIN(created_at) AS first_seen,
+               MAX(created_at) AS last_seen,
+               array_agg(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) AS users
+        FROM o365_audit_logs
+        WHERE created_at >= :since
+          AND attacker_lat IS NOT NULL
+          AND attacker_lon IS NOT NULL
+        GROUP BY client_ip, attacker_lat, attacker_lon,
+                 attacker_country, attacker_city, failed
+        ORDER BY cnt DESC
+        LIMIT 500
+    """)
+    for r in (await db.execute(o365_sql, {"since": since})).all():
+        failed = bool(r[5])
+        sorted_attackers.append({
+            "ip": r[0], "lat": r[1], "lon": r[2],
+            "country": r[3], "city": r[4],
+            "count": int(r[6]), "severity": "medium" if failed else "low",
+            "first_seen": _iso(r[7]), "last_seen": _iso(r[8]),
+            "alert_types": ["O365LoginFailed" if failed else "O365LoginOK"],
+            "categories": ["m365_fail" if failed else "m365_ok"],
+            "dest_ips": [], "threats": [], "actions": [], "log_types": [],
+            "dest_ports": [], "users": _cap(r[9]), "firewalls": [],
+            "asn": None, "org": None,
+            "source": "o365",
+            "direction": "inbound",
+        })
+
     # Annotate each attacker with current block status
     ips = {a["ip"] for a in sorted_attackers if a["ip"]}
     blocked: dict[str, BlockedIp] = {}
@@ -514,6 +577,113 @@ async def get_attack_map(
             }
             for fw in firewalls.scalars().all()
         ],
+    }
+
+
+# --- Microsoft 365 Logins ---
+
+@app.get("/api/o365/logins")
+@cached(ttl=60)
+async def get_o365_logins(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=200, ge=1, le=1000),
+    status: str = Query(default="all", pattern="^(all|failed|success)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    q = select(O365AuditLog).where(O365AuditLog.created_at >= since)
+    if status == "failed":
+        q = q.where(O365AuditLog.operation == "UserLoginFailed")
+    elif status == "success":
+        q = q.where(O365AuditLog.operation == "UserLoggedIn")
+    rows = (
+        (await db.execute(q.order_by(O365AuditLog.created_at.desc()).limit(limit)))
+        .scalars()
+        .all()
+    )
+
+    base = select(O365AuditLog).where(O365AuditLog.created_at >= since).subquery()
+    stats_row = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(base.c.operation == "UserLoginFailed"),
+                func.count(func.distinct(base.c.user_id)),
+                func.count(func.distinct(base.c.client_ip)),
+            ).select_from(base)
+        )
+    ).one()
+
+    top_fail_sql = text("""
+        SELECT user_id, COUNT(*) AS cnt
+        FROM o365_audit_logs
+        WHERE created_at >= :since AND operation = 'UserLoginFailed' AND user_id IS NOT NULL
+        GROUP BY user_id ORDER BY cnt DESC LIMIT 10
+    """)
+    top_failed_users = (await db.execute(top_fail_sql, {"since": since})).all()
+
+    top_country_sql = text("""
+        SELECT attacker_country, COUNT(*) AS cnt
+        FROM o365_audit_logs
+        WHERE created_at >= :since AND attacker_country IS NOT NULL
+        GROUP BY attacker_country ORDER BY cnt DESC LIMIT 10
+    """)
+    top_countries = (await db.execute(top_country_sql, {"since": since})).all()
+
+    # Annotate whitelist status so the UI can hide the block action up front
+    # (the block endpoint refuses whitelisted IPs anyway — this is UX).
+    ips = {r.client_ip for r in rows if r.client_ip}
+    whitelisted: set[str] = set()
+    if ips:
+        wl_rows = await db.execute(select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(ips)))
+        whitelisted = {w for (w,) in wl_rows.all()}
+
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+
+    def _device(raw):
+        """Pull device info out of the audit record's DeviceProperties array."""
+        props = {p.get("Name"): p.get("Value") for p in (raw or {}).get("DeviceProperties", []) if isinstance(p, dict)}
+        if not props:
+            return None
+        return {
+            "name": props.get("DisplayName"),
+            "os": props.get("OS"),
+            "browser": props.get("BrowserType") if props.get("BrowserType") not in (None, "Other") else None,
+            "compliant": {"true": True, "false": False}.get((props.get("IsCompliant") or "").lower()),
+            "managed": {"true": True, "false": False}.get((props.get("IsCompliantAndManaged") or "").lower()),
+        }
+
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "operation": r.operation,
+                "user_id": r.user_id,
+                "client_ip": r.client_ip,
+                "whitelisted": r.client_ip in whitelisted,
+                "application_id": r.application_id,
+                "application": app_display_name(r.application_id),
+                "device": _device(r.raw_data),
+                "result_status": r.result_status,
+                "logon_error": r.logon_error,
+                "user_agent": r.user_agent,
+                "country": r.attacker_country,
+                "city": r.attacker_city,
+                "created_at": _iso(r.created_at),
+            }
+            for r in rows
+        ],
+        "stats": {
+            "total": int(stats_row[0]),
+            "failed": int(stats_row[1]),
+            "unique_users": int(stats_row[2]),
+            "unique_ips": int(stats_row[3]),
+            "top_failed_users": [{"user": r[0], "count": int(r[1])} for r in top_failed_users],
+            "top_countries": [{"country": r[0], "count": int(r[1])} for r in top_countries],
+        },
+        "configured": o365_client.configured,
     }
 
 
@@ -3339,6 +3509,16 @@ class AdminSettingsIn(BaseModel):
     sophos_client_id: str | None = None
     sophos_client_secret: str | None = None
     sophos_tenant_id: str | None = None
+    o365_tenant_id: str | None = None
+    o365_client_id: str | None = None
+    o365_client_secret: str | None = None
+    entra_block_enabled: bool | None = None
+    entra_block_sync_interval_minutes: int | None = None
+    entra_ca_exclude_users: str | None = None
+    telegram_enabled: bool | None = None
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    telegram_poll_interval_seconds: int | None = None
     maxmind_license_key: str | None = None
     abuseipdb_api_key: str | None = None
     virustotal_api_key: str | None = None
@@ -3422,6 +3602,80 @@ async def test_sophos_connection():
             "tenant_id": sophos_client.tenant_id,
             "data_region": sophos_client.data_region_url,
         }
+    except httpx.HTTPStatusError as e:
+        return {"ok": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
+
+
+@app.post("/api/admin/test/telegram")
+async def test_telegram_connection():
+    from app.telegram_client import test_telegram
+    return await test_telegram()
+
+
+@app.post("/api/admin/test/entra")
+async def test_entra_connection():
+    from app.entra_client import entra_client
+    return await entra_client.test()
+
+
+@app.post("/api/admin/entra/sync-now")
+async def entra_sync_now():
+    """Force an immediate blocklist → Entra named-location sync."""
+    from app.entra_client import entra_client
+    if not entra_client.configured:
+        raise HTTPException(status_code=400, detail="O365 app credentials not set")
+    if not settings.entra_block_enabled:
+        raise HTTPException(status_code=400, detail="entra_block_enabled is off")
+    try:
+        return await entra_client.sync_blocklist()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Graph {e.response.status_code}: {e.response.text[:200]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/entra/ca-policy")
+async def get_entra_ca_policy():
+    """Current on/off state of the Warroom block policy (for the admin toggle)."""
+    from app.entra_client import entra_client
+    return await entra_client.get_ca_policy_state()
+
+
+class CaPolicyToggleIn(BaseModel):
+    enabled: bool
+    # Optional: set/confirm the excluded break-glass accounts at activation time
+    # (comma-separated UPNs or object ids). None = leave the stored value as-is.
+    exclude_users: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/admin/entra/ca-policy")
+async def set_entra_ca_policy(body: CaPolicyToggleIn):
+    """Enable (enforce) or disable the Warroom conditional-access block policy."""
+    from app.entra_client import entra_client
+    if not entra_client.configured:
+        raise HTTPException(status_code=400, detail="O365 app credentials not set")
+    try:
+        return await entra_client.set_ca_policy_state(body.enabled, body.exclude_users)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Graph {e.response.status_code}: {e.response.text[:200]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/test/o365")
+async def test_o365_connection():
+    """Fresh M365 auth round-trip + subscription check with current credentials."""
+    if not o365_client.configured:
+        return {"ok": False, "error": "tenant_id/client_id/client_secret not set"}
+    o365_client.reload()
+    try:
+        await o365_client._authenticate()
+        await o365_client._ensure_subscription()
+        return {"ok": True, "tenant_id": settings.o365_tenant_id}
     except httpx.HTTPStatusError as e:
         return {"ok": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
     except Exception as e:

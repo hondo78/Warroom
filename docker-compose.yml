@@ -2,6 +2,10 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Docker's default /dev/shm of 64MB is too small for parallel-worker
+    # aggregations once firewall_logs grows large (DiskFullError on the
+    # /api/map/attacks query at ~14M rows / 41GB).
+    shm_size: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-warroom}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -87,6 +91,24 @@ services:
     depends_on:
       - backend
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    restart: unless-stopped
+    ports:
+      - "${REDISINSIGHT_PORT:-5540}:5540"
+    environment:
+      # Accept the EULA non-interactively and pre-add the Warroom Redis so the
+      # UI opens straight onto the cache (no manual "Add database" step).
+      RI_ACCEPT_TERMS_AND_CONDITIONS: "true"
+      RI_REDIS_HOST0: "redis"
+      RI_REDIS_PORT0: "6379"
+      RI_REDIS_ALIAS0: "Warroom Cache"
+    volumes:
+      - redisinsight_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
   grafana:
     image: grafana/grafana:11.4.0
     restart: unless-stopped
@@ -101,6 +123,11 @@ services:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_USERS_DEFAULT_THEME: "dark"
+      # Reverse-proxy / subpath support. Empty GRAFANA_ROOT_URL keeps Grafana's
+      # native default (direct access on :3030). Behind a proxy under e.g.
+      # /grafana set GRAFANA_ROOT_URL=https://host/grafana/ + SERVE_FROM_SUB_PATH=true.
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-%(protocol)s://%(domain)s:%(http_port)s/}"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "${GRAFANA_SERVE_FROM_SUB_PATH:-false}"
       # Available to provisioning files as $POSTGRES_USER etc.
       POSTGRES_USER: "${POSTGRES_USER:-warroom}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
@@ -116,3 +143,4 @@ services:
 volumes:
   postgres_data:
   grafana_data:
+  redisinsight_data:

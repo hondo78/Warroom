@@ -63,11 +63,68 @@ async function showOsint(value, type = 'ip') {
         console.error('OSINT modal not present in DOM');
         return;
     }
+    _ensureTriageButton(modal);
     const label = { ip: 'IP', domain: 'Domain', url: 'URL' }[type] || 'IP';
     if (titleEl) titleEl.textContent = `OSINT-Check für ${label}: ${value}`;
     body.innerHTML = '<div class="osint-loading">Quellen werden parallel abgefragt — 5–10 Sekunden bei nicht gecachten Einträgen…</div>';
     modal.classList.add('active');
     await _osintRun(value, type, false);
+}
+
+// Inject the AI-triage action into the shared modal once per page — keeps the
+// static modal markup in the HTML files unchanged.
+function _ensureTriageButton(modal) {
+    if (modal.querySelector('#osintTriageBtn')) return;
+    const actions = modal.querySelector('.modal-actions');
+    if (!actions) return;
+    const btn = document.createElement('button');
+    btn.id = 'osintTriageBtn';
+    btn.innerHTML = '🤖 An KI-Triage übergeben';
+    btn.onclick = triageFromOsint;
+    actions.insertBefore(btn, actions.firstChild);
+}
+
+function _osintTriageMsg(html, kind) {
+    const body = document.getElementById('osintModalBody');
+    if (!body) return;
+    let box = document.getElementById('osintTriageMsg');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'osintTriageMsg';
+        body.prepend(box);
+    }
+    box.className = `alert alert-${kind} mb-3`;
+    box.innerHTML = html;
+}
+
+async function triageFromOsint() {
+    const { value, type } = _osintCurrent;
+    if (!value) return;
+    const note = prompt('Optionaler Hinweis für den KI-Agenten (Kontext):', '') || null;
+    const btn = document.getElementById('osintTriageBtn');
+    if (btn) btn.disabled = true;
+    _osintTriageMsg('<i class="bi bi-robot"></i> KI-Triage läuft — der Agent prüft den Wert (kann einige Sekunden dauern)…', 'info');
+    try {
+        const r = await fetch('/api/agent/triage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value, type, note }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        const conf = Math.round((d.confidence || 0) * 100);
+        const acted = d.action && d.action !== 'no_action';
+        _osintTriageMsg(
+            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${_osintEscape(d.action || '?')}</strong> (${conf}% Konfidenz)` +
+            `${d.reasoning ? '<br><small>' + _osintEscape(d.reasoning) + '</small>' : ''}` +
+            `<br><a href="/agent.html" class="alert-link">Decision #${d.decision_id} im Agent-Log ansehen ↗</a>`,
+            acted ? 'warning' : 'secondary'
+        );
+    } catch (err) {
+        _osintTriageMsg(`KI-Triage fehlgeschlagen: ${_osintEscape(err.message)}`, 'danger');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 async function reloadOsint() {
