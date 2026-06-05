@@ -37,8 +37,13 @@ ALLOWED_ACTIONS = {
 }
 # isolate stays manual; every "block_*" action is auto-executable (same risk
 # class) so high-confidence/auto-execute settings act on them uniformly.
-AUTO_EXECUTABLE_ACTIONS = {
+# Block actions ALWAYS require human approval and are never auto-executed —
+# regardless of agent_auto_execute or the confidence fast-lane. Only the listed
+# non-destructive actions may auto-run.
+BLOCK_ACTIONS = {
     "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
+}
+AUTO_EXECUTABLE_ACTIONS = {
     "acknowledge",
 }
 # Hard upper bound for block_subnet to avoid accidentally blocking enormous
@@ -147,6 +152,9 @@ def _should_auto_execute(action: str, confidence: float | None) -> tuple[bool, s
     Returns (should_execute, reason). The reason is logged so the audit
     trail explains why an action ran without human approval.
     """
+    # Hard rule: every block decision needs human approval — no exceptions.
+    if action in BLOCK_ACTIONS:
+        return False, ""
     if action not in AUTO_EXECUTABLE_ACTIONS:
         return False, ""
     conf_pct = float(confidence or 0.0) * 100.0
