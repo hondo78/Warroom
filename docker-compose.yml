@@ -109,6 +109,29 @@ services:
       redis:
         condition: service_healthy
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    ports:
+      - "${PGADMIN_PORT:-5051}:80"
+    environment:
+      # Login for the pgAdmin web UI itself (change the defaults!).
+      # Login for the pgAdmin web UI. Use a real TLD — pgAdmin rejects reserved
+      # domains like .local at setup. Not used for mail, just the login id.
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@warroom.com}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-changeme_pgadmin}"
+      PGADMIN_CONFIG_CHECK_EMAIL_DELIVERABILITY: "False"
+      # Skip the post-login intro/upgrade nag screens.
+      PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      # Pre-loads the Warroom DB connection (host/port/db/user). The DB password
+      # is entered once on first connect — pgAdmin can save it per-session.
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   grafana:
     image: grafana/grafana:11.4.0
     restart: unless-stopped
@@ -144,3 +167,4 @@ volumes:
   postgres_data:
   grafana_data:
   redisinsight_data:
+  pgadmin_data:

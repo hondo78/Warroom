@@ -350,9 +350,11 @@ Einsatz mit echten Daten unbedingt beachten:
   ggf. `GF_AUTH_ANONYMOUS_ENABLED=false` setzen, falls nicht erwünscht.
 - **Kein HTTPS out-of-the-box** – nginx lauscht auf Port 80 (gemappt auf 8448).
   Für Produktion einen TLS-Reverse-Proxy davorsetzen.
-- **Exponierte Ports** (5514, 2055, 3030, 5540, 8448) nur im vertrauenswürdigen
-  Netz freigeben. **RedisInsight (5540)** läuft ohne Auth und erlaubt vollen
-  Lese-/Schreibzugriff auf den Cache → hinter Firewall/Proxy absichern.
+- **Exponierte Ports** (5514, 2055, 3030, 5051, 5540, 8448) nur im
+  vertrauenswürdigen Netz freigeben. **RedisInsight (5540)** läuft ohne Auth und
+  erlaubt vollen Lese-/Schreibzugriff auf den Cache, **pgAdmin (5051)** hat zwar
+  ein Login (`PGADMIN_EMAIL`/`PGADMIN_PASSWORD`), gibt aber vollen DB-Zugriff →
+  beide hinter Firewall/Proxy absichern und Default-Passwörter ändern.
 - **M365/Telegram-Secrets** (Client-Secret, Bot-Token) liegen wie alle anderen
   unverschlüsselt in `app_settings`. Die Entra-App sollte nur die minimal nötigen
   Graph-Berechtigungen besitzen.
@@ -375,6 +377,7 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 | GeoIP | MaxMind GeoLite2 (Fallback: ip-api.com) |
 | Dashboards | Grafana 11 |
 | Redis-GUI | RedisInsight (Cache-Inspektion) |
+| DB-GUI | pgAdmin 4 (PostgreSQL-Verwaltung) |
 | Cloud-APIs | Sophos Central/Email, Microsoft 365 (Management Activity + Graph), Telegram |
 
 | Container | Port (Host) | Beschreibung |
@@ -386,6 +389,7 @@ Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
 | `postgres` | (intern 5432) | Daten-Persistenz |
 | `redis` | (intern 6379) | Cache (Summary, OSINT-Lookups) |
 | `redisinsight` | `5540` | RedisInsight — Redis-GUI (Cache vorkonfiguriert) |
+| `pgadmin` | `5051` | pgAdmin 4 — PostgreSQL-GUI (Server „Warroom DB" vorkonfiguriert) |
 | `grafana` | `3030` | Dashboards |
 
 ### Datenfluss

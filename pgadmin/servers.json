@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Warroom DB",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "warroom",
+      "Username": "warroom",
+      "SSLMode": "prefer",
+      "Comment": "Warroom PostgreSQL — password = POSTGRES_PASSWORD from .env. If you changed POSTGRES_USER/DB, adjust Username/MaintenanceDB here."
+    }
+  }
+}
