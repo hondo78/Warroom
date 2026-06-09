@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     sophos_intelix_client_id: str = ""
     sophos_intelix_client_secret: str = ""
 
+    # Shodan credits are scarce. Routine/automated OSINT never queries Shodan;
+    # only human-initiated lookups do. Exception: automated agent loops may
+    # spend a credit when the cheaper providers already flag the IP as clearly
+    # malicious. Set shodan_auto_on_malicious=False to make Shodan human-only.
+    shodan_auto_on_malicious: bool = True
+    shodan_auto_abuse_threshold: int = 80   # AbuseIPDB confidence % that counts as "malicious"
+
     collector_interval: int = 300
 
     # --- Firewall-log retention (firewall_logs grows fast; connection logs

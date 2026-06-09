@@ -61,6 +61,7 @@ async function refreshAll() {
         updateAttackers(days),
         updateFirewallStats(days),
         updateMap(days),
+        updateShodanLayer(),
         updateAlertsTable(),
         updateEventsTable(),
         updateDetectionsTable(),

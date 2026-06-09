@@ -167,6 +167,8 @@ async def _shodan(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
             "country": d.get("country_code"),
             "city": d.get("city"),
             "os": d.get("os"),
+            "latitude": d.get("latitude"),
+            "longitude": d.get("longitude"),
             "last_update": d.get("last_update"),
             "url": f"https://www.shodan.io/host/{ip}",
         }
@@ -334,10 +336,72 @@ async def _ipinfo(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
         return {"available": False, "reason": str(e)[:120]}
 
 
-async def lookup(ip: str, force: bool = False) -> dict[str, Any]:
-    """Run all OSINT providers in parallel and return a merged dict.
+# Shodan API credits are scarce, so Shodan is NOT part of the routine OSINT
+# sweep. It is queried only when explicitly allowed (allow_shodan=True — human
+# interaction) or, for automated callers, when the cheaper providers already
+# flag the IP as clearly malicious (see looks_malicious + shodan_enrich).
+_SHODAN_SKIPPED = {"available": False, "skipped": "not queried (Shodan is human-/malicious-only)"}
 
-    Cached in Redis for `CACHE_TTL` seconds; pass force=True to bypass cache.
+
+def _has_shodan_data(s: Any) -> bool:
+    """True if Shodan was actually queried (don't re-query), False for the
+    skipped sentinel (so a human/malicious request can upgrade it)."""
+    return isinstance(s, dict) and s.get("available") is True and "skipped" not in s
+
+
+def looks_malicious(payload: dict[str, Any], abuse_threshold: int = 80) -> bool:
+    """Cheap-signal verdict used to decide whether an automated caller may
+    spend a Shodan credit on this IP."""
+    if not isinstance(payload, dict):
+        return False
+    ab = (payload.get("abuseipdb") or {}).get("abuse_score")
+    if isinstance(ab, (int, float)) and ab >= abuse_threshold:
+        return True
+    vt = (payload.get("virustotal") or {}).get("malicious")
+    if isinstance(vt, (int, float)) and vt >= 3:
+        return True
+    if (payload.get("greynoise") or {}).get("classification") == "malicious":
+        return True
+    return False
+
+
+async def shodan_enrich(ip: str) -> dict[str, Any]:
+    """Query Shodan for a single IP and persist the ports/CVEs long-term.
+    The ONLY path that spends a Shodan credit."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        s = await _track("shodan", _shodan(client, ip))
+    await _persist_shodan(ip, s)
+    return s
+
+
+async def shodan_on_demand(ip: str) -> dict[str, Any]:
+    """Human-triggered Shodan lookup (the 'Shodan abfragen' button). Queries +
+    persists, and folds the result into the cached OSINT payload so re-opening
+    the panel shows it without another credit."""
+    if not is_public(ip):
+        return {"available": False, "reason": "private/reserved IP"}
+    s = await shodan_enrich(ip)
+    redis = await get_redis()
+    if redis:
+        try:
+            cached = await redis.get(f"osint:{ip}")
+            if cached:
+                payload = json.loads(cached)
+                payload["shodan"] = s
+                await redis.setex(f"osint:{ip}", CACHE_TTL, json.dumps(payload))
+        except Exception as e:
+            logger.warning(f"OSINT shodan cache update failed: {e}")
+    return s
+
+
+async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> dict[str, Any]:
+    """Run the OSINT providers and return a merged dict.
+
+    Shodan is NEVER queried here by default — it costs a scarce credit and must
+    be triggered explicitly: a human presses the "Shodan abfragen" button
+    (→ shodan_enrich via /api/osint/shodan/{ip}), or an automated caller decides
+    an IP is malicious enough to spend a credit (looks_malicious + shodan_enrich).
+    Cached in Redis for `CACHE_TTL` seconds.
     """
     if not is_public(ip):
         return {"ip": ip, "error": "private/reserved IP — OSINT lookups skipped"}
@@ -350,20 +414,33 @@ async def lookup(ip: str, force: bool = False) -> dict[str, Any]:
             if cached:
                 payload = json.loads(cached)
                 payload["cached"] = True
-                await _record_cache_hit(["abuseipdb", "virustotal", "shodan", "greynoise", "ipinfo", "intelix"])
+                # Upgrade a cached entry that skipped Shodan when the caller is
+                # now allowed to query it (e.g. a human opens the OSINT panel).
+                if allow_shodan and not _has_shodan_data(payload.get("shodan")):
+                    payload["shodan"] = await shodan_enrich(ip)
+                    payload["cached"] = False
+                    try:
+                        await redis.setex(cache_key, CACHE_TTL, json.dumps(payload))
+                    except Exception as e:
+                        logger.warning(f"OSINT redis write failed: {e}")
+                else:
+                    await _record_cache_hit(["abuseipdb", "virustotal", "shodan", "greynoise", "ipinfo", "intelix"])
                 return payload
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        abuse, vt, shodan, gn, ipi, intelix = await asyncio.gather(
+        abuse, vt, gn, ipi, intelix = await asyncio.gather(
             _track("abuseipdb", _abuseipdb(client, ip)),
             _track("virustotal", _virustotal(client, ip)),
-            _track("shodan", _shodan(client, ip)),
             _track("greynoise", _greynoise(client, ip)),
             _track("ipinfo", _ipinfo(client, ip)),
             _track("intelix", _intelix(client, ip)),
         )
+
+    # Shodan only on explicit permission (human). Automated callers get the
+    # skipped sentinel and may follow up via shodan_enrich if malicious.
+    shodan = await shodan_enrich(ip) if allow_shodan else dict(_SHODAN_SKIPPED)
 
     payload = {
         "ip": ip,
@@ -383,6 +460,56 @@ async def lookup(ip: str, force: bool = False) -> dict[str, Any]:
             logger.warning(f"OSINT redis write failed: {e}")
 
     return payload
+
+
+async def _persist_shodan(ip: str, shodan: dict[str, Any]) -> None:
+    """Upsert a Shodan host record when the lookup yielded ports or CVEs.
+    Best-effort — never breaks the OSINT response. Geo falls back to GeoIP
+    when Shodan didn't return coordinates."""
+    if not isinstance(shodan, dict) or not shodan.get("available"):
+        return
+    ports = shodan.get("ports") or []
+    vulns = shodan.get("vulns") or []
+    if not ports and not vulns:
+        return
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from app.database import async_session
+        from app.models import ShodanHost
+        from app.geoip_service import lookup_ip
+
+        lat, lon = shodan.get("latitude"), shodan.get("longitude")
+        country, city = shodan.get("country"), shodan.get("city")
+        async with async_session() as db:
+            if lat is None or lon is None:
+                geo = await lookup_ip(ip, db)
+                if geo:
+                    lat = lat if lat is not None else geo.get("lat")
+                    lon = lon if lon is not None else geo.get("lon")
+                    country = country or geo.get("country")
+                    city = city or geo.get("city")
+            now = datetime.now(timezone.utc)
+            values = {
+                "ip": ip, "lat": lat, "lon": lon, "country": country, "city": city,
+                "org": shodan.get("org"), "asn": str(shodan.get("asn") or "") or None,
+                "os": shodan.get("os"),
+                "ports": ports, "vulns": vulns,
+                "hostnames": shodan.get("hostnames") or [],
+                "tags": shodan.get("tags") or [],
+                "shodan_last_update": shodan.get("last_update"),
+                "last_seen": now,
+            }
+            stmt = pg_insert(ShodanHost).values(**values)
+            # On conflict refresh everything except first_seen.
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ip"],
+                set_={k: values[k] for k in values if k != "ip"},
+            )
+            await db.execute(stmt)
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"shodan persist failed for {ip}: {e}")
 
 
 # --- Domain & URL OSINT ---

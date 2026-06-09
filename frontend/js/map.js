@@ -2,6 +2,8 @@ let attackMap = null;
 let attackerMarkers = null;
 let firewallMarkers = null;
 let connectionLines = null;
+let shodanMarkers = null;
+let _shodanVisible = false;   // optional layer, off by default
 
 const ATTACK_CATEGORIES = [
     {key: 'malware',    label: 'Malware / C2',        color: '#7f1d1d'},
@@ -43,6 +45,7 @@ function initMap() {
     attackerMarkers = L.layerGroup().addTo(attackMap);
     firewallMarkers = L.layerGroup().addTo(attackMap);
     connectionLines = L.layerGroup().addTo(attackMap);
+    shodanMarkers = L.layerGroup().addTo(attackMap);
 
     addAttackLegend();
 }
@@ -82,9 +85,15 @@ function renderLegend() {
             <span class="legend-label">${d.label}</span>
         </div>`;
     }).join('');
+    const shodanOff = _shodanVisible ? '' : ' legend-row-off';
     _legendEl.innerHTML = `
         <div class="legend-title">Angriffsart</div>${catItems}
         <div class="legend-title legend-title-sub">Richtung</div>${dirRows}
+        <div class="legend-title legend-title-sub">Layer</div>
+        <div class="legend-row legend-clickable${shodanOff}" data-layer="shodan" title="Shodan-Hosts (Ports/CVEs) ein/ausblenden">
+            <span class="legend-swatch" style="background:#a855f7"></span>
+            <span class="legend-label">Shodan-Hosts (Ports/CVEs)</span>
+        </div>
         <div class="legend-actions">
             <button type="button" class="legend-btn" data-action="all">Alle</button>
             <button type="button" class="legend-btn" data-action="none">Keine</button>
@@ -92,11 +101,18 @@ function renderLegend() {
 }
 
 function onLegendClick(ev) {
-    const row = ev.target.closest('[data-cat],[data-dir],[data-action]');
+    const row = ev.target.closest('[data-cat],[data-dir],[data-action],[data-layer]');
     if (!row) return;
     const cat = row.dataset.cat;
     const dir = row.dataset.dir;
     const action = row.dataset.action;
+    const layer = row.dataset.layer;
+    if (layer === 'shodan') {
+        _shodanVisible = !_shodanVisible;
+        renderLegend();
+        updateShodanLayer();
+        return;
+    }
     if (cat) {
         if (_activeCategories.has(cat)) _activeCategories.delete(cat);
         else _activeCategories.add(cat);
@@ -363,5 +379,73 @@ function buildAttackPopup(atk) {
     const actions = blockBtn
         ? `<div class="popup-actions">${blockBtn}</div>`
         : '';
+    return `<div class="map-popup">${lines.filter(Boolean).join('')}${actions}</div>`;
+}
+
+// ── Shodan host layer (optional) ──────────────────────────────────────────
+// Long-term Shodan intel (open ports + known CVEs) harvested via OSINT lookups.
+// Colour scales with CVE count; radius with the exposed port count.
+
+function _shodanColor(cveCount) {
+    if (cveCount >= 20) return '#dc2626';   // red    — heavily vulnerable
+    if (cveCount >= 6)  return '#f97316';   // orange
+    if (cveCount >= 1)  return '#eab308';   // yellow
+    return '#a855f7';                        // purple — exposed ports, no known CVE
+}
+
+async function updateShodanLayer() {
+    if (!shodanMarkers) return;
+    if (!_shodanVisible) {
+        shodanMarkers.clearLayers();
+        return;
+    }
+    try {
+        const resp = await fetch('/api/shodan/hosts?days=365');
+        const data = await resp.json();
+        shodanMarkers.clearLayers();
+        (data.hosts || []).forEach(h => {
+            if (h.lat == null || h.lon == null) return;
+            const color = _shodanColor(h.cve_count);
+            const radius = Math.min(4 + Math.log2((h.port_count || 0) + 1) * 2.2, 16);
+            const marker = L.circleMarker([h.lat, h.lon], {
+                radius,
+                fillColor: color,
+                color: color,
+                weight: 1.5,
+                opacity: 0.9,
+                fillOpacity: 0.55,
+                dashArray: h.cve_count ? null : '2 3',
+            });
+            marker.bindPopup(buildShodanPopup(h), {maxWidth: 360, minWidth: 240});
+            shodanMarkers.addLayer(marker);
+        });
+    } catch (err) {
+        console.error('Shodan layer update failed:', err);
+    }
+}
+
+function buildShodanPopup(h) {
+    const ports = (h.ports || []).slice(0, 24).join(', ');
+    const cves = (h.vulns || []).slice(0, 12);
+    const cveLinks = cves.map(c =>
+        `<a href="https://nvd.nist.gov/vuln/detail/${_popEsc(c)}" target="_blank" rel="noopener">${_popEsc(c)}</a>`
+    ).join(', ');
+    const moreCve = h.cve_count > cves.length ? ` … (+${h.cve_count - cves.length})` : '';
+    const loc = [h.city, h.country].filter(Boolean).join(', ');
+    const lines = [
+        `<div class="popup-title">🛰️ ${_popEsc(h.ip)}</div>`,
+        loc ? `<div class="popup-row">${_popEsc(loc)}</div>` : '',
+        h.org ? `<div class="popup-row"><span>Org</span> ${_popEsc(h.org)}</div>` : '',
+        h.os ? `<div class="popup-row"><span>OS</span> ${_popEsc(h.os)}</div>` : '',
+        `<div class="popup-row"><span>Ports (${h.port_count})</span> ${_popEsc(ports) || '—'}</div>`,
+        h.cve_count
+            ? `<div class="popup-row"><span>CVEs (${h.cve_count})</span> ${cveLinks}${moreCve}</div>`
+            : `<div class="popup-row"><span>CVEs</span> keine bekannt</div>`,
+        h.last_seen ? `<div class="popup-row"><span>Gesehen</span> ${_popTime(h.last_seen)}</div>` : '',
+    ];
+    const actions = `<div class="popup-actions">
+        <a class="block-link" href="https://www.shodan.io/host/${_popEsc(h.ip)}" target="_blank" rel="noopener">Shodan ↗</a>
+        ${typeof osintButton === 'function' ? osintButton(h.ip, 'block-link', 'ip') : ''}
+    </div>`;
     return `<div class="map-popup">${lines.filter(Boolean).join('')}${actions}</div>`;
 }

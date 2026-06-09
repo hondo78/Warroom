@@ -54,6 +54,29 @@ class O365AuditLog(Base):
     attacker_city = Column(String(255))
 
 
+class ShodanHost(Base):
+    """Long-term store of Shodan host intelligence harvested via OSINT lookups —
+    open ports and known CVEs per IP, geo-located for the map layers."""
+
+    __tablename__ = "shodan_hosts"
+
+    ip = Column(String(64), primary_key=True)
+    lat = Column(Float)
+    lon = Column(Float)
+    country = Column(String(100))
+    city = Column(String(255))
+    org = Column(String(255))
+    asn = Column(String(64))
+    os = Column(String(120))
+    ports = Column(JSONB)        # list[int]
+    vulns = Column(JSONB)        # list[str]  (CVE ids)
+    hostnames = Column(JSONB)    # list[str]
+    tags = Column(JSONB)         # list[str]
+    shodan_last_update = Column(String(64))   # Shodan's own "last_update" string
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Event(Base):
     __tablename__ = "events"
 

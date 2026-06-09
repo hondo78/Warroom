@@ -18,7 +18,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, WhitelistedIp
+from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, ShodanHost, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -684,6 +684,54 @@ async def get_o365_logins(
             "top_countries": [{"country": r[0], "count": int(r[1])} for r in top_countries],
         },
         "configured": o365_client.configured,
+    }
+
+
+# --- Shodan host intelligence (ports + CVEs) ---
+
+@app.get("/api/shodan/hosts")
+@cached(ttl=60)
+async def get_shodan_hosts(
+    days: int = Query(default=90, ge=1, le=365),
+    only_vulns: bool = Query(default=False),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Geolocated Shodan hosts harvested via OSINT lookups, for the map layers."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = (
+        select(ShodanHost)
+        .where(ShodanHost.last_seen >= since, ShodanHost.lat.isnot(None), ShodanHost.lon.isnot(None))
+        .order_by(ShodanHost.last_seen.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+
+    items = []
+    for r in rows:
+        vulns = r.vulns or []
+        ports = r.ports or []
+        if only_vulns and not vulns:
+            continue
+        items.append({
+            "ip": r.ip, "lat": r.lat, "lon": r.lon,
+            "country": r.country, "city": r.city, "org": r.org, "asn": r.asn, "os": r.os,
+            "ports": ports, "port_count": len(ports),
+            "vulns": vulns, "cve_count": len(vulns),
+            "hostnames": r.hostnames or [], "tags": r.tags or [],
+            "last_seen": _iso(r.last_seen), "shodan_last_update": r.shodan_last_update,
+        })
+    total_cves = sum(i["cve_count"] for i in items)
+    return {
+        "hosts": items,
+        "stats": {
+            "hosts": len(items),
+            "with_cves": sum(1 for i in items if i["cve_count"]),
+            "total_cves": total_cves,
+        },
     }
 
 
@@ -2945,11 +2993,25 @@ async def osint_lookup_domain(domain: str, force: bool = Query(default=False)):
     return await osint_domain_fn(normalised, force=force)
 
 
+@app.post("/api/osint/shodan/{ip}")
+async def osint_shodan_ondemand(ip: str):
+    """Explicit, human-triggered Shodan lookup (the 'Shodan abfragen' button).
+    Shodan is never run automatically — this is the only human entry point and
+    it spends one Shodan credit. Queries + persists ports/CVEs for the layers."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+    from app.osint import shodan_on_demand
+    return await shodan_on_demand(ip)
+
+
 @app.get("/api/osint/{ip}")
 async def osint_lookup(ip: str, force: bool = Query(default=False)):
-    """Run AbuseIPDB / VirusTotal / Shodan / GreyNoise / ipinfo in parallel
-    for a given IP. Results are cached in Redis for 1h. Pass ?force=true to
-    bypass the cache."""
+    """Run AbuseIPDB / VirusTotal / GreyNoise / ipinfo / Intelix in parallel for
+    a given IP (Shodan is NOT included — trigger it explicitly via the button →
+    /api/osint/shodan/{ip}). Cached in Redis for 1h. Pass ?force=true to bypass."""
     import ipaddress
     try:
         ipaddress.ip_address(ip)
@@ -3523,6 +3585,8 @@ class AdminSettingsIn(BaseModel):
     abuseipdb_api_key: str | None = None
     virustotal_api_key: str | None = None
     shodan_api_key: str | None = None
+    shodan_auto_on_malicious: bool | None = None
+    shodan_auto_abuse_threshold: int | None = None
     sophos_intelix_client_id: str | None = None
     sophos_intelix_client_secret: str | None = None
     collector_interval: int | None = Field(default=None, ge=30, le=86400)

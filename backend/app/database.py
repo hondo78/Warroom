@@ -216,6 +216,27 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_o365_audit_operation ON o365_audit_logs(operation)",
     # Telegram approval message id on agent decisions (idempotent add).
     "ALTER TABLE agent_decisions ADD COLUMN IF NOT EXISTS telegram_message_id BIGINT",
+    # Long-term Shodan host intelligence (open ports + CVEs per IP).
+    """
+    CREATE TABLE IF NOT EXISTS shodan_hosts (
+        ip VARCHAR(64) PRIMARY KEY,
+        lat FLOAT,
+        lon FLOAT,
+        country VARCHAR(100),
+        city VARCHAR(255),
+        org VARCHAR(255),
+        asn VARCHAR(64),
+        os VARCHAR(120),
+        ports JSONB,
+        vulns JSONB,
+        hostnames JSONB,
+        tags JSONB,
+        shodan_last_update VARCHAR(64),
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_shodan_hosts_last_seen ON shodan_hosts(last_seen DESC)",
 ]
 
 

@@ -1092,8 +1092,16 @@ async def _llm_decide_rule(
     osint: dict[str, Any] = {}
     if ip and _is_public_ip(ip):
         try:
-            from app.osint import lookup as osint_lookup
-            osint = await osint_lookup(ip, force=False)
+            from app.osint import lookup as osint_lookup, looks_malicious, shodan_enrich
+            # Automated path: skip the (scarce) Shodan credit by default and only
+            # spend it when the cheap providers already flag the IP as malicious.
+            osint = await osint_lookup(ip, force=False, allow_shodan=False)
+            if settings.shodan_auto_on_malicious and looks_malicious(osint, settings.shodan_auto_abuse_threshold):
+                try:
+                    osint["shodan"] = await shodan_enrich(ip)
+                    logger.info(f"agent[{source_type}]: Shodan queried for malicious {ip}")
+                except Exception as e:
+                    logger.warning(f"agent[{source_type}]: Shodan enrich for {ip} failed: {e}")
         except Exception as e:
             logger.warning(f"agent[{source_type}]: OSINT lookup for {ip} failed: {e}")
             osint = {"error": str(e)[:200]}

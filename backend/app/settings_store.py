@@ -41,6 +41,8 @@ MANAGED_KEYS: dict[str, type] = {
     "abuseipdb_api_key": str,
     "virustotal_api_key": str,
     "shodan_api_key": str,
+    "shodan_auto_on_malicious": bool,
+    "shodan_auto_abuse_threshold": int,
     "sophos_intelix_client_id": str,
     "sophos_intelix_client_secret": str,
     "collector_interval": int,

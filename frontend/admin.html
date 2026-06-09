@@ -225,6 +225,13 @@
                             <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="virustotal_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
                             <div class="col-md-4"><label class="form-label">Shodan API Key</label></div>
                             <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="shodan_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Shodan: Auto-Abfrage bei schädlicher IP</label></div>
+                            <div class="col-md-8">
+                                <input type="checkbox" data-key="shodan_auto_on_malicious" data-bool="1">
+                                <small class="admin-hint">Shodan-Credits sind knapp: Abfragen nur manuell (OSINT-Button/Triage). Aktiviert → automatische Agent-Loops dürfen Shodan zusätzlich bei klar schädlichen IPs abfragen.</small>
+                            </div>
+                            <div class="col-md-4"><label class="form-label">Schwelle „schädlich" (AbuseIPDB %)</label></div>
+                            <div class="col-md-8"><input type="number" min="0" max="100" class="form-control form-control-sm" data-key="shodan_auto_abuse_threshold"></div>
                             <div class="col-md-4"><label class="form-label">Sophos Intelix Client ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_intelix_client_id" autocomplete="off"></div>
                             <div class="col-md-4"><label class="form-label">Sophos Intelix Client Secret</label></div>

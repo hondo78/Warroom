@@ -77,7 +77,7 @@ zur Verfügung:
 | **Agent-Workflow** | `/agent-workflow.html` | Visualisiert die Entscheidungs-Pipeline und macht **jede Stufe** (Trigger, Schwellen, Intervall, erlaubte Aktionen, System-Prompt, Auto-Execute) live editierbar. Das LLM wird mit **strukturierten Ausgaben** (Pydantic-Schema via `response_format`) angesprochen und typisiert validiert. |
 | **Email** | `/email.html` | Sophos Email Management API: Mailboxen verwalten (anlegen/ändern/löschen), Quarantäne & Post-Delivery-Quarantäne durchsuchen, Nachrichten freigeben/löschen (optional Absender erlauben/blocken). |
 | **Microsoft 365** | `/o365.html` | M365-Login-Audit (Management Activity API): erfolgreiche & fehlgeschlagene Anmeldungen mit App, **Gerät** (Name/OS/Browser/Compliance), Quell-IP, Standort. Spalten **sortier- und filterbar**; OSINT-Drilldown pro IP; fehlgeschlagene Logins direkt blockbar (whitelistete IPs geschützt). |
-| **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo & DNS parallel; Verlauf & Cache-Bypass. Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. |
+| **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, GreyNoise, ipinfo & DNS parallel; Verlauf & Cache-Bypass. **Shodan** ist credit-sparend opt-in: erst per Button „🛰️ Shodan abfragen". Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. Erkannte **offene Ports & CVEs** werden langfristig gespeichert und als optionaler Karten-Layer dargestellt. |
 | **Stats** | `/stats.html` | Verbrauch der OSINT-Provider (Tages-/Monatslimits), LLM-Calls & Tokens, Cache-Trefferquote. |
 | **Admin** | `/admin.html` | Alle API-Keys, Intervalle, Loglevel und Agent-Einstellungen **live** editieren – ohne Container-Neustart. |
 | **Grafana** | `:3030` | Vorgefertigte Dashboards (Warroom, NetFlow, Blocklist) direkt auf der PostgreSQL-DB. |
@@ -329,6 +329,29 @@ ausgeführt (Long-Polling, kein öffentlicher Webhook nötig). Konfiguration unt
 
 > Nur der konfigurierte Chat darf Approvals ausführen; Taps aus anderen Chats
 > werden abgewiesen.
+
+---
+
+## Shodan-Host-Intelligence (optional)
+
+Liefert pro IP **offene Ports** und **bekannte CVEs**. Diese werden langfristig in
+`shodan_hosts` gespeichert und als optionaler Karten-Layer dargestellt
+(Marker nach CVE-Anzahl gefärbt, Popup mit Ports + CVE-Links). Setzt einen
+**Shodan API Key** voraus (Admin → OSINT).
+
+**Shodan-Credits sind knapp — deshalb wird Shodan nie automatisch abgefragt:**
+
+- **Mensch:** nur per Button **„🛰️ Shodan abfragen"** im OSINT-Panel
+  (`POST /api/osint/shodan/{ip}`). Das routinemäßige OSINT-Panel löst **keine**
+  Shodan-Abfrage aus.
+- **Automatik:** die regelbasierten Agent-Loops fragen Shodan nur, wenn die
+  günstigen Provider die IP bereits als **klar schädlich** einstufen
+  (AbuseIPDB ≥ Schwelle / VirusTotal ≥ 3 / GreyNoise = malicious). Steuerbar
+  über *Shodan: Auto-Abfrage bei schädlicher IP* + *Schwelle* (Admin → OSINT);
+  abschalten ⇒ Shodan ist rein manuell.
+
+Den Karten-Layer findest du in der **Attack-Map-Legende** unter „LAYER →
+Shodan-Hosts" (und im OSIRIS-Dashboard als eigener Layer).
 
 ---
 

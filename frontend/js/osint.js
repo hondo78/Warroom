@@ -139,6 +139,23 @@ function closeOsint() {
     _osintCurrent = { value: null, type: 'ip' };
 }
 
+// Human-triggered Shodan lookup — the only way Shodan runs for a person.
+async function shodanLookup() {
+    const ip = _osintCurrent.value;
+    if (!ip || _osintCurrent.type !== 'ip') return;
+    const card = document.getElementById('osintShodanCard');
+    const btn = card ? card.querySelector('.osint-shodan-btn') : null;
+    if (btn) { btn.disabled = true; btn.textContent = '🛰️ Shodan wird abgefragt…'; }
+    try {
+        const r = await fetch(`/api/osint/shodan/${encodeURIComponent(ip)}`, { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = await r.json();
+        if (card) card.innerHTML = _osintRenderShodanBody(s);
+    } catch (err) {
+        if (card) card.innerHTML = `<div class="detail-error">Shodan-Abfrage fehlgeschlagen: ${_osintEscape(err.message)}</div>`;
+    }
+}
+
 async function _osintRun(value, type, force) {
     const body = document.getElementById('osintModalBody');
     try {
@@ -252,6 +269,18 @@ function _osintRenderVT(p) {
 }
 
 function _osintRenderShodan(p) {
+    // Shodan is opt-in: the skipped sentinel renders a button instead of data,
+    // so opening the panel never spends a Shodan credit.
+    if (p && p.skipped) {
+        return `<div id="osintShodanCard">
+            <div class="osint-na">Wird nur auf Anfrage abgefragt — verbraucht ein Shodan-Credit.</div>
+            <button class="osint-shodan-btn" onclick="shodanLookup()">🛰️ Shodan abfragen</button>
+        </div>`;
+    }
+    return `<div id="osintShodanCard">${_osintRenderShodanBody(p)}</div>`;
+}
+
+function _osintRenderShodanBody(p) {
     const head = _osintHead(p); if (head !== null) return head;
     if (p.no_record) return `<div class="osint-na">kein Eintrag bei Shodan</div>${_osintLink(p.url, 'Shodan-Suche öffnen')}`;
     const ports = (p.ports || []).slice(0, 30).map(pt => `<span class="osint-tag">${pt}</span>`).join(' ');
