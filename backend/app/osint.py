@@ -459,7 +459,61 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         except Exception as e:
             logger.warning(f"OSINT redis write failed: {e}")
 
+    # Long-term history (independent of the 1h Redis cache).
+    await _persist_osint(ip, "ip", payload)
+
     return payload
+
+
+async def _persist_osint(value: str, itype: str, payload: dict[str, Any]) -> None:
+    """Upsert an OSINT lookup into the long-term history table. Best-effort —
+    never breaks the lookup response."""
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from app.database import async_session
+        from app.models import OsintResult
+
+        ab = payload.get("abuseipdb") or {}
+        vt = payload.get("virustotal") or {}
+        gn = payload.get("greynoise") or {}
+        intel = payload.get("intelix") or {}
+        ipi = payload.get("ipinfo") or {}
+        # ipinfo "loc" is "lat,lon"; split when present.
+        lat = lon = None
+        loc = ipi.get("loc") or ""
+        if isinstance(loc, str) and "," in loc:
+            try:
+                lat, lon = (float(x) for x in loc.split(",", 1))
+            except ValueError:
+                lat = lon = None
+        cols = {
+            "value": value[:2048],
+            "indicator_type": itype,
+            "abuse_score": ab.get("abuse_score") if isinstance(ab.get("abuse_score"), (int, float)) else None,
+            "vt_malicious": vt.get("malicious") if isinstance(vt.get("malicious"), (int, float)) else None,
+            "greynoise": (gn.get("classification") or None),
+            "intelix_category": (intel.get("security_category") or intel.get("category") or None),
+            "country": ipi.get("country"),
+            "city": ipi.get("city"),
+            "org": ipi.get("org"),
+            "asn": str(ipi.get("asn")) if ipi.get("asn") else None,
+            "lat": lat, "lon": lon,
+            "raw": payload,
+            "last_seen": datetime.now(timezone.utc),
+        }
+        async with async_session() as db:
+            stmt = pg_insert(OsintResult).values(lookup_count=1, **cols)
+            # On repeat lookup: refresh summary + bump the counter, keep first_seen.
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["value"],
+                set_={**{k: cols[k] for k in cols if k != "value"},
+                      "lookup_count": OsintResult.lookup_count + 1},
+            )
+            await db.execute(stmt)
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"osint persist failed for {value}: {e}")
 
 
 async def _persist_shodan(ip: str, shodan: dict[str, Any]) -> None:
@@ -749,6 +803,8 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
         except Exception as e:
             logger.warning(f"OSINT redis write failed: {e}")
 
+    await _persist_osint(domain.lower(), "domain", payload)
+
     return payload
 
 
@@ -790,5 +846,7 @@ async def lookup_url(url: str, force: bool = False) -> dict[str, Any]:
             await redis.setex(cache_key, CACHE_TTL, json.dumps(payload))
         except Exception as e:
             logger.warning(f"OSINT redis write failed: {e}")
+
+    await _persist_osint(url, "url", payload)
 
     return payload

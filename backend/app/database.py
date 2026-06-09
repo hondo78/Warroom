@@ -1,7 +1,11 @@
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(settings.database_url, echo=False, pool_size=10)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -237,13 +241,43 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_shodan_hosts_last_seen ON shodan_hosts(last_seen DESC)",
+    # Long-term OSINT lookup history (cheap providers only live ~1h in Redis).
+    """
+    CREATE TABLE IF NOT EXISTS osint_results (
+        value VARCHAR(2048) PRIMARY KEY,
+        indicator_type VARCHAR(16),
+        abuse_score INTEGER,
+        vt_malicious INTEGER,
+        greynoise VARCHAR(32),
+        intelix_category VARCHAR(120),
+        country VARCHAR(100),
+        city VARCHAR(255),
+        org VARCHAR(255),
+        asn VARCHAR(64),
+        lat FLOAT,
+        lon FLOAT,
+        raw JSONB,
+        lookup_count INTEGER DEFAULT 1,
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_osint_results_last_seen ON osint_results(last_seen DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_osint_results_type ON osint_results(indicator_type)",
+    "CREATE INDEX IF NOT EXISTS idx_osint_results_abuse ON osint_results(abuse_score DESC)",
 ]
 
 
 async def ensure_schema() -> None:
-    async with engine.begin() as conn:
-        for stmt in _MIGRATIONS:
-            await conn.execute(text(stmt))
+    # Each migration runs in its own transaction so a transient failure on one
+    # statement (e.g. a lock at startup) can't roll back the others. Failures
+    # are logged, not fatal — all statements are idempotent and retried next boot.
+    for stmt in _MIGRATIONS:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception as e:
+            logger.warning(f"migration failed (will retry next start): {str(e)[:160]} | {stmt[:70].strip()}")
 
 
 async def get_db():

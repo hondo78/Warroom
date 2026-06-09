@@ -77,6 +77,30 @@ class ShodanHost(Base):
     last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class OsintResult(Base):
+    """Long-term history of every OSINT lookup (IP / domain / URL). The cheap
+    providers only live ~1h in Redis; this keeps a searchable record."""
+
+    __tablename__ = "osint_results"
+
+    value = Column(String(2048), primary_key=True)   # the IP / domain / URL
+    indicator_type = Column(String(16))              # ip | domain | url
+    abuse_score = Column(Integer)                    # AbuseIPDB confidence %
+    vt_malicious = Column(Integer)                   # VirusTotal malicious count
+    greynoise = Column(String(32))                   # classification
+    intelix_category = Column(String(120))
+    country = Column(String(100))
+    city = Column(String(255))
+    org = Column(String(255))
+    asn = Column(String(64))
+    lat = Column(Float)
+    lon = Column(Float)
+    raw = Column(JSONB)                              # full merged payload
+    lookup_count = Column(Integer, default=1)
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Event(Base):
     __tablename__ = "events"
 

@@ -14,7 +14,55 @@ document.addEventListener('DOMContentLoaded', () => {
     input.addEventListener('keydown', e => { if (e.key === 'Enter') runOsintQuery(); });
     input.focus();
     renderHistory();
+    loadOsintHistory();
 });
+
+// --- Persistent OSINT history (DB-backed, survives the 1h Redis cache) ---
+let _osintHistTimer = null;
+function loadOsintHistoryDebounced() {
+    clearTimeout(_osintHistTimer);
+    _osintHistTimer = setTimeout(loadOsintHistory, 350);
+}
+
+async function loadOsintHistory() {
+    const type = document.getElementById('osintHistType')?.value || 'all';
+    const abuse = document.getElementById('osintHistAbuse')?.value || '0';
+    const q = (document.getElementById('osintHistSearch')?.value || '').trim();
+    const tbody = document.getElementById('osintHistTable');
+    if (!tbody) return;
+    try {
+        const params = new URLSearchParams({ days: '3650', indicator_type: type, min_abuse: abuse, limit: '500' });
+        if (q) params.set('q', q);
+        const r = await fetch('/api/osint/history?' + params.toString());
+        const d = await r.json();
+        const totEl = document.getElementById('osintHistTotal');
+        if (totEl) totEl.textContent = d.total != null ? `(${d.total} gespeichert)` : '';
+        const items = d.items || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-secondary text-center py-3">Keine Einträge.</td></tr>';
+            return;
+        }
+        const abuseBadge = s => s == null ? '—'
+            : `<span class="badge ${s >= 80 ? 'text-bg-danger' : s >= 40 ? 'text-bg-warning' : 'text-bg-secondary'}">${s}%</span>`;
+        tbody.innerHTML = items.map(h => {
+            const loc = [h.city, h.country].filter(Boolean).join(', ') || '—';
+            const ago = h.last_seen ? new Date(h.last_seen).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+            const osint = typeof osintButton === 'function' && h.type === 'ip' ? osintButton(h.value, 'osint-btn', 'ip') : '';
+            return `<tr>
+                <td><code style="font-size:.8rem">${escapeHtml(h.value)}</code>${osint}</td>
+                <td><span class="badge text-bg-dark">${escapeHtml(h.type || '')}</span></td>
+                <td>${abuseBadge(h.abuse_score)}</td>
+                <td>${h.vt_malicious != null ? h.vt_malicious : '—'}</td>
+                <td>${escapeHtml(h.greynoise || '—')}</td>
+                <td>${escapeHtml(loc)} <span class="text-secondary" style="font-size:.75rem">${escapeHtml(h.org || '')}</span></td>
+                <td>${h.lookup_count || 1}</td>
+                <td style="white-space:nowrap">${ago}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="detail-error">Historie laden fehlgeschlagen: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
 
 // Best-effort classification when the type select is on "auto".
 function detectOsintType(v) {

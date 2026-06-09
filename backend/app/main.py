@@ -19,7 +19,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, ShodanHost, WhitelistedIp
+from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -2996,6 +2996,46 @@ async def osint_lookup_domain(domain: str, force: bool = Query(default=False)):
         raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
     from app.osint import lookup_domain as osint_domain_fn
     return await osint_domain_fn(normalised, force=force)
+
+
+@app.get("/api/osint/history")
+async def osint_history(
+    days: int = Query(default=90, ge=1, le=3650),
+    q: str = Query(default=""),
+    indicator_type: str = Query(default="all", pattern="^(all|ip|domain|url)$"),
+    min_abuse: int = Query(default=0, ge=0, le=100),
+    limit: int = Query(default=200, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persistent OSINT lookup history (survives the 1h Redis cache)."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    stmt = select(OsintResult).where(OsintResult.last_seen >= since)
+    if indicator_type != "all":
+        stmt = stmt.where(OsintResult.indicator_type == indicator_type)
+    if q:
+        stmt = stmt.where(OsintResult.value.ilike(f"%{q}%"))
+    if min_abuse:
+        stmt = stmt.where(OsintResult.abuse_score >= min_abuse)
+    rows = (await db.execute(stmt.order_by(OsintResult.last_seen.desc()).limit(limit))).scalars().all()
+    total = (await db.execute(select(func.count(OsintResult.value)))).scalar() or 0
+
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "value": r.value, "type": r.indicator_type,
+                "abuse_score": r.abuse_score, "vt_malicious": r.vt_malicious,
+                "greynoise": r.greynoise, "intelix_category": r.intelix_category,
+                "country": r.country, "city": r.city, "org": r.org, "asn": r.asn,
+                "lookup_count": r.lookup_count,
+                "first_seen": _iso(r.first_seen), "last_seen": _iso(r.last_seen),
+            }
+            for r in rows
+        ],
+    }
 
 
 @app.post("/api/osint/shodan/{ip}")
