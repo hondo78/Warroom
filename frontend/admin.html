@@ -215,6 +215,27 @@
                     </div>
                 </div>
 
+                <!-- Analyst persona (free chat) -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0">KI-Analyst — Persona (System-Prompt)</h3>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="resetAnalystPersona()"><i class="bi bi-arrow-counterclockwise"></i> Standard laden</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint">
+                            System-Prompt für den <strong>freien Chat</strong> mit dem LLM (über
+                            <a href="/chat.html" class="osint-link">KI-Chat</a>, Teams und Telegram).
+                            Nicht erkannte Befehle werden als Gespräch mit dieser Analysten-Persona
+                            beantwortet. Leer = mitgelieferter Standard-Prompt. Benötigt einen
+                            aktivierten Agenten (LLM-Endpoint).
+                        </p>
+                        <textarea class="form-control form-control-sm" rows="8" data-key="analyst_system_prompt" placeholder="Leer lassen für die Standard-Analyst-Persona…" style="font-family:monospace;font-size:.8rem"></textarea>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('analyst')">Persona speichern</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- IOC Feeds -->
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0">IOC-Feeds (IP + Domain + URL)</h3></div>

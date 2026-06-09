@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     # Empty ⇒ fall back to DEFAULT_TRIAGE_PROMPT in app.agent.
     agent_triage_system_prompt: str = ""
 
+    # Analyst-persona system prompt for the free-form chat (in-app chat / Teams /
+    # Telegram conversation). Empty ⇒ DEFAULT_ANALYST_PROMPT in command_service.
+    analyst_system_prompt: str = ""
+
     # --- OSINT-Provider Quota limits (for the /stats.html cost view) ---
     # Defaults reflect the documented free tiers; 0 disables the warning.
     osint_abuseipdb_daily_limit: int = 1000     # Standard free tier

@@ -213,12 +213,36 @@ async def _handle_callback(cb: dict) -> None:
         await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + f"\n\n{verdict} — by @{actor}")
 
 
+async def _handle_message(msg: dict) -> None:
+    """Free-text message in the configured chat → run it through the command /
+    analyst pipeline and reply. Commands (block/isolate/…) execute; everything
+    else is a conversation with the analyst-persona LLM."""
+    chat_id = str(((msg.get("chat") or {}).get("id")))
+    if chat_id != str(settings.telegram_chat_id):
+        return  # ignore other chats
+    text = (msg.get("text") or "").strip()
+    if not text or text.startswith("/"):  # ignore slash-commands / empty
+        return
+    actor = ((msg.get("from") or {}).get("username")
+             or (msg.get("from") or {}).get("first_name") or "telegram")
+    try:
+        from app.command_service import run_command
+        result = await run_command(text, actor=actor)
+        await _call("sendMessage", {
+            "chat_id": settings.telegram_chat_id,
+            "text": result.get("reply") or "(keine Antwort)",
+            "reply_to_message_id": msg.get("message_id"),
+        })
+    except Exception as e:
+        logger.warning(f"telegram message handling failed: {e}")
+
+
 async def telegram_poll_updates() -> None:
-    """Pull queued updates and dispatch button callbacks."""
+    """Pull queued updates and dispatch button callbacks and free-text messages."""
     global _update_offset
     if not _enabled():
         return
-    payload = {"timeout": 0, "allowed_updates": ["callback_query"]}
+    payload = {"timeout": 0, "allowed_updates": ["callback_query", "message"]}
     if _update_offset is not None:
         payload["offset"] = _update_offset
     updates = await _call("getUpdates", payload, timeout=20.0)
@@ -232,6 +256,10 @@ async def telegram_poll_updates() -> None:
                 await _handle_callback(cb)
             except Exception as e:
                 logger.warning(f"telegram callback handling failed: {e}")
+            continue
+        msg = upd.get("message")
+        if msg:
+            await _handle_message(msg)
 
 
 async def test_telegram() -> dict:

@@ -4,6 +4,7 @@ const SECTIONS = {
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],
+    analyst: ['analyst_system_prompt'],
     geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'shodan_auto_on_malicious', 'shodan_auto_abuse_threshold', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
     osintQuota: [
         'osint_abuseipdb_daily_limit', 'osint_abuseipdb_monthly_limit',
@@ -243,6 +244,17 @@ async function entraSyncNow() {
         toast(`✓ ${data.ranges} IP-Range(s) zu Entra synchronisiert.`, 'success');
     } catch (err) {
         toast(`Entra-Sync fehlgeschlagen: ${err.message}`, 'error');
+    }
+}
+
+async function resetAnalystPersona() {
+    try {
+        const r = await fetch('/api/chat/default-persona');
+        const d = await r.json();
+        const ta = document.querySelector('[data-key="analyst_system_prompt"]');
+        if (ta && d.prompt) { ta.value = d.prompt; toast('Standard-Persona geladen — zum Übernehmen speichern.', 'info'); }
+    } catch (err) {
+        toast('Standard-Persona laden fehlgeschlagen: ' + err.message, 'error');
     }
 }
 

@@ -350,7 +350,14 @@ Nachricht ausführen:
 
 Die Intent-Erkennung läuft zuerst über einen **Keyword-Parser** (sofortige
 Antwort für klare Befehle) und fällt bei unklaren Formulierungen auf den
-**LLM-Agenten** zurück — funktioniert also auch ohne aktivierten Agenten.
+**LLM-Agenten** zurück — die Kern-Befehle funktionieren also auch ohne Agent.
+
+**Freier Chat mit dem LLM:** Alles, was kein erkannter Befehl ist, beantwortet
+eine **Security-Analyst-Persona** (LLM) — Bedrohungen einordnen, CVEs erklären,
+Indikatoren bewerten, Logs interpretieren. Funktioniert über **alle drei
+Kanäle** (KI-Chat, Teams, Telegram). Der System-Prompt der Persona ist unter
+**Admin → KI-Analyst — Persona** editierbar (mit „Standard laden"). Benötigt
+einen aktivierten Agenten (LLM-Endpoint).
 
 **Microsoft Teams einrichten** (Admin → Microsoft Teams):
 1. Im Team → **… → Verwalten → Outgoing Webhooks → Erstellen**.

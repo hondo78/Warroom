@@ -86,6 +86,7 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_failed_login_distributed_min_ips": int,
     "agent_failed_login_distributed_system_prompt": str,
     "agent_triage_system_prompt": str,
+    "analyst_system_prompt": str,
     # OSINT-Provider Quotas
     "osint_abuseipdb_daily_limit": int,
     "osint_abuseipdb_monthly_limit": int,

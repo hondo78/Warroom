@@ -59,6 +59,28 @@ quarantaene/quarantine -> quarantine_list. osint/pruefe/info zu -> osint.
 report/statistik/stats/zusammenfassung -> stats_report. hilfe/help -> help.
 Nur das JSON, keine Erklaerung."""
 
+DEFAULT_ANALYST_PROMPT = """Du bist „Warroom Analyst", ein erfahrener Security-Operations-Analyst (SOC)
+als Assistent in der Warroom-Plattform (Sophos-zentriert: Firewall, Endpoints,
+Email, NetFlow, M365, OSINT, Blocklisten).
+
+Deine Aufgabe: dem Analysten im Gespräch helfen — Bedrohungen einordnen, CVEs
+und Angriffsmuster erklären, IPs/Domains/Indikatoren bewerten, Logs und Alerts
+interpretieren, Härtungs- und Reaktionsempfehlungen geben.
+
+Stil: präzise, sachlich, auf Deutsch, knapp aber fundiert. Strukturiere bei
+Bedarf mit kurzen Stichpunkten. Keine erfundenen Fakten — wenn du etwas nicht
+sicher weißt, sage es und schlage einen nächsten Schritt vor.
+
+Du kannst auch Aktionen auslösen: Wenn der Nutzer etwas blocken, isolieren, die
+Quarantäne oder OSINT abfragen oder einen Statistik-Report möchte, weise ihn auf
+die direkten Befehle hin (z.B. „blockiere 1.2.3.4", „isoliere PC-12345",
+„OSINT zu 8.8.8.8", „Statistik-Report") — diese führt das System direkt aus.
+Du selbst führst keine Änderungen aus, du berätst.
+
+WICHTIG: Antworte IMMER auf Deutsch und gib NUR die finale Antwort aus. Zeige
+keine Denkschritte, kein internes Reasoning, keine Meta-Kommentare wie „Here's a
+thinking process" — direkt die fertige, knappe Analyse. /no_think"""
+
 _IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 _DOMAIN_RE = re.compile(r"\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b", re.I)
 _URL_RE = re.compile(r"\bhttps?://[^\s]+", re.I)
@@ -359,8 +381,47 @@ _HANDLERS = {
 }
 
 
-async def run_command(text: str, actor: str = "chat") -> dict[str, Any]:
-    """Resolve and execute a free-text command. Returns {tool, reply}."""
+async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
+    """Free-form conversation with the LLM using the analyst persona. Returns
+    None when the agent/LLM isn't configured."""
+    base = (settings.agent_base_url or "").rstrip("/")
+    if not (settings.agent_enabled and base):
+        return None
+    system_prompt = (getattr(settings, "analyst_system_prompt", "") or "").strip() or DEFAULT_ANALYST_PROMPT
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in (history or [])[-8:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": str(h["content"])[:4000]})
+    messages.append({"role": "user", "content": text})
+    headers = {"Content-Type": "application/json"}
+    if settings.agent_api_key:
+        headers["Authorization"] = f"Bearer {settings.agent_api_key}"
+    payload = {
+        "model": settings.agent_model or "local-model",
+        "temperature": float(getattr(settings, "agent_temperature", 0.3) or 0.3),
+        "max_tokens": int(getattr(settings, "agent_max_tokens", 1200) or 1200),
+        "messages": messages,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(f"{base}/chat/completions", headers=headers, json=payload)
+        if r.status_code != 200:
+            return f"WARN LLM-Fehler (HTTP {r.status_code})."
+        content = (((r.json().get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+        # Strip reasoning some models leak: <think>…</think> tags, and a leading
+        # English "thinking process" preamble before the actual answer.
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.S)
+        content = re.sub(r"^\s*(?:here'?s?\s+(?:a|my)\s+thinking\s+process|let me think|thinking)\b.*?(?:\n\n|\Z)",
+                         "", content, flags=re.S | re.I, count=1)
+        return content.strip() or "(keine Antwort)"
+    except Exception as e:
+        logger.warning(f"llm_chat failed: {e}")
+        return f"WARN LLM nicht erreichbar: {str(e)[:160]}"
+
+
+async def run_command(text: str, actor: str = "chat", history: list[dict] | None = None) -> dict[str, Any]:
+    """Resolve a free-text message: execute a recognised command, otherwise hold
+    a conversation with the analyst-persona LLM. Returns {tool, reply}."""
     text = (text or "").strip()
     if not text:
         return {"tool": "help", "reply": _help_text()}
@@ -368,12 +429,17 @@ async def run_command(text: str, actor: str = "chat") -> dict[str, Any]:
     tool = intent.get("tool", "unknown")
     if tool == "help":
         return {"tool": "help", "reply": _help_text()}
-    if tool == "unknown" or tool not in _HANDLERS:
-        return {"tool": "unknown", "reply": "Befehl nicht erkannt. Schreib 'hilfe' fuer die Uebersicht."}
-    handler = _HANDLERS[tool]
-    try:
-        reply = await handler(intent.get("args") or {}, actor)
-    except Exception as e:
-        logger.exception("command handler failed")
-        reply = f"WARN Ausfuehrung fehlgeschlagen: {str(e)[:200]}"
-    return {"tool": tool, "reply": reply, "args": intent.get("args") or {}}
+    if tool in _HANDLERS:
+        try:
+            reply = await _HANDLERS[tool](intent.get("args") or {}, actor)
+        except Exception as e:
+            logger.exception("command handler failed")
+            reply = f"WARN Ausfuehrung fehlgeschlagen: {str(e)[:200]}"
+        return {"tool": tool, "reply": reply, "args": intent.get("args") or {}}
+
+    # No command matched → free conversation with the analyst LLM.
+    chat_reply = await llm_chat(text, history)
+    if chat_reply is None:
+        return {"tool": "unknown",
+                "reply": "Befehl nicht erkannt und kein LLM konfiguriert. Schreib 'hilfe' fuer die Befehle."}
+    return {"tool": "chat", "reply": chat_reply}

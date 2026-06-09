@@ -3030,15 +3030,25 @@ async def osint_lookup(ip: str, force: bool = Query(default=False)):
 # --- AI command interface (chat + Teams) ---
 
 class ChatCommandIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000)
+    message: str = Field(..., min_length=1, max_length=4000)
+    # Optional short conversation history [{role, content}] for the free chat.
+    history: list[dict] | None = None
 
 
 @app.post("/api/chat/command")
 async def chat_command(body: ChatCommandIn):
-    """Natural-language command from the in-app chat. Resolves intent (block /
-    isolate / quarantine / OSINT / stats) and executes it."""
+    """Natural-language input from the in-app chat: a recognised command (block /
+    isolate / quarantine / OSINT / stats) is executed, otherwise it's a free
+    conversation with the analyst-persona LLM."""
     from app.command_service import run_command
-    return await run_command(body.message, actor="chat")
+    return await run_command(body.message, actor="chat", history=body.history)
+
+
+@app.get("/api/chat/default-persona")
+async def chat_default_persona():
+    """The bundled analyst-persona prompt, for the admin 'reset to default'."""
+    from app.command_service import DEFAULT_ANALYST_PROMPT
+    return {"prompt": DEFAULT_ANALYST_PROMPT}
 
 
 def _verify_teams_hmac(raw: bytes, auth_header: str | None) -> bool:
@@ -3686,6 +3696,7 @@ class AdminSettingsIn(BaseModel):
     agent_failed_login_distributed_min_ips: int | None = Field(default=None, ge=2, le=10000)
     agent_failed_login_distributed_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_triage_system_prompt: str | None = Field(default=None, max_length=20000)
+    analyst_system_prompt: str | None = Field(default=None, max_length=20000)
     osint_abuseipdb_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_abuseipdb_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_virustotal_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
