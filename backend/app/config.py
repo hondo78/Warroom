@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""          # numeric chat or group id
     telegram_poll_interval_seconds: int = 5
 
+    # --- Microsoft Teams command channel ---
+    # HMAC secret from the Teams "Outgoing Webhook" (Teams → Warroom commands).
+    teams_outgoing_secret: str = ""
+    # Incoming-webhook URL for outbound notifications (Warroom → Teams), optional.
+    teams_incoming_webhook: str = ""
+
     maxmind_license_key: str = ""
     abuseipdb_api_key: str = ""
     virustotal_api_key: str = ""

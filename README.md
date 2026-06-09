@@ -55,6 +55,7 @@ Sophos Intelix / GreyNoise** an. Geblockte IPs, Domains und URLs werden als
 - [Microsoft 365 Audit-Logs (optional)](#microsoft-365-audit-logs-optional)
 - [Entra ID Login-Blocking (optional)](#entra-id-login-blocking-optional)
 - [Telegram-Approvals (optional)](#telegram-approvals-optional)
+- [KI-Chat & Teams-Befehle](#ki-chat--teams-befehle)
 - [Sicherheit & Härtung](#sicherheit--härtung)
 - [Stack & Services](#stack--services)
 - [Troubleshooting](#troubleshooting)
@@ -69,6 +70,7 @@ zur Verfügung:
 | Seite | URL | Das kannst du dort tun |
 |-------|-----|------------------------|
 | **Dashboard** | `/` | Alerts, Events & Detections aus Sophos Central; Live-Karte mit Angreifer-Geolokation; Firewall-Logs (IPS / WAF / Auth / Failed-Logins); KI-Agent-Empfehlungen; Endpoint-Übersicht. IPs direkt per Klick blocken, Alerts quittieren, Endpoints isolieren. |
+| **KI-Chat** | `/chat.html` | Befehle in natürlicher Sprache: IP/Domain/FQDN/URL blocken, Endpoint isolieren, Quarantäne abfragen, OSINT-Lookup, Statistik-Report. Dieselbe Engine ist über **Microsoft Teams** erreichbar. |
 | **Blocklist** | `/blocked.html` | IPs, Domains und URLs manuell blocken/entblocken; Whitelist pflegen; die fertigen IOC-Feeds einsehen. |
 | **NetFlow** | `/netflow.html` | Traffic-Analyse: Top-Talker, Ziele, Ports, Protokoll-Mix, Interface-Durchsatz. |
 | **Firewalls** | `/firewalls.html` | Firewall-Standorte auf der Karte, Interface-Statistiken, Whitelist-Verwaltung. |
@@ -329,6 +331,39 @@ ausgeführt (Long-Polling, kein öffentlicher Webhook nötig). Konfiguration unt
 
 > Nur der konfigurierte Chat darf Approvals ausführen; Taps aus anderen Chats
 > werden abgewiesen.
+
+---
+
+## KI-Chat & Teams-Befehle
+
+Eine **Befehls-Schnittstelle in natürlicher Sprache** — erreichbar über den
+In-App-**KI-Chat** (`/chat.html`) und **Microsoft Teams**. Damit lassen sich per
+Nachricht ausführen:
+
+- **Blocklist:** IP / Domain / FQDN / URL setzen
+  („blockiere 1.2.3.4", „sperre boese.example")
+- **Endpoint isolieren** („isoliere PC-12345")
+- **Quarantäne abfragen** („zeig die Quarantäne")
+- **OSINT** zu IP/Domain („OSINT zu 8.8.8.8") — günstige Provider; Shodan bleibt
+  Button-only
+- **Statistik-Report** („Statistik-Report der letzten 7 Tage")
+
+Die Intent-Erkennung läuft zuerst über einen **Keyword-Parser** (sofortige
+Antwort für klare Befehle) und fällt bei unklaren Formulierungen auf den
+**LLM-Agenten** zurück — funktioniert also auch ohne aktivierten Agenten.
+
+**Microsoft Teams einrichten** (Admin → Microsoft Teams):
+1. Im Team → **… → Verwalten → Outgoing Webhooks → Erstellen**.
+2. Callback-URL: `https://<warroom>/api/teams/command` (Warroom muss per HTTPS
+   erreichbar sein).
+3. Das von Teams erzeugte **HMAC-Secret** im Admin hinterlegen — jede Teams-
+   Anfrage wird damit signaturgeprüft.
+4. Im Team `@Botname <befehl>` schreiben.
+
+> Sicherheit: Der Teams-Endpoint ist von der `X-API-Key`-Prüfung ausgenommen und
+> authentifiziert sich ausschließlich über die HMAC-Signatur. Block-Befehle aus
+> Chat/Teams sind direkte menschliche Aktionen und werden sofort ausgeführt
+> (Whitelist-IPs bleiben geschützt).
 
 ---
 

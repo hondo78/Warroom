@@ -3,6 +3,7 @@ const SECTIONS = {
     o365: ['o365_tenant_id', 'o365_client_id', 'o365_client_secret'],
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
+    teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],
     geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'shodan_auto_on_malicious', 'shodan_auto_abuse_threshold', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
     osintQuota: [
         'osint_abuseipdb_daily_limit', 'osint_abuseipdb_monthly_limit',

@@ -32,6 +32,7 @@
             <nav class="mt-2">
                 <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
                     <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
                     <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
                     <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
                     <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
@@ -186,6 +187,30 @@
                         </div>
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('telegram')">Telegram-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Microsoft Teams command channel -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Microsoft Teams — Befehlskanal</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint">
+                            Erlaubt Befehle aus Teams (blocken, isolieren, Quarantäne, OSINT, Statistik) —
+                            dieselbe KI wie im <a href="/chat.html" class="osint-link">KI-Chat</a>.
+                            In Teams einen <strong>Outgoing Webhook</strong> anlegen (Team → … → Verwalten →
+                            Outgoing Webhooks), als Callback-URL <code>https://&lt;warroom&gt;/api/teams/command</code>
+                            eintragen und das von Teams erzeugte <strong>HMAC-Secret</strong> hier hinterlegen.
+                            Der Bot antwortet dann auf <code>@Botname &lt;befehl&gt;</code>.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label">Outgoing-Webhook HMAC-Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="teams_outgoing_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Incoming-Webhook URL (Benachrichtigungen, optional)</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="teams_incoming_webhook" placeholder="https://outlook.office.com/webhook/…" autocomplete="off"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('teams')">Teams-Settings speichern</button>
                         </div>
                     </div>
                 </div>

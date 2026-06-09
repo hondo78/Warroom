@@ -1,3 +1,4 @@
+import hashlib
 import hmac
 import logging
 import re
@@ -6,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Body, FastAPI, Depends, Header, HTTPException, Query, status
+from fastapi import Body, FastAPI, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, text, case, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +39,11 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
-async def verify_api_key(x_api_key: str | None = Header(default=None)):
+async def verify_api_key(request: Request, x_api_key: str | None = Header(default=None)):
+    # The Teams webhook authenticates itself with its own HMAC signature
+    # (Teams never sends X-API-Key), so it is exempt from the global key check.
+    if request.url.path.startswith("/api/teams/"):
+        return
     expected = settings.warroom_api_key
     if not expected:
         # Open mode: warning is logged once at startup; do not block.
@@ -3022,6 +3027,58 @@ async def osint_lookup(ip: str, force: bool = Query(default=False)):
     return await osint_lookup_fn(ip, force=force)
 
 
+# --- AI command interface (chat + Teams) ---
+
+class ChatCommandIn(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+@app.post("/api/chat/command")
+async def chat_command(body: ChatCommandIn):
+    """Natural-language command from the in-app chat. Resolves intent (block /
+    isolate / quarantine / OSINT / stats) and executes it."""
+    from app.command_service import run_command
+    return await run_command(body.message, actor="chat")
+
+
+def _verify_teams_hmac(raw: bytes, auth_header: str | None) -> bool:
+    """Teams Outgoing Webhooks sign the request body with HMAC-SHA256 using the
+    base64 secret Teams shows at creation; the header is 'HMAC <base64sig>'."""
+    secret = settings.teams_outgoing_secret
+    if not secret:
+        return False
+    if not auth_header or not auth_header.startswith("HMAC "):
+        return False
+    try:
+        import base64
+        digest = hmac.new(base64.b64decode(secret), raw, hashlib.sha256).digest()
+        expected = base64.b64encode(digest).decode()
+        return hmac.compare_digest(expected, auth_header[5:].strip())
+    except Exception:
+        return False
+
+
+@app.post("/api/teams/command")
+async def teams_command(request: Request):
+    """Microsoft Teams Outgoing Webhook entry point. Verifies the HMAC
+    signature, runs the command, and replies with a Teams message card."""
+    raw = await request.body()
+    if not _verify_teams_hmac(raw, request.headers.get("Authorization")):
+        raise HTTPException(status_code=401, detail="invalid HMAC signature")
+    try:
+        activity = json.loads(raw or b"{}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON")
+    text = (activity.get("text") or "").strip()
+    # Strip the bot @mention Teams prepends (plain text or <at>…</at>).
+    text = re.sub(r"<at>.*?</at>", "", text)
+    text = re.sub(r"^\s*@?\w+\s*", "", text) if text.lower().startswith("@") else text
+    actor = ((activity.get("from") or {}).get("name")) or "teams"
+    from app.command_service import run_command
+    result = await run_command(text.strip(), actor=actor)
+    return {"type": "message", "text": result["reply"]}
+
+
 # --- NetFlow analytics ---
 
 # Map of common ports/protocols → human-readable label, used in chart legends.
@@ -3581,6 +3638,8 @@ class AdminSettingsIn(BaseModel):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     telegram_poll_interval_seconds: int | None = None
+    teams_outgoing_secret: str | None = None
+    teams_incoming_webhook: str | None = None
     maxmind_license_key: str | None = None
     abuseipdb_api_key: str | None = None
     virustotal_api_key: str | None = None
