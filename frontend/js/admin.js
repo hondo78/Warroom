@@ -4,8 +4,8 @@ const SECTIONS = {
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],
-    analyst: ['analyst_system_prompt'],
-    geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'shodan_auto_on_malicious', 'shodan_auto_abuse_threshold', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
+    analyst: ['analyst_system_prompt', 'chat_sql_enabled'],
+    geoip: ['maxmind_license_key', 'abuseipdb_api_key', 'virustotal_api_key', 'shodan_api_key', 'shodan_auto_every_lookup', 'shodan_auto_on_malicious', 'shodan_auto_abuse_threshold', 'sophos_intelix_client_id', 'sophos_intelix_client_secret'],
     osintQuota: [
         'osint_abuseipdb_daily_limit', 'osint_abuseipdb_monthly_limit',
         'osint_virustotal_daily_limit', 'osint_virustotal_monthly_limit',
@@ -16,7 +16,7 @@ const SECTIONS = {
     ],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
-    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips'],
+    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_auto_execute_threshold', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
     // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
 };
 

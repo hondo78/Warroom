@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - FW-Anomalien</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="firewall-anomalies">
+<div class="app-wrapper">
+
+    <!-- Topbar -->
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+                <input id="anIp" type="text" class="form-control form-control-sm" style="width:170px"
+                       placeholder="IP-Fokus (optional)"
+                       title="Bestimmte IP analysieren — leer = gesamtes Netzwerk">
+                <select id="anRole" class="form-select form-select-sm" style="width:auto"
+                        title="Rolle: ohne IP-Fokus = Quell- vs. Ziel-IPs analysieren; mit IP-Fokus = Rolle der gewählten IP">
+                    <option value="src" selected>Quelle</option>
+                    <option value="dst">Ziel</option>
+                </select>
+                <select id="anHours" class="form-select form-select-sm" style="width:auto">
+                    <option value="6">6 Stunden</option>
+                    <option value="24" selected>24 Stunden</option>
+                    <option value="72">3 Tage</option>
+                    <option value="168">7 Tage</option>
+                </select>
+                <select id="anMinFlows" class="form-select form-select-sm" style="width:auto" title="Mindestanzahl Flows pro IP">
+                    <option value="5" selected>≥ 5 Flows</option>
+                    <option value="20">≥ 20 Flows</option>
+                    <option value="100">≥ 100 Flows</option>
+                    <option value="1000">≥ 1000 Flows</option>
+                </select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="anomalyRefresh()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">FW-Anomalien</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link active"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
+                    <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0">Firewall-Anomalien <small class="text-secondary fs-6">Isolation Forest · NetFlow · 3 frei wählbare Dimensionen</small></h3>
+                <div id="anFocusInfo" class="text-info small mt-1"></div>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <!-- Stat tiles -->
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-sm-6 col-xl">
+                        <div class="small-box bg-info">
+                            <div class="inner"><h3 id="anAnalyzed">-</h3><p>Analysierte IPs</p></div>
+                            <div class="small-box-footer" id="anWindow">-</div>
+                            <span class="icon"><i class="bi bi-broadcast-pin"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl">
+                        <div class="small-box bg-danger">
+                            <div class="inner"><h3 id="anAnomalies">-</h3><p>Anomalien</p></div>
+                            <div class="small-box-footer">über Schwelle</div>
+                            <span class="icon"><i class="bi bi-exclamation-octagon"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl">
+                        <div class="small-box bg-warning">
+                            <div class="inner"><h3 id="anTopScore">-</h3><p>Höchster Score</p></div>
+                            <div class="small-box-footer" id="anTopIp">-</div>
+                            <span class="icon"><i class="bi bi-graph-up-arrow"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl">
+                        <div class="small-box bg-secondary">
+                            <div class="inner"><h3 id="anThreshold">-</h3><p>Schwelle</p></div>
+                            <div class="small-box-footer">Score ≥ = Anomalie</div>
+                            <span class="icon"><i class="bi bi-sliders"></i></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dimension selectors: pick any 3 dimensions to analyse + plot -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Analyse-Dimensionen <small class="text-secondary">— 3 frei wählbar (X · Y · Z)</small></h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .6rem">
+                            Wähle die drei Achsen, in deren Raum die Quell-IPs verglichen werden. Der
+                            Isolation-Forest-<strong>Score wird aus genau diesen drei Dimensionen berechnet</strong>,
+                            und beide Graphen unten zeigen sie als Achsen. Jede Dimension lässt sich nur einmal wählen.
+                        </p>
+                        <div class="row g-2">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small mb-1" for="anDimX">Achse X</label>
+                                <select id="anDimX" class="form-select form-select-sm"></select>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small mb-1" for="anDimY">Achse Y</label>
+                                <select id="anDimY" class="form-select form-select-sm"></select>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small mb-1" for="anDimZ">Achse Z</label>
+                                <select id="anDimZ" class="form-select form-select-sm"></select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bubble: x=Achse X, y=Achse Y, Blasengröße=Achse Z, Farbe=Anomalie -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" id="anScatterTitle">Bubble-Ansicht</h3></div>
+                    <div class="card-body"><canvas id="anScatter" style="max-height:360px"></canvas></div>
+                </div>
+
+                <!-- 3-D scatter: rotatable point cloud over the 3 chosen dimensions -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" id="an3dTitle">3-D-Ansicht</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .5rem">
+                            Jeder Punkt ist eine IP im Raum der <strong>drei gewählten Dimensionen</strong>
+                            (Achse X, Y, Z). <strong>Rote</strong> Punkte sind Anomalien — sie heben sich in
+                            diesem Raum vom Normalbereich ab. Mit der Maus <strong>drehen, zoomen</strong> und
+                            über Punkte fahren für Details (inkl. Land &amp; Score).
+                        </p>
+                        <div id="an3d" style="height:480px"></div>
+                    </div>
+                </div>
+
+                <!-- Anomaly table -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0">Auffälligste Quell-IPs</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .5rem">
+                            Verglichen werden die <strong id="anDimsText">drei gewählten Dimensionen</strong>.
+                            Je höher der Score (0–1), desto leichter isoliert das Modell die IP von der Masse —
+                            z. B. Exfil-Hosts mit ungewöhnlichem Volumen, Portscanner oder Quellen aus seltenen
+                            Ländern. Die farbigen Chips unter dem Score zeigen die <strong>treibende(n)
+                            Dimension(en)</strong> — also worin die IP am stärksten aus der Masse heraussticht
+                            (Perzentil-Rang der IP in dieser Dimension). <strong>Klick auf eine Zeile</strong> zeigt
+                            alle bekannten Verbindungen (ein- &amp; ausgehend, inkl. geblockter Firewall-Versuche).
+                        </p>
+                        <div class="filter-row">
+                            <input type="text" data-filter-for="anTable" class="form-control form-control-sm" placeholder="Filter (IP, Land…)">
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr id="anSortRow">
+                                    <th data-sort="score" style="cursor:pointer;user-select:none">Score <span class="sort-ind"></span></th>
+                                    <th data-sort="ip" style="cursor:pointer;user-select:none"><span id="anIpHdr">Quell-IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="peer" style="cursor:pointer;user-select:none" title="Haupt-Gegenstelle (Top nach Volumen) — Klick auf die Zeile zeigt alle Verbindungen"><span id="anPeerHdr">Ziel-IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="country" style="cursor:pointer;user-select:none">Land <span class="sort-ind"></span></th>
+                                    <th data-sort="bytes" style="cursor:pointer;user-select:none">Volumen <span class="sort-ind"></span></th>
+                                    <th data-sort="flows" style="cursor:pointer;user-select:none">Flows <span class="sort-ind"></span></th>
+                                    <th data-sort="dports" style="cursor:pointer;user-select:none">Ziel-Ports <span class="sort-ind"></span></th>
+                                    <th data-sort="dips" style="cursor:pointer;user-select:none">Ziel-IPs <span class="sort-ind"></span></th>
+                                    <th data-sort="night" style="cursor:pointer;user-select:none">Nacht <span class="sort-ind"></span></th>
+                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none">Zuletzt <span class="sort-ind"></span></th>
+                                    <th>Aktion</th>
+                                </tr></thead>
+                                <tbody id="anTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Connections detail modal (row click) -->
+<div class="modal-overlay" id="connModal">
+    <div class="modal alert-detail-modal" style="max-width:920px">
+        <div class="alert-detail-header">
+            <h3 id="connModalTitle">Verbindungen</h3>
+            <button class="modal-close" onclick="closeConn()" title="Schliessen">×</button>
+        </div>
+        <div id="connModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div class="modal-actions">
+            <button onclick="closeConn()">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<!-- OSINT Modal -->
+<div class="modal-overlay" id="osintModal">
+    <div class="modal alert-detail-modal">
+        <div class="alert-detail-header">
+            <h3 id="osintModalTitle">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+        </div>
+        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div class="modal-actions">
+            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/osint.js"></script>
+<script src="/js/firewall-anomalies.js"></script>
+</body>
+</html>

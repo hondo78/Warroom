@@ -12,9 +12,11 @@ default safety mechanism.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import logging
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -22,6 +24,8 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, text
 
+from app import login_cache
+from app import waf_path_cache
 from app.config import settings
 from app.database import async_session
 from app.models import (
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = {
     "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
-    "acknowledge", "isolate", "no_action",
+    "acknowledge", "isolate", "notify", "no_action",
 }
 # isolate stays manual; every "block_*" action is auto-executable (same risk
 # class) so high-confidence/auto-execute settings act on them uniformly.
@@ -174,12 +178,13 @@ Erlaubte Aktionen:
 - "isolate": Endpoint isolieren (nur bei aktivem Malware-/Threat-Befund mit klarem Endpoint-Bezug).
 - "no_action": Mehr Daten abwarten, weder blocken noch acknowledgen.
 
-Antworte ausschließlich mit gültigem JSON nach diesem Schema:
+Antworte ausschließlich mit gültigem JSON (kein ```-Fence, kein zusätzlicher Text).
+BEISPIEL:
 {
-  "action": "<einer der erlaubten Werte>",
-  "args": {"target_ip": "1.2.3.4"} oder {} (objekt darf leer sein),
-  "confidence": 0.0-1.0,
-  "reasoning": "kurz auf Deutsch, max. 2-3 Sätze"
+  "action": "block_ip",
+  "args": {"target_ip": "203.0.113.45"},
+  "confidence": 0.9,
+  "reasoning": "Bekannte C2-IP mit mehrfachen failed logins von öffentlicher Quelle. Klar bösartig."
 }
 
 Sei konservativ: hohe Konfidenz nur bei klar bösartigen Indikatoren (bekannte C2-IPs,
@@ -202,28 +207,47 @@ DEFAULT_WAF_PROMPT = """Du bist ein WAF-Security-Analyst für Warroom.
 INPUT (JSON, vom System gestellt):
   - source_ip       — angreifende öffentliche IPv4
   - context         — Aggregat-Werte zur IP (4xx/5xx-Counts in 24 h, HTTP-Statuses,
-                       Hosts, Land/Stadt) und die konfigurierte Schwelle (threshold)
+                       Hosts, Land/Stadt) und die konfigurierte Schwelle (threshold).
+                       PFAD-INTELLIGENZ (aus Redis-Cache, über 24 h gesammelt):
+                         distinct_paths_24h — Anzahl UNTERSCHIEDLICHER Pfade, die die
+                                              IP angefragt hat
+                         path_4xx_count     — wie viele davon mit 4xx (meist 404)
+                                              beantwortet wurden
+                         sample_paths       — Stichprobe der angefragten Pfade (max 60)
   - osint           — OSINT-Lookup (abuseipdb, virustotal, shodan, greynoise,
                        intelix, ipinfo). Felder können fehlen wenn ein Provider
                        keinen Key/Account hat.
   - allowed_actions — erlaubte Werte für `action`
 
 ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift):
-1. count_4xx_24h + count_5xx_24h >= threshold       → action="block_ip", confidence=0.95.
-2. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
+1. WORDLIST-/DIRECTORY-BRUTE-FORCE (forced browsing / Verzeichnis-Scan):
+   Viele UNTERSCHIEDLICHE Pfade von einer IP, überwiegend 404 — typischer
+   Scanner/Wordlist-Angriff (z. B. /wp-admin, /.env, /.git, /phpmyadmin,
+   /admin, /config.php, /backup.zip …). Prüfe sample_paths auf solche Muster.
+   Indiz: distinct_paths_24h >= 15 UND der Großteil ist 4xx (path_4xx_count)
+                                                    → action="block_ip", confidence=0.9.
+   Begründe im reasoning, dass es ein Wordlist-/Verzeichnis-Brute-Force ist,
+   und nenne 2-3 verdächtige Pfade aus sample_paths.
+2. count_4xx_24h + count_5xx_24h >= threshold       → action="block_ip", confidence=0.95.
+3. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, High Risk, Bad})
                                                     → action="block_ip", confidence=0.95.
-3. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
+4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern — die IP exponiert
+   mehrere bekannte Schwachstellen und ist damit ein verwundbares/kompromittiertes
+   System bzw. eine angreifende Maschine mit großer Angriffsfläche.
+                                                    → action="block_ip", confidence=0.9.
+   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs aus shodan.vulns.
+5. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
                                                     → action="block_ip", confidence=0.85.
-4. Sonst                                            → action="no_action", confidence=0.6.
+6. Sonst                                            → action="no_action", confidence=0.6.
 
-AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text):
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
-  "action":     "<einer aus allowed_actions>",
-  "args":       {} oder {"target_ip": "<source_ip>"},
-  "confidence": <float 0..1>,
-  "reasoning":  "<deutsche Begründung, max 2-3 Sätze, nenne die ausschlaggebenden Werte>"
+  "action": "block_ip",
+  "args": {"target_ip": "203.0.113.45"},
+  "confidence": 0.9,
+  "reasoning": "Wordlist-Scan: 42 unterschiedliche Pfade, fast alle 404 (u.a. /.env, /wp-admin, /phpmyadmin). Klarer Directory-Brute-Force."
 }
 """
 
@@ -243,10 +267,19 @@ ENTSCHEIDUNGSREGELN (erste passende greift):
    Schwere ist Block ohne weitere Belege gerechtfertigt.
 2. count_24h >= threshold                            → action="block_ip", confidence=0.95.
 3. OSINT-Sophos-Intelix-Treffer                      → action="block_ip", confidence=0.95.
-4. OSINT-Treffer anderer Provider                    → action="block_ip", confidence=0.85.
-5. Sonst                                             → action="no_action", confidence=0.6.
+4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
+   kompromittiertes System, große Angriffsfläche)    → action="block_ip", confidence=0.9.
+   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+5. OSINT-Treffer anderer Provider                    → action="block_ip", confidence=0.85.
+6. Sonst                                             → action="no_action", confidence=0.6.
 
-AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
+{
+  "action": "block_ip",
+  "args": {"target_ip": "198.51.100.7"},
+  "confidence": 0.92,
+  "reasoning": "IPS-Treffer mit Schweregrad 'high' (Signatur SQL-Injection), 18 Hits in 24h. Eindeutiger Intrusion-Versuch."
+}
 """
 
 
@@ -264,54 +297,68 @@ INPUT (JSON):
 ENTSCHEIDUNGSREGELN (erste passende greift):
 1. count_24h >= threshold                          → "block_ip", confidence=0.95.
 2. OSINT Sophos-Intelix-Treffer                    → "block_ip", confidence=0.95.
-3. OSINT-Treffer anderer Provider                  → "block_ip", confidence=0.85.
-4. Sonst                                           → "no_action", confidence=0.6.
+3. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
+   kompromittiertes System)                        → "block_ip", confidence=0.9.
+   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+4. OSINT-Treffer anderer Provider                  → "block_ip", confidence=0.85.
+5. Sonst                                           → "no_action", confidence=0.6.
 
-AUSGABE: wie WAF (strikt JSON, ohne Fence/Vortext).
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
+{
+  "action": "block_ip",
+  "args": {"target_ip": "192.0.2.88"},
+  "confidence": 0.95,
+  "reasoning": "61 fehlgeschlagene SSL-VPN-Logins in 24h auf mehrere User (admin, root). Schwelle (10) klar überschritten — Brute-Force."
+}
 """
 
 
 DEFAULT_DISTRIBUTED_LOGIN_PROMPT = """Du bist ein Analyst für VERTEILTE Brute-Force-Angriffe (Distributed Brute Force) in Warroom.
 
-Du bekommst ALLE fehlgeschlagenen Login-Versuche der letzten Minuten als JSON.
-Deine Aufgabe: Gruppiere die Versuche nach ihrem /24-Netz (die ersten drei
-Oktette der `ip`, Feld `subnet24`) und ZÄHLE pro /24 die Versuche und die
-Anzahl unterschiedlicher IPs. Stelle fest, ob ein /24 koordiniert Logins
-angreift (verteilter Brute-Force aus einem Netzbereich).
+Du bekommst die fehlgeschlagenen Login-Versuche der letzten Minuten als JSON,
+bereits aggregiert nach ihrem tatsächlichen NETZ (CIDR, per OSINT/ipinfo-RDAP
+ermittelt — nicht das naive /24). Deine Aufgabe: erkenne, ob aus EINEM Netz
+koordiniert von mehreren unterschiedlichen IPs angegriffen wird, und blocke dann
+das ganze Netz.
 
 INPUT (JSON):
   - window_minutes        — Beobachtungsfenster in Minuten
   - total_login_attempts  — Gesamtzahl übergebener Versuche
-  - thresholds            — {min_attempts_per_24, min_distinct_ips_per_24}:
-                            Richtwert, ab wann ein /24 als koordiniert gilt
-  - login_attempts        — Liste der Versuche, je {ip, subnet24, user,
+  - thresholds            — {min_attempts_per_net, min_distinct_ips_per_net}:
+                            Richtwert, ab wann ein Netz als koordiniert gilt
+  - max_block_hosts       — maximale Größe (Adressen) für block_subnet
+  - networks              — Aggregat je Netz: {network (CIDR), network_name,
+                            attempts, distinct_ips, subnets24, countries,
+                            too_large (Netz > max_block_hosts)}
+  - login_attempts        — Einzelversuche, je {ip, subnet24, network, user,
                             component, country, ts}
   - allowed_actions       — "block_subnet", "block_ips", "no_action"
 
 VORGEHEN:
-1. Aggregiere login_attempts nach subnet24. Pro /24: Versuche zählen,
-   distinct IPs zählen.
-2. Ein /24 gilt als verteilter Brute-Force, wenn seine Versuche
-   >= thresholds.min_attempts_per_24 UND die distinct IPs
-   >= thresholds.min_distinct_ips_per_24 sind (du darfst bei klarem Muster
-   begründet abweichen).
-3. Entscheidung:
-   - Genau EIN auffälliges /24  → action="block_subnet",
-       args={"target_subnet":"<a.b.c.0/24>"}, confidence ~0.9.
-   - MEHRERE auffällige /24 oder gestreute IPs → action="block_ips",
+1. Betrachte `networks`. Ein Netz gilt als verteilter Brute-Force, wenn
+   attempts >= thresholds.min_attempts_per_net UND distinct_ips >=
+   thresholds.min_distinct_ips_per_net (bei klarem Muster begründet abweichen).
+2. Entscheidung:
+   - Genau EIN auffälliges Netz mit too_large=false → action="block_subnet",
+       args={"target_subnet":"<CIDR aus networks.network>"}, confidence ~0.9.
+       So wird das GANZE Netz geblockt (Mensch muss bestätigen).
+   - Auffälliges Netz aber too_large=true, ODER MEHRERE auffällige Netze, ODER
+       gestreute Einzel-IPs → action="block_ips",
        args={"target_ips":[... die auffälligen Quell-IPs ...]}, confidence ~0.88.
-   - Kein /24 über der Schwelle → action="no_action", confidence ~0.6.
-4. reasoning: nenne die betroffenen /24, deren Versuche und distinct IPs.
+   - Kein Netz über der Schwelle → action="no_action", confidence ~0.6.
+3. reasoning: nenne das/die betroffenen Netze (CIDR + network_name), deren
+   attempts und distinct_ips.
 
-WICHTIG: Beziehe dich ausschließlich auf diese Login-Versuche. Die Whitelist
-(eigene IPs) wird vom System bei der Ausführung erneut geprüft.
+WICHTIG: Nutze als target_subnet ausschließlich einen CIDR-Wert aus
+`networks.network`. Erfinde keine Präfixe. Die Whitelist (eigene IPs) wird vom
+System bei der Ausführung erneut geprüft; jeder Block braucht menschliche Freigabe.
 
-AUSGABE (strikt JSON, ohne Fence/Vortext):
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
-  "action":     "<einer aus allowed_actions>",
-  "args":       {"target_subnet":"..."} oder {"target_ips":[...]} oder {},
-  "confidence": <float 0..1>,
-  "reasoning":  "<deutsch, max 3 Sätze, nenne die ausschlaggebenden /24 + Zahlen>"
+  "action": "block_subnet",
+  "args": {"target_subnet": "203.0.113.0/24"},
+  "confidence": 0.9,
+  "reasoning": "Netz 203.0.113.0/24 (ExampleHoster): 240 Versuche von 17 unterschiedlichen IPs in 15 Min — koordinierter verteilter Brute-Force."
 }
 """
 
@@ -333,23 +380,66 @@ ENTSCHEIDUNGSREGELN (erste passende greift):
 1. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, Phishing, Spam,
    High Risk, Bad})                                  → Block, confidence=0.95.
-2. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
+2. SHODAN-VULNS (nur bei value_type="ip"): shodan.vulns enthält MEHR ALS 2
+   CVE-Nummern (verwundbares/kompromittiertes System) → Block, confidence=0.9.
+   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+3. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
                                                       → Block, confidence=0.85.
-3. Eindeutiger Hinweis des Operators in `note`, der bösartiges Verhalten
+4. Eindeutiger Hinweis des Operators in `note`, der bösartiges Verhalten
    belegt                                             → Block, confidence=0.8.
-4. Sonst (keine belastbaren Indikatoren)              → "no_action", confidence=0.55.
+5. Sonst (keine belastbaren Indikatoren)              → "no_action", confidence=0.55.
 
 Die Block-Aktion ist genau die in allowed_actions enthaltene
 (block_ip / block_domain / block_url). Bei privaten/reservierten IPs niemals
 block_ip empfehlen.
 
-AUSGABE (strikt JSON, ohne Fence/Vortext):
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
-  "action":     "<einer aus allowed_actions>",
-  "args":       {} (Ziel wird vom System gesetzt),
-  "confidence": <float 0..1>,
-  "reasoning":  "<deutsche Begründung, max 2-3 Sätze, nenne die ausschlaggebenden Werte>"
+  "action": "block_ip",
+  "args": {},
+  "confidence": 0.9,
+  "reasoning": "Shodan meldet 5 CVEs (u.a. CVE-2021-44228, CVE-2019-0708) — exponiertes, verwundbares System. Block empfohlen."
+}
+"""
+
+
+DEFAULT_USER_LOGIN_PROMPT = """Du bist ein SOC-Analyst für Warroom und bewertet
+fehlgeschlagene Login-Versuche, die auf EINEN Benutzernamen gerichtet sind.
+
+INPUT (JSON):
+  - username                 — der betroffene Benutzer
+  - window_minutes           — Zeitfenster der Auswertung
+  - total_failed_attempts    — Summe der fehlgeschlagenen Logins auf diesen User
+  - distinct_ips             — Anzahl unterschiedlicher Quell-IPs
+  - distributed_hint_min_ips — ab so vielen unterschiedlichen IPs gilt es als verteilt
+  - ip_breakdown             — Liste {ip, failed_attempts, country} (je IP die Anzahl
+                               fehlgeschlagener Versuche auf diesen User)
+  - countries                — beobachtete Herkunftsländer
+  - allowed_actions          — ["notify", "no_action"]
+
+ENTSCHEIDUNGSREGELN (erste passende greift):
+1. DISTRIBUTED BRUTEFORCE: viele unterschiedliche Quell-IPs (distinct_ips >=
+   distributed_hint_min_ips), die denselben User attackieren — typischerweise je
+   IP wenige Versuche, in Summe aber viele. → action="notify",
+   args={"classification":"distributed_bruteforce", ...}, confidence ~0.9.
+2. BRUTEFORCE: eine oder sehr wenige IPs mit vielen Fehlversuchen auf den User
+   (klares Hochfrequenz-Muster). → action="notify",
+   args={"classification":"bruteforce", ...}, confidence ~0.85.
+3. Sonst (vereinzelte Fehlversuche, kein Muster, plausibel Tippfehler/abgelaufenes
+   Passwort) → action="no_action", confidence ~0.5.
+
+Beziehe die Zahlen ein: total_failed_attempts, distinct_ips und die Verteilung in
+ip_breakdown. Ein einzelner Fehlversuch von einer IP ist KEINE Bruteforce.
+
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
+{
+  "action": "notify",
+  "args": {"classification": "distributed_bruteforce",
+           "endangered_user": "administrator",
+           "distinct_ips": 23, "total_attempts": 145},
+  "confidence": 0.9,
+  "reasoning": "145 Fehlversuche auf 'administrator' von 23 unterschiedlichen IPs — klares verteiltes Brute-Force-Muster (je IP nur wenige Versuche)."
 }
 """
 
@@ -360,6 +450,7 @@ _RULE_PROMPTS = {
     "ips":          ("agent_ips_system_prompt", DEFAULT_IPS_PROMPT),
     "failed_login": ("agent_failed_login_system_prompt", DEFAULT_FAILED_LOGIN_PROMPT),
     "failed_login_distributed": ("agent_failed_login_distributed_system_prompt", DEFAULT_DISTRIBUTED_LOGIN_PROMPT),
+    "failed_login_user": ("agent_failed_login_user_system_prompt", DEFAULT_USER_LOGIN_PROMPT),
     "triage":       ("agent_triage_system_prompt", DEFAULT_TRIAGE_PROMPT),
 }
 
@@ -772,6 +863,10 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
                     network = ipaddress.ip_network(cidr, strict=False)
                 except ValueError as e:
                     raise ValueError(f"invalid CIDR {cidr!r}: {e}")
+                # Defence-in-depth: never enumerate-and-block a private/reserved
+                # range (matches the per-IP public check on block_ip/block_ips).
+                if not network.is_global:
+                    raise ValueError(f"subnet {cidr} is not a public/global network — block refused")
                 if network.num_addresses > MAX_SUBNET_HOSTS:
                     raise ValueError(
                         f"subnet {cidr} too large "
@@ -1007,6 +1102,33 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
         """), {"since": h24_ago, "ips": candidate_ips})
         per_ip = {r[0]: r for r in counts_q.fetchall()}
 
+        # Step 3: top up the per-IP path cache from this window's WAF rows.
+        # We persist *which paths* each IP hit so the LLM can spot directory/
+        # wordlist brute-force (many distinct paths) vs. a single broken URL.
+        paths_q = await db.execute(text(f"""
+            SELECT source_ip,
+                   COALESCE(raw_data->>'httpquery', raw_data->>'url',
+                            raw_data->>'querystring', raw_data->>'request') AS path,
+                   raw_data->>'http_status'                                  AS status,
+                   COALESCE(raw_data->>'httpmethod', raw_data->>'method')   AS method,
+                   created_at
+            FROM firewall_logs
+            WHERE created_at >= :since
+              AND {_WAF_FILTER_SQL_FRAG}
+              AND source_ip = ANY(:ips)
+              AND (raw_data->>'http_status') ~ '^[45][0-9][0-9]$'
+              AND COALESCE(raw_data->>'httpquery', raw_data->>'url',
+                           raw_data->>'querystring', raw_data->>'request') IS NOT NULL
+        """), {"since": window_start, "ips": candidate_ips})
+        entries_by_ip: dict[str, list[dict]] = {}
+        for src_ip, path, status, method, ts in paths_q.fetchall():
+            entries_by_ip.setdefault(src_ip, []).append(
+                {"path": path, "status": status, "method": method, "ts": ts}
+            )
+
+    for src_ip, entries in entries_by_ip.items():
+        await waf_path_cache.add_paths(src_ip, entries, now)
+
     logger.info(f"agent[waf]: {len(candidate_ips)} candidate IP(s)")
 
     for ip in candidate_ips:
@@ -1018,6 +1140,12 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
         country = row[5] if row else None
         city = row[6] if row else None
 
+        # Accumulated distinct paths (24h) for wordlist/dir-brute-force detection.
+        cached_paths = await waf_path_cache.recent_paths(ip, 24 * 60, now)
+        paths = cached_paths or []
+        distinct_path_names = sorted({p["path"] for p in paths if p.get("path")})
+        status_404 = sum(1 for p in paths if (p.get("status") or "").startswith("4"))
+
         context = {
             "source_ip": ip,
             "count_4xx_24h": c4,
@@ -1026,6 +1154,10 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
             "statuses": statuses,
             "hosts": hosts,
             "country": country, "city": city,
+            # Path intelligence from the Redis cache:
+            "distinct_paths_24h": len(distinct_path_names),
+            "path_4xx_count": status_404,
+            "sample_paths": distinct_path_names[:60],
         }
 
         await _llm_decide_rule(source_type="waf", ip=ip, context=context)
@@ -1092,11 +1224,14 @@ async def _llm_decide_rule(
     osint: dict[str, Any] = {}
     if ip and _is_public_ip(ip):
         try:
-            from app.osint import lookup as osint_lookup, looks_malicious, shodan_enrich
-            # Automated path: skip the (scarce) Shodan credit by default and only
-            # spend it when the cheap providers already flag the IP as malicious.
+            from app.osint import lookup as osint_lookup, looks_malicious, shodan_enrich, _has_shodan_data
+            # If shodan_auto_every_lookup is on, lookup() already queried Shodan;
+            # otherwise spend a credit here only when the cheap providers flag the
+            # IP as malicious (and Shodan wasn't already fetched).
             osint = await osint_lookup(ip, force=False, allow_shodan=False)
-            if settings.shodan_auto_on_malicious and looks_malicious(osint, settings.shodan_auto_abuse_threshold):
+            if (settings.shodan_auto_on_malicious
+                    and not _has_shodan_data(osint.get("shodan"))
+                    and looks_malicious(osint, settings.shodan_auto_abuse_threshold)):
                 try:
                     osint["shodan"] = await shodan_enrich(ip)
                     logger.info(f"agent[{source_type}]: Shodan queried for malicious {ip}")
@@ -1377,33 +1512,161 @@ _FAILED_LOGIN_SQL_FRAG = (
 )
 
 
+def _subnet24(ip: str) -> str:
+    p = ip.split(".")
+    return f"{p[0]}.{p[1]}.{p[2]}.0/24" if len(p) >= 4 else ip
+
+
+# Build the "external public IPv4 failed-login" WHERE body once (shared by the
+# incremental cache top-up and the cold-cache fallback).
+_DIST_EXTERNAL_FILTER = (
+    "source_ip IS NOT NULL "
+    "AND source_ip ~ '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$' "
+    # A distributed brute-force is by definition public; never block an internal net.
+    "AND NOT (source_ip::inet <<= inet '10.0.0.0/8' "
+    "      OR source_ip::inet <<= inet '172.16.0.0/12' "
+    "      OR source_ip::inet <<= inet '192.168.0.0/16' "
+    "      OR source_ip::inet <<= inet '127.0.0.0/8' "
+    "      OR source_ip::inet <<= inet '169.254.0.0/16' "
+    "      OR source_ip::inet <<= inet '100.64.0.0/10') "
+    f"AND {_FAILED_LOGIN_SQL_FRAG}"
+)
+
+_DIST_TOPUP_MAX = 2000          # new rows pulled from Postgres per loop
+_DIST_PAYLOAD_ATTEMPTS = 800    # cap on individual attempts handed to the LLM
+_DIST_MAX_NET_LOOKUPS = 40      # cap RDAP/OSINT network resolutions per sweep
+
+
+async def _topup_login_cache(now: datetime) -> None:
+    """Incrementally copy new external failed-login rows from Postgres into the
+    Redis working-set cache (since the stored cursor; cold start backfills the
+    retention window)."""
+    cursor_iso = await login_cache.get_cursor()
+    if cursor_iso:
+        try:
+            since = datetime.fromisoformat(cursor_iso)
+        except ValueError:
+            since = now - timedelta(seconds=login_cache.RETENTION_SECONDS)
+    else:
+        since = now - timedelta(seconds=login_cache.RETENTION_SECONDS)
+
+    async with async_session() as db:
+        rows = (await db.execute(text(f"""
+            SELECT id, source_ip, user_name,
+                   raw_data->>'log_component' AS component,
+                   attacker_country, created_at
+            FROM firewall_logs
+            -- >= (not >) so rows sharing the cursor's exact timestamp aren't
+            -- skipped; the uid-keyed cache members dedupe the harmless re-fetch.
+            WHERE created_at >= :since
+              AND {_DIST_EXTERNAL_FILTER}
+            ORDER BY created_at ASC
+            LIMIT :lim
+        """), {"since": since, "lim": _DIST_TOPUP_MAX})).fetchall()
+
+    attempts = [
+        {"uid": r[0], "ip": r[1], "user": r[2], "component": r[3],
+         "country": r[4], "ts": r[5].isoformat() if r[5] else None}
+        for r in rows
+    ]
+    await login_cache.add_attempts(attempts, now)
+
+
+async def _fallback_window_attempts(now: datetime, dist_minutes: int) -> list[dict]:
+    """Direct Postgres read of the analysis window — used only when the Redis
+    cache is unavailable (so the sweep still works)."""
+    since = now - timedelta(minutes=max(1, dist_minutes))
+    async with async_session() as db:
+        rows = (await db.execute(text(f"""
+            SELECT id, source_ip, user_name,
+                   raw_data->>'log_component' AS component,
+                   attacker_country, created_at
+            FROM firewall_logs
+            WHERE created_at >= :since
+              AND {_DIST_EXTERNAL_FILTER}
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """), {"since": since, "lim": _DIST_TOPUP_MAX})).fetchall()
+    return [
+        {"uid": r[0], "ip": r[1], "user": r[2], "component": r[3],
+         "country": r[4], "ts": r[5].isoformat() if r[5] else None}
+        for r in rows
+    ]
+
+
+async def _resolve_networks(attempts: list[dict]) -> tuple[dict[str, str], dict[str, str | None]]:
+    """For the busiest /24s, resolve the real allocated network (CIDR) via the
+    OSINT/RDAP lookup, then map every attempt IP to the smallest resolved net it
+    falls in (or its /24 when unresolved). Returns (ip→cidr, cidr→name)."""
+    from app import osint as osint_mod
+
+    cnt24: Counter = Counter()
+    rep_by_24: dict[str, str] = {}
+    for a in attempts:
+        s = _subnet24(a["ip"])
+        cnt24[s] += 1
+        rep_by_24.setdefault(s, a["ip"])
+
+    reps = [rep_by_24[s] for s, _ in cnt24.most_common(_DIST_MAX_NET_LOOKUPS)]
+    results = await asyncio.gather(*[osint_mod.network_for_ip(ip) for ip in reps],
+                                   return_exceptions=True)
+    resolved: list[tuple[Any, str, str | None]] = []
+    seen_cidr: set[str] = set()
+    for res in results:
+        if isinstance(res, dict) and res.get("cidr") and res["cidr"] not in seen_cidr:
+            try:
+                net = ipaddress.ip_network(res["cidr"], strict=False)
+            except ValueError:
+                continue
+            seen_cidr.add(res["cidr"])
+            resolved.append((net, res["cidr"], res.get("name")))
+
+    ip_to_net: dict[str, str] = {}
+    net_name: dict[str, str | None] = {}
+    for a in attempts:
+        ip = a["ip"]
+        if ip in ip_to_net:
+            continue
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            ip_to_net[ip] = _subnet24(ip)
+            continue
+        covering = [(n, c, nm) for (n, c, nm) in resolved if addr in n]
+        if covering:
+            _, cidr, nm = min(covering, key=lambda t: t[0].num_addresses)
+            ip_to_net[ip] = cidr
+            net_name[cidr] = nm
+        else:
+            ip_to_net[ip] = _subnet24(ip)
+    return ip_to_net, net_name
+
+
 async def _distributed_login_sweep(
     now: datetime, window_minutes: int | None, handled_ips: set[str]
 ) -> None:
-    """Hand ALL failed-login attempts of the last N minutes to the LLM as one
-    JSON payload and let it group them by /24, count per subnet, and decide
-    whether a distributed brute-force is underway.
+    """Detect a distributed brute-force and, with human approval, block the whole
+    attacker NETWORK.
 
-    This stage looks ONLY at login logs (``_FAILED_LOGIN_SQL_FRAG``). IPs the
-    resulting decision covers are added to ``handled_ips`` so the per-IP stage
-    skips them. A 1h cooldown prevents re-deciding the same picture every loop.
+    Reads recent failed-login attempts from the Redis working-set cache (topped
+    up from ``firewall_logs``), resolves each busy /24 to its real allocated CIDR
+    via the OSINT/ipinfo-RDAP lookup, groups attempts by that network, and hands
+    the LLM a per-network aggregate. A network attacked by enough distinct IPs →
+    ``block_subnet`` of the whole CIDR (oversized allocations are downgraded to a
+    bulk-IP block). Every block requires human approval (BLOCK_ACTIONS). Covered
+    IPs are marked handled; a 1h cooldown prevents re-deciding the same picture.
     """
-    from collections import defaultdict
-
-    # Window: setting default (60 min), widened if an ad-hoc scan asked for more.
     dist_minutes = max(
         int(settings.agent_failed_login_distributed_window_minutes or 60),
         int(window_minutes or 0),
     )
-    since = now - timedelta(minutes=max(1, dist_minutes))
     block_cooldown = now - timedelta(hours=1)
-    per24_attempts = int(settings.agent_failed_login_distributed_attempts or 20)
-    per24_min_ips = int(settings.agent_failed_login_distributed_min_ips or 4)
-    MAX_ROWS = 1500
+    per_net_attempts = int(settings.agent_failed_login_distributed_attempts or 20)
+    per_net_min_ips = int(settings.agent_failed_login_distributed_min_ips or 4)
+    use_network = bool(getattr(settings, "agent_failed_login_network_block_enabled", True))
 
     async with async_session() as db:
-        # Cooldown: at most one distributed decision per hour (the 60-min picture
-        # changes slowly; re-running every loop would spam identical decisions).
+        # Cooldown: at most one distributed decision per hour.
         recent = (await db.execute(
             select(AgentDecision.id).where(
                 AgentDecision.source_type == "failed_login",
@@ -1414,63 +1677,69 @@ async def _distributed_login_sweep(
         if recent is not None:
             return
 
-        rows = (await db.execute(text(f"""
-            SELECT source_ip,
-                   split_part(source_ip, '.', 1) || '.' ||
-                   split_part(source_ip, '.', 2) || '.' ||
-                   split_part(source_ip, '.', 3) || '.0/24' AS subnet24,
-                   user_name,
-                   raw_data->>'log_component' AS component,
-                   attacker_country,
-                   created_at
-            FROM firewall_logs
-            WHERE created_at >= :since
-              AND source_ip IS NOT NULL
-              AND source_ip ~ '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'
-              -- Only external sources: a distributed brute-force is by definition
-              -- public, and we must never recommend blocking an internal /24.
-              AND NOT (source_ip::inet <<= inet '10.0.0.0/8'
-                    OR source_ip::inet <<= inet '172.16.0.0/12'
-                    OR source_ip::inet <<= inet '192.168.0.0/16'
-                    OR source_ip::inet <<= inet '127.0.0.0/8'
-                    OR source_ip::inet <<= inet '169.254.0.0/16'
-                    OR source_ip::inet <<= inet '100.64.0.0/10')
-              AND {_FAILED_LOGIN_SQL_FRAG}
-            ORDER BY created_at DESC
-            LIMIT :lim
-        """), {"since": since, "lim": MAX_ROWS})).fetchall()
-
-    if not rows:
+    # Top up the Redis cache, then read the analysis window from it. If Redis is
+    # unavailable, fall back to a direct Postgres read of the window.
+    await _topup_login_cache(now)
+    attempts = await login_cache.recent(dist_minutes, now)
+    if attempts is None:
+        attempts = await _fallback_window_attempts(now, dist_minutes)
+    if not attempts:
         return
 
-    attempts = [
-        {
-            "ip": r[0], "subnet24": r[1], "user": r[2],
-            "component": r[3], "country": r[4],
-            "ts": r[5].isoformat() if r[5] else None,
-        }
-        for r in rows
-    ]
-    # System-side /24 summary for the audit trail / UI (the LLM derives its own
-    # grouping from the raw attempts above — this is just for display).
-    by24: dict[str, dict] = defaultdict(lambda: {"attempts": 0, "ips": set()})
+    # Map each attempt IP to its network (real CIDR when enabled, else /24).
+    if use_network:
+        ip_to_net, net_name = await _resolve_networks(attempts)
+    else:
+        ip_to_net = {a["ip"]: _subnet24(a["ip"]) for a in attempts}
+        net_name = {}
+
+    by_net: dict[str, dict] = defaultdict(
+        lambda: {"attempts": 0, "ips": set(), "subnets": set(), "countries": set()})
     for a in attempts:
-        s = by24[a["subnet24"]]
-        s["attempts"] += 1
-        s["ips"].add(a["ip"])
-    summary = sorted(
-        [{"subnet24": k, "attempts": v["attempts"], "distinct_ips": len(v["ips"])} for k, v in by24.items()],
-        key=lambda x: -x["attempts"],
+        cidr = ip_to_net[a["ip"]]
+        g = by_net[cidr]
+        g["attempts"] += 1
+        g["ips"].add(a["ip"])
+        g["subnets"].add(_subnet24(a["ip"]))
+        if a.get("country"):
+            g["countries"].add(a["country"])
+
+    def _too_large(cidr: str) -> bool:
+        try:
+            return ipaddress.ip_network(cidr, strict=False).num_addresses > MAX_SUBNET_HOSTS
+        except ValueError:
+            return False
+
+    networks = sorted(
+        [{
+            "network": cidr,
+            "network_name": net_name.get(cidr),
+            "attempts": g["attempts"],
+            "distinct_ips": len(g["ips"]),
+            "subnets24": sorted(g["subnets"])[:20],
+            "countries": sorted(g["countries"])[:8],
+            "too_large": _too_large(cidr),
+        } for cidr, g in by_net.items()],
+        key=lambda n: -n["attempts"],
     )
+
+    attempts_payload = [
+        {"ip": a["ip"], "subnet24": _subnet24(a["ip"]), "network": ip_to_net[a["ip"]],
+         "user": a.get("user"), "component": a.get("component"),
+         "country": a.get("country"), "ts": a.get("ts")}
+        for a in attempts[:_DIST_PAYLOAD_ATTEMPTS]
+    ]
 
     payload = {
         "window_minutes": dist_minutes,
         "total_login_attempts": len(attempts),
         "thresholds": {
-            "min_attempts_per_24": per24_attempts,
-            "min_distinct_ips_per_24": per24_min_ips,
+            "min_attempts_per_net": per_net_attempts,
+            "min_distinct_ips_per_net": per_net_min_ips,
         },
-        "login_attempts": attempts,
+        "max_block_hosts": MAX_SUBNET_HOSTS,
+        "networks": networks[:40],
+        "login_attempts": attempts_payload,
         "allowed_actions": ["block_subnet", "block_ips", "no_action"],
     }
     user_msg = (
@@ -1492,9 +1761,11 @@ async def _distributed_login_sweep(
     allowed = {"block_subnet", "block_ips", "no_action"}
     action = decision["action"] if decision["action"] in allowed else "no_action"
     args = dict(decision.get("args") or {})
+    reasoning = decision.get("reasoning") or ""
 
-    # Work out which observed IPs the decision covers (for handled_ips) and
-    # validate the action's args before persisting.
+    # Work out covered IPs and validate args. Oversized networks are downgraded
+    # to a bulk block of the observed offenders so we never persist an
+    # un-executable block_subnet (execute_decision caps subnets at MAX_SUBNET_HOSTS).
     covered: set[str] = set()
     if action == "block_subnet":
         cidr = args.get("target_subnet")
@@ -1512,6 +1783,29 @@ async def _distributed_login_sweep(
                     covered.add(a["ip"])
             except ValueError:
                 pass
+        # The target net MUST contain at least one observed attacker IP — this
+        # rejects an LLM-hallucinated/injected CIDR (an unobserved public range,
+        # or a private net, which by construction holds none of our public
+        # offenders) before it can reach the approval queue.
+        if not covered:
+            logger.warning(
+                f"agent[failed_login distributed]: block_subnet {cidr} covers no "
+                f"observed attacker IP; dropping"
+            )
+            return
+        if net.num_addresses > MAX_SUBNET_HOSTS:
+            offenders = sorted(covered)[:MAX_BULK_IPS]
+            if not offenders:
+                logger.warning(f"agent[failed_login distributed]: net {cidr} too large, no offenders; dropping")
+                return
+            logger.info(
+                f"agent[failed_login distributed]: net {cidr} > /{MAX_SUBNET_HOSTS} hosts — "
+                f"downgrading to block_ips of {len(offenders)} offender(s)"
+            )
+            reasoning = f"[Netz {cidr} zu groß → Einzel-IP-Block] {reasoning}"[:2000]
+            action = "block_ips"
+            args = {"target_ips": offenders}
+            covered = set(offenders)
     elif action == "block_ips":
         tips = args.get("target_ips") or []
         covered = {str(ip).strip() for ip in tips if str(ip).strip()}
@@ -1521,26 +1815,187 @@ async def _distributed_login_sweep(
 
     await _store_rule_decision(
         source_type="failed_login", ip=None, action=action,
-        reasoning=decision.get("reasoning") or "",
+        reasoning=reasoning,
         confidence=decision.get("confidence", 0.0),
         args=args,
         context={
             "distributed_brute_force_indicator": True,
-            "rule": "llm-distributed",
+            "rule": "llm-distributed-network" if use_network else "llm-distributed",
             "window_minutes": dist_minutes,
             "total_login_attempts": len(attempts),
-            "subnet_summary": summary[:30],
+            "network_summary": networks[:30],
             "thresholds": {
-                "min_attempts_per_24": per24_attempts,
-                "min_distinct_ips_per_24": per24_min_ips,
+                "min_attempts_per_net": per_net_attempts,
+                "min_distinct_ips_per_net": per_net_min_ips,
             },
         },
     )
     handled_ips.update(covered)
     logger.info(
         f"agent[failed_login distributed]: {len(attempts)} login attempt(s) over "
-        f"{len(summary)} /24(s) -> {action}"
+        f"{len(networks)} network(s) -> {action}"
     )
+
+
+# --- User-centric brute-force alert ------------------------------------------
+# Aggregates failed logins by USERNAME (all source IPs + per-IP failed counts),
+# lets the LLM classify bruteforce vs distributed bruteforce, and — on a hit —
+# sends a Telegram warning that the user is endangered. No block: only a warning.
+
+_USER_ALERT_KEY = "agent:userbrute:notified:"   # + lowercased username
+_USER_ALERT_MAX_USERS = 10        # cap LLM calls per sweep
+_USER_ALERT_IP_BREAKDOWN = 150    # cap per-user IP rows handed to the LLM
+
+
+async def _user_alert_on_cooldown(user_key: str) -> bool:
+    """True if we already alerted/evaluated this user within its cooldown."""
+    try:
+        from app.geoip_service import get_redis
+        r = await get_redis()
+        return bool(await r.get(_USER_ALERT_KEY + user_key))
+    except Exception:
+        return False
+
+
+async def _mark_user_alerted(user_key: str, ttl_seconds: int) -> None:
+    try:
+        from app.geoip_service import get_redis
+        r = await get_redis()
+        await r.set(_USER_ALERT_KEY + user_key, "1", ex=max(60, ttl_seconds))
+    except Exception:
+        pass
+
+
+async def _notify_user_endangered(user: str, classification: str, total: int,
+                                  distinct_ips: int, countries: list[str],
+                                  confidence: float, reasoning: str) -> None:
+    """Fire-and-forget Telegram warning that a user is under (distributed) brute-force."""
+    import html
+    from app import telegram_client
+    label = "Distributed Bruteforce" if classification == "distributed_bruteforce" else "Bruteforce"
+    conf = round(float(confidence or 0) * 100)
+    lines = [
+        "🚨 <b>Warroom — User gefährdet</b>",
+        f"<b>User:</b> <code>{html.escape(str(user))}</code>",
+        f"<b>Einschätzung:</b> {label}",
+        f"<b>Fehlversuche:</b> {total} von {distinct_ips} IP(s)",
+    ]
+    if countries:
+        lines.append(f"<b>Länder:</b> {html.escape(', '.join(countries))}")
+    lines.append(f"<b>Konfidenz:</b> {conf}%")
+    if reasoning:
+        lines.append("\n" + html.escape(str(reasoning)[:600]))
+    await telegram_client.send_notification("\n".join(lines))
+
+
+async def _user_login_bruteforce_sweep(now: datetime) -> None:
+    """Group recent failed logins by username, hand each busy user's IP breakdown
+    to the LLM, and Telegram-warn when it classifies a (distributed) brute-force."""
+    window = max(1, int(settings.agent_failed_login_user_window_minutes or 60))
+    min_attempts = max(1, int(settings.agent_failed_login_user_min_attempts or 10))
+    dist_min_ips = max(2, int(settings.agent_failed_login_user_distributed_min_ips or 3))
+    cooldown_min = max(1, int(settings.agent_failed_login_user_alert_cooldown_minutes or 60))
+
+    # Ensure the Redis working-set is fresh, then read the analysis window from it
+    # (fall back to a direct DB read when Redis is unavailable).
+    await _topup_login_cache(now)
+    attempts = await login_cache.recent(window, now)
+    if attempts is None:
+        attempts = await _fallback_window_attempts(now, window)
+    if not attempts:
+        return
+
+    # Aggregate by username (case-insensitive — AD/SSL-VPN logins are).
+    by_user: dict[str, dict] = defaultdict(
+        lambda: {"display": None, "ips": Counter(), "ip_country": {}, "countries": set(), "total": 0})
+    for a in attempts:
+        u = (a.get("user") or "").strip()
+        ip = a.get("ip")
+        if not u or not ip:
+            continue
+        g = by_user[u.lower()]
+        g["display"] = g["display"] or u
+        g["ips"][ip] += 1
+        g["total"] += 1
+        if a.get("country"):
+            g["ip_country"][ip] = a["country"]
+            g["countries"].add(a["country"])
+
+    # Busiest users first; only those above the pre-filter reach the LLM.
+    candidates = sorted(
+        ((k, g) for k, g in by_user.items() if g["total"] >= min_attempts),
+        key=lambda kv: -kv[1]["total"],
+    )[:_USER_ALERT_MAX_USERS]
+    if not candidates:
+        return
+
+    for user_key, g in candidates:
+        if await _user_alert_on_cooldown(user_key):
+            continue
+        ips: Counter = g["ips"]
+        payload = {
+            "username": g["display"],
+            "window_minutes": window,
+            "total_failed_attempts": g["total"],
+            "distinct_ips": len(ips),
+            "distributed_hint_min_ips": dist_min_ips,
+            "ip_breakdown": [
+                {"ip": ip, "failed_attempts": c, "country": g["ip_country"].get(ip)}
+                for ip, c in ips.most_common(_USER_ALERT_IP_BREAKDOWN)
+            ],
+            "countries": sorted(g["countries"])[:12],
+            "allowed_actions": ["notify", "no_action"],
+        }
+        user_msg = (
+            f"Fehlgeschlagene Logins auf den User '{g['display']}' der letzten "
+            f"{window} Minuten:\n"
+            + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+        )
+        try:
+            decision = await _call_llm(
+                user_msg,
+                system_prompt=_prompt_for("failed_login_user"),
+                source="failed_login_user",
+                allowed_actions=["notify", "no_action"],
+            )
+        except Exception as e:
+            logger.warning(f"agent[failed_login user]: LLM call failed for {g['display']!r}: {e}")
+            continue
+
+        if decision.get("action") == "notify":
+            args = decision.get("args") or {}
+            classification = str(args.get("classification") or "bruteforce")
+            await _notify_user_endangered(
+                g["display"], classification, g["total"], len(ips),
+                sorted(g["countries"])[:6], decision.get("confidence", 0.0),
+                decision.get("reasoning") or "",
+            )
+            await _mark_user_alerted(user_key, cooldown_min * 60)
+            logger.info(
+                f"agent[failed_login user]: ALERT {classification} on user "
+                f"{g['display']!r} ({g['total']} attempts / {len(ips)} IPs)"
+            )
+        else:
+            # No alert → re-evaluate sooner than a real alert, but not every loop.
+            await _mark_user_alerted(user_key, min(cooldown_min, 10) * 60)
+
+
+async def agent_user_login_alert_loop(window_minutes: int | None = None, force: bool = False) -> None:
+    """Standalone user-centric brute-force alerting.
+
+    Tops up the Redis failed-login working-set, aggregates attempts by username
+    (every source IP + its failed-attempt count), lets the LLM classify
+    bruteforce vs distributed bruteforce, and Telegram-warns that the user is
+    endangered. It only NOTIFIES (never blocks), so it runs independently of the
+    blocking failed-login agent — gated solely by the master agent switch and its
+    own feature flag."""
+    if (not settings.agent_enabled or not settings.agent_failed_login_user_alert_enabled) and not force:
+        return
+    now = datetime.now(timezone.utc)
+    try:
+        await _user_login_bruteforce_sweep(now)
+    except Exception as e:
+        logger.warning(f"agent[failed_login user]: sweep failed: {e}")
 
 
 async def agent_failed_login_loop(window_minutes: int | None = None, force: bool = False) -> None:

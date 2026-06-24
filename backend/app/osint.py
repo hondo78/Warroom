@@ -314,26 +314,141 @@ async def _intelix(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
 
 
 async def _ipinfo(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
-    """ipinfo.io — key-less endpoint, ~50k/month free."""
+    """ipinfo.io — key-less endpoint, ~50k/month free.
+
+    The free ipinfo endpoint reports the ASN only inside ``org`` and never the
+    allocated CIDR, so we additionally resolve the owning network via RDAP (run
+    concurrently with the ipinfo call so it adds no serial latency) and expose it
+    as ``network`` — this is what the failed-login agent groups on to block a
+    whole attacker network rather than a naive /24.
+    """
+    async def _info() -> dict[str, Any]:
+        try:
+            r = await client.get(f"https://ipinfo.io/{ip}/json", headers={"Accept": "application/json"})
+            if r.status_code != 200:
+                return {"available": False, "reason": f"HTTP {r.status_code}"}
+            d = r.json() or {}
+            return {
+                "available": True,
+                "hostname": d.get("hostname"),
+                "city": d.get("city"),
+                "region": d.get("region"),
+                "country": d.get("country"),
+                "loc": d.get("loc"),
+                "org": d.get("org"),
+                "postal": d.get("postal"),
+                "timezone": d.get("timezone"),
+                "url": f"https://ipinfo.io/{ip}",
+            }
+        except Exception as e:
+            return {"available": False, "reason": str(e)[:120]}
+
+    net, info = await asyncio.gather(_rdap_network(client, ip), _info())
+    info["network"] = (net or {}).get("cidr")          # allocated CIDR (via RDAP)
+    info["network_name"] = (net or {}).get("name")
+    return info
+
+
+# --- Network (CIDR) resolution -------------------------------------------------
+# ipinfo's free tier omits the allocated prefix, so we resolve the owning network
+# via RDAP (rdap.org bootstraps to the responsible RIR). Cached in Redis for a
+# day — allocations are stable, and the failed-login sweep hits the same nets.
+_NETWORK_CACHE_TTL = 86400
+# Cache "couldn't resolve" too (short TTL) so a sweep of RDAP-silent IPs doesn't
+# re-hit rdap.org every loop. Stored as {"cidr": null}.
+_NETWORK_NEG_TTL = 3600
+
+
+def _parse_rdap_cidr(d: dict[str, Any], ip: str) -> str | None:
+    """Best CIDR for ``ip`` from an RDAP IP-network object: prefer the cidr0
+    extension, fall back to summarising startAddress..endAddress."""
     try:
-        r = await client.get(f"https://ipinfo.io/{ip}/json", headers={"Accept": "application/json"})
-        if r.status_code != 200:
-            return {"available": False, "reason": f"HTTP {r.status_code}"}
-        d = r.json() or {}
-        return {
-            "available": True,
-            "hostname": d.get("hostname"),
-            "city": d.get("city"),
-            "region": d.get("region"),
-            "country": d.get("country"),
-            "loc": d.get("loc"),
-            "org": d.get("org"),
-            "postal": d.get("postal"),
-            "timezone": d.get("timezone"),
-            "url": f"https://ipinfo.io/{ip}",
-        }
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    # cidr0_cidrs extension: [{"v4prefix": "1.2.3.0", "length": 24}, ...]
+    best: ipaddress._BaseNetwork | None = None
+    for c in d.get("cidr0_cidrs") or []:
+        prefix = c.get("v4prefix") or c.get("v6prefix")
+        length = c.get("length")
+        if prefix is None or length is None:
+            continue
+        try:
+            net = ipaddress.ip_network(f"{prefix}/{length}", strict=False)
+        except ValueError:
+            continue
+        if addr in net and (best is None or net.num_addresses < best.num_addresses):
+            best = net
+    if best is not None:
+        return str(best)
+    # Fallback: start/end range → smallest aligned block containing the ip.
+    start, end = d.get("startAddress"), d.get("endAddress")
+    if start and end:
+        try:
+            nets = list(ipaddress.summarize_address_range(
+                ipaddress.ip_address(start), ipaddress.ip_address(end)))
+        except (ValueError, TypeError):
+            nets = []
+        covering = [n for n in nets if addr in n]
+        if covering:
+            return str(min(covering, key=lambda n: n.num_addresses))
+        # No summarised block actually contains the IP (malformed RDAP range) →
+        # don't guess; returning a non-covering CIDR could block the wrong net.
+    return None
+
+
+async def _rdap_network(client: httpx.AsyncClient, ip: str) -> dict[str, Any] | None:
+    """Resolve {cidr, name, handle} for ``ip`` via RDAP, Redis-cached (24h).
+    Returns None on any failure — callers fall back to a /24."""
+    redis = await get_redis()
+    ck = f"osint:net:{ip}"
+    if redis:
+        try:
+            cached = await redis.get(ck)
+            if cached:
+                obj = json.loads(cached)
+                return obj if obj.get("cidr") else None   # {"cidr": null} = known-negative
+        except Exception:
+            pass
+    result: dict[str, Any] | None = None
+    try:
+        r = await client.get(f"https://rdap.org/ip/{ip}",
+                             headers={"Accept": "application/json"}, follow_redirects=True)
+        if r.status_code == 200:
+            d = r.json() or {}
+            cidr = _parse_rdap_cidr(d, ip)
+            if cidr:
+                result = {"cidr": cidr, "name": d.get("name"), "handle": d.get("handle")}
     except Exception as e:
-        return {"available": False, "reason": str(e)[:120]}
+        logger.debug(f"rdap network lookup failed for {ip}: {e}")
+    if redis:
+        try:
+            if result is not None:
+                await redis.setex(ck, _NETWORK_CACHE_TTL, json.dumps(result))
+            else:
+                await redis.setex(ck, _NETWORK_NEG_TTL, json.dumps({"cidr": None}))
+        except Exception:
+            pass
+    return result
+
+
+async def network_for_ip(ip: str) -> dict[str, Any] | None:
+    """Public helper: the allocated network {cidr, name, handle} for a public IP,
+    determined via the OSINT/RDAP lookup and cached in Redis. None if unresolved
+    or non-public. Used by the failed-login agent to block whole attacker nets."""
+    if not is_public(ip):
+        return None
+    redis = await get_redis()
+    if redis:
+        try:
+            cached = await redis.get(f"osint:net:{ip}")
+            if cached:
+                obj = json.loads(cached)
+                return obj if obj.get("cidr") else None   # {"cidr": null} = known-negative
+        except Exception:
+            pass
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        return await _rdap_network(client, ip)
 
 
 # Shodan API credits are scarce, so Shodan is NOT part of the routine OSINT
@@ -341,6 +456,8 @@ async def _ipinfo(client: httpx.AsyncClient, ip: str) -> dict[str, Any]:
 # interaction) or, for automated callers, when the cheaper providers already
 # flag the IP as clearly malicious (see looks_malicious + shodan_enrich).
 _SHODAN_SKIPPED = {"available": False, "skipped": "not queried (Shodan is human-/malicious-only)"}
+# Auto-every-lookup is on but the daily/monthly Shodan quota is reached.
+_SHODAN_QUOTA_SKIPPED = {"available": False, "skipped": "Shodan-Tageslimit erreicht — uebersprungen"}
 
 
 def _has_shodan_data(s: Any) -> bool:
@@ -407,6 +524,24 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         return {"ip": ip, "error": "private/reserved IP — OSINT lookups skipped"}
 
     cache_key = f"osint:{ip}"
+    # Shodan runs automatically on every lookup when shodan_auto_every_lookup is
+    # on (default); otherwise only when the caller explicitly allows it (human
+    # button) or an automated caller follows up on a malicious IP. An explicit
+    # human request (allow_shodan) always goes through; the automatic path is
+    # hard-capped at the configured daily/monthly Shodan quota.
+    do_shodan = bool(allow_shodan)
+    quota_blocked = False
+    if not do_shodan and getattr(settings, "shodan_auto_every_lookup", False):
+        try:
+            from app.osint_metrics import quota_exhausted
+            quota_blocked = await quota_exhausted("shodan")
+        except Exception as e:
+            logger.warning(f"shodan quota check failed (querying anyway): {e}")
+            quota_blocked = False
+        do_shodan = not quota_blocked
+        if quota_blocked:
+            logger.debug(f"OSINT: Shodan auto-skip for {ip} — daily/monthly quota reached")
+
     redis = await get_redis()
     if redis and not force:
         try:
@@ -414,9 +549,9 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
             if cached:
                 payload = json.loads(cached)
                 payload["cached"] = True
-                # Upgrade a cached entry that skipped Shodan when the caller is
-                # now allowed to query it (e.g. a human opens the OSINT panel).
-                if allow_shodan and not _has_shodan_data(payload.get("shodan")):
+                # Upgrade a cached entry that skipped Shodan when we're now
+                # allowed to query it (auto-enabled, or a human opens the panel).
+                if do_shodan and not _has_shodan_data(payload.get("shodan")):
                     payload["shodan"] = await shodan_enrich(ip)
                     payload["cached"] = False
                     try:
@@ -438,9 +573,15 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
             _track("intelix", _intelix(client, ip)),
         )
 
-    # Shodan only on explicit permission (human). Automated callers get the
-    # skipped sentinel and may follow up via shodan_enrich if malicious.
-    shodan = await shodan_enrich(ip) if allow_shodan else dict(_SHODAN_SKIPPED)
+    # Query Shodan when enabled (auto-every-lookup or explicit permission);
+    # otherwise store a skipped sentinel (a malicious-IP follow-up may upgrade
+    # it). Distinguish "quota reached" so the panel/audit shows why it was skipped.
+    if do_shodan:
+        shodan = await shodan_enrich(ip)
+    elif quota_blocked:
+        shodan = dict(_SHODAN_QUOTA_SKIPPED)
+    else:
+        shodan = dict(_SHODAN_SKIPPED)
 
     payload = {
         "ip": ip,

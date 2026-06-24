@@ -36,6 +36,7 @@
                     <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
                     <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
                     <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
                     <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
                     <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
                     <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
@@ -230,6 +231,14 @@
                             aktivierten Agenten (LLM-Endpoint).
                         </p>
                         <textarea class="form-control form-control-sm" rows="8" data-key="analyst_system_prompt" placeholder="Leer lassen für die Standard-Analyst-Persona…" style="font-family:monospace;font-size:.8rem"></textarea>
+                        <div class="form-check form-switch mt-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="chat_sql_enabled" data-key="chat_sql_enabled">
+                            <label class="form-check-label" for="chat_sql_enabled">
+                                <strong>Datenbank-Lesezugriff</strong> — der Chat darf read-only SQL (nur SELECT)
+                                gegen Postgres ausführen, um Datenfragen mit echten Werten zu beantworten.
+                                <span class="text-secondary">app_settings (Secrets) bleibt gesperrt.</span>
+                            </label>
+                        </div>
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('analyst')">Persona speichern</button>
                         </div>
@@ -271,6 +280,11 @@
                             <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="virustotal_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
                             <div class="col-md-4"><label class="form-label">Shodan API Key</label></div>
                             <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="shodan_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label">Shodan: Auto-Abfrage bei JEDEM OSINT-Lauf</label></div>
+                            <div class="col-md-8">
+                                <input type="checkbox" data-key="shodan_auto_every_lookup" data-bool="1">
+                                <small class="admin-hint">Aktiviert → jede OSINT-IP-Abfrage fragt zusätzlich Shodan ab (verbraucht jedes Mal ein Credit). Aus → Shodan bleibt credit-sparend (nur manuell + die Ausnahme unten).</small>
+                            </div>
                             <div class="col-md-4"><label class="form-label">Shodan: Auto-Abfrage bei schädlicher IP</label></div>
                             <div class="col-md-8">
                                 <input type="checkbox" data-key="shodan_auto_on_malicious" data-bool="1">
@@ -517,7 +531,15 @@
                             <div class="col-md-4"><label class="form-label">Verteilter BF / Distinct-IPs pro /24 (Richtwert)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_min_ips" min="2" max="10000" placeholder="4">
-                                <small class="admin-hint">Richtwerte, ab wann ein /24 als koordiniert gilt — werden dem Agenten als Hinweis übergeben; er darf bei klarem Muster begründet abweichen.</small>
+                                <small class="admin-hint">Richtwerte, ab wann ein Netz als koordiniert gilt — werden dem Agenten als Hinweis übergeben; er darf bei klarem Muster begründet abweichen.</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label">Ganzes Netz blocken (OSINT/ipinfo)</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" data-key="agent_failed_login_network_block_enabled" data-bool="1">
+                                    <label class="form-check-label admin-hint">Statt naivem /24 wird pro auffälligem Netz das <strong>tatsächliche Netz (CIDR)</strong> per OSINT/ipinfo-RDAP ermittelt. Greifen mehrere unterschiedliche IPs aus demselben Netz an, wird das <strong>ganze Netz</strong> vorgeschlagen (Block braucht Freigabe; zu große Netze werden auf einen Einzel-IP-Block heruntergestuft). Aus ⇒ klassische /24-Gruppierung.</label>
+                                </div>
                             </div>
 
                         </div>

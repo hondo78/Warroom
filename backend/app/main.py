@@ -77,7 +77,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
-    from app.agent import agent_loop, agent_waf_loop, agent_ips_loop, agent_failed_login_loop
+    from app.agent import (agent_loop, agent_waf_loop, agent_ips_loop,
+                           agent_failed_login_loop, agent_user_login_alert_loop)
     scheduler.add_job(
         agent_loop, "interval",
         seconds=max(30, settings.agent_interval_seconds),
@@ -97,6 +98,14 @@ async def lifespan(app: FastAPI):
         agent_failed_login_loop, "interval",
         seconds=max(30, settings.agent_failed_login_interval_seconds),
         id="agent_failed_login_loop",
+    )
+    # User-centric brute-force alerting (stores attempts in Redis, classifies via
+    # LLM, Telegram-warns when a user is endangered). Notify-only; independent of
+    # the blocking failed-login agent. No-op while disabled.
+    scheduler.add_job(
+        agent_user_login_alert_loop, "interval",
+        seconds=max(60, settings.agent_failed_login_interval_seconds),
+        id="agent_user_login_alert_loop",
     )
     # OSINT-usage telemetry: flush the in-memory provider-call counter once a minute
     from app.osint_metrics import flush_to_db as flush_osint_metrics
@@ -1919,10 +1928,17 @@ async def refresh_whitelist(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/api/firewalls/extended")
+@cached(ttl=120)
 async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
     """One row per known firewall (grouped by name), not per IP. A firewall
     that's both manually configured AND sends syslog from a different IP
-    shows up once with both IPs listed underneath."""
+    shows up once with both IPs listed underneath.
+
+    The per-firewall log aggregation scans the whole firewall_logs table, so the
+    result is cached (120s) and relies on the covering index
+    idx_fw_logs_ip_created (firewall_ip, created_at) INCLUDE (firewall_name) to
+    stay an index-only scan instead of a 40GB heap scan — see
+    db/migrations/003_fw_ip_index.sql."""
     locs = (await db.execute(select(FirewallLocation))).scalars().all()
 
     log_stats = (await db.execute(
@@ -2039,6 +2055,383 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
 
     items = sorted(grouped.values(), key=lambda r: r["log_count"] + r["iface_count"], reverse=True)
     return {"items": items}
+
+
+# Selectable dimensions for the firewall-anomaly analysis. The user picks any 3;
+# the Isolation Forest scores IPs in exactly that 3-D space and the dashboard
+# plots those three axes. Each IP gets, per dimension, a "raw" value (the human
+# number shown on the axis / hover) and an Isolation-Forest "feature" value
+# (oriented so higher = more anomalous, log-scaled where the metric is
+# heavy-tailed). "axis" hints the chart at a log vs linear scale.
+ANOMALY_DIMENSIONS = [
+    {"key": "volume",  "label": "Volumen (Bytes)",   "axis": "log"},
+    {"key": "ports",   "label": "Ziel-Ports",        "axis": "linear"},
+    {"key": "dst_ips", "label": "Ziel-IPs",          "axis": "linear"},
+    {"key": "flows",   "label": "Flows",             "axis": "log"},
+    {"key": "packets", "label": "Pakete",            "axis": "log"},
+    {"key": "night",   "label": "Tageszeit (Nacht)", "axis": "linear"},
+    {"key": "country", "label": "Land-Seltenheit",   "axis": "linear"},
+]
+_ANOMALY_DIM_KEYS = {d["key"] for d in ANOMALY_DIMENSIONS}
+_ANOMALY_DIM_LABEL = {d["key"]: d["label"] for d in ANOMALY_DIMENSIONS}
+_ANOMALY_DEFAULT_DIMS = ["volume", "ports", "night"]
+
+
+@app.get("/api/firewall/anomalies")
+@cached(ttl=300)
+async def firewall_anomalies(
+    hours: int = Query(default=24, ge=1, le=720),
+    min_flows: int = Query(default=5, ge=1, le=1000000),
+    max_ips: int = Query(default=4000, ge=100, le=12000),
+    limit: int = Query(default=80, ge=1, le=500),
+    dims: str = Query(default="volume,ports,night",
+                      description="Comma-separated keys of the 3 dimensions to "
+                                  "analyse, e.g. 'volume,ports,night'. See "
+                                  "ANOMALY_DIMENSIONS for valid keys."),
+    ip: str | None = Query(default=None,
+                           description="Optional focus IP. Drills into this IP's "
+                                       "counterparts instead of the whole network."),
+    role: str = Query(default="src",
+                      description="'src' or 'dst'. Without ip: score all source "
+                                  "(src) or all destination (dst) IPs. With ip: "
+                                  "the focus IP's role — 'src' scores the "
+                                  "destinations it contacts, 'dst' scores the "
+                                  "sources that contact it."),
+    db: AsyncSession = Depends(get_db),
+):
+    """Isolation Forest anomaly detection over NetFlow IPs in a **freely chosen
+    3-dimensional space**, for the whole network or **focused on a single IP**.
+
+    The caller picks any 3 of the available dimensions (``dims=`` — Volumen,
+    Ziel-Ports, Ziel-/Quell-IPs, Flows, Pakete, Tageszeit, Land-Seltenheit); the
+    forest scores every IP in exactly that 3-D space and the dashboard plots those
+    three axes. An IP is anomalous when it is easy to isolate from the crowd —
+    e.g. exfil hosts with unusual volume, scanners hitting many ports/IPs,
+    off-hours activity, or sources from rare countries.
+
+    Scope is controlled by ``ip`` + ``role``:
+
+    * no ``ip`` → global: score **all source IPs** (``role=src``, default) or
+      **all destination IPs** (``role=dst``).
+    * ``ip`` set → drill into that IP's peers: ``role=src`` treats the IP as the
+      source and scores the **destinations it contacts**; ``role=dst`` treats it
+      as the destination and scores the **sources that contact it**.
+
+    Built on netflow_buckets (the only source with real byte volume) with a
+    geoip_cache join for country. The aggregation + CPU scoring is cached (300s,
+    keyed incl. dimensions + focus) and runs off-thread."""
+    import asyncio
+    import math
+    import ipaddress as _ipaddr
+    from collections import Counter
+
+    # Resolve the 3 chosen dimensions: keep valid, distinct, order-preserved keys;
+    # fall back to the default trio if the request doesn't yield exactly three.
+    selected: list[str] = []
+    for k in (dims or "").split(","):
+        k = k.strip()
+        if k in _ANOMALY_DIM_KEYS and k not in selected:
+            selected.append(k)
+    if len(selected) != 3:
+        selected = list(_ANOMALY_DEFAULT_DIMS)
+
+    role = role if role in ("src", "dst") else "src"
+    focus_ip = (ip or "").strip() or None
+    if focus_ip:
+        try:
+            _ipaddr.ip_address(focus_ip)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ungültige IP")
+
+    # Decide which IP column is the scored entity, which is the peer (counterpart)
+    # used for the distinct-peer dimension, and which column the focus IP filters.
+    # Column names come from a fixed whitelist, so they are safe to interpolate.
+    if focus_ip:
+        # Drill into one IP's peers: role = the focus IP's own side; the entity we
+        # score is the opposite side (its counterparts), filtered to that IP.
+        if role == "src":            # focus IP is source → score its destinations
+            entity_col, peer_col = "dst_ip", "src_ip"
+        else:                        # focus IP is destination → score its sources
+            entity_col, peer_col = "src_ip", "dst_ip"
+        filter_col = peer_col        # = the focus IP's own column
+    else:
+        entity_col = "src_ip" if role == "src" else "dst_ip"
+        peer_col = "dst_ip" if role == "src" else "src_ip"
+        filter_col = None
+
+    where = ["n.bucket_start >= :since", f"n.{entity_col} IS NOT NULL"]
+    params = {"since": datetime.now(timezone.utc) - timedelta(hours=hours),
+              "min_flows": min_flows, "max_ips": max_ips}
+    if focus_ip:
+        where.append(f"n.{filter_col} = :focus_ip")
+        params["focus_ip"] = focus_ip
+
+    rows = (await db.execute(text(f"""
+        SELECT n.{entity_col} AS entity,
+               SUM(n.bytes)   AS bytes,
+               SUM(n.flows)   AS flows,
+               SUM(n.packets) AS packets,
+               COUNT(DISTINCT n.dst_port)   AS dports,
+               COUNT(DISTINCT n.{peer_col}) AS dips,
+               SUM(CASE WHEN EXTRACT(hour FROM n.bucket_start) < 6 THEN n.flows ELSE 0 END) AS night_flows,
+               MAX(n.bucket_start) AS last_seen,
+               MAX(g.country) AS country
+        FROM netflow_buckets n
+        LEFT JOIN geoip_cache g ON g.ip = n.{entity_col}
+        WHERE {" AND ".join(where)}
+        GROUP BY n.{entity_col}
+        HAVING SUM(n.flows) >= :min_flows
+        ORDER BY SUM(n.bytes) DESC
+        LIMIT :max_ips
+    """), params)).all()
+
+    # Country-rarity encoding: a source from a country that rarely appears among
+    # the observed sources is easier to isolate. NULL country (internal/unknown)
+    # is its own bucket so internal hosts aren't flagged just for being internal.
+    counts = Counter((r[8] or "(intern)") for r in rows)
+    total = max(1, len(rows))
+
+    items = []
+    for r in rows:
+        entity, byts, flows, pkts, dports, dips, night_flows, last_seen, country = r
+        byts = int(byts or 0)
+        flows = int(flows or 0) or 1
+        pkts = int(pkts or 0)
+        dports = int(dports or 0)
+        dips = int(dips or 0)
+        share = counts[country or "(intern)"] / total
+        rarity = -math.log(share)
+        night_ratio = int(night_flows or 0) / flows
+
+        # raw = the human value shown on each axis / hover; feat = the
+        # Isolation-Forest input (higher = more anomalous, log-scaled for the
+        # heavy-tailed count/volume metrics).
+        raw = {"volume": byts, "ports": dports, "dst_ips": dips,
+               "flows": flows, "packets": pkts,
+               "night": round(night_ratio, 3), "country": round(rarity, 3)}
+        feat = {"volume": math.log1p(byts), "ports": math.log1p(dports),
+                "dst_ips": math.log1p(dips), "flows": math.log1p(flows),
+                "packets": math.log1p(pkts), "night": night_ratio,
+                "country": rarity}
+
+        it = {
+            "ip": entity,
+            "country": country or None,
+            "bytes": byts,
+            "flows": flows,
+            "packets": pkts,
+            "distinct_dst_ports": dports,
+            "distinct_dst_ips": dips,
+            "night_ratio": round(night_ratio, 3),
+            "country_rarity": round(rarity, 3),
+            "last_seen": last_seen.isoformat() if last_seen else None,
+            # Raw values for every dimension so the chart can plot any chosen 3.
+            "vals": raw,
+        }
+        # Only the chosen dimensions feed the forest.
+        for k in selected:
+            it[f"f_{k}"] = feat[k]
+        items.append(it)
+
+    # The distinct-peer dimension is labelled by what the peer is: when source
+    # IPs are scored the peers are destinations (Ziel-IPs); when destination IPs
+    # are scored the peers are sources (Quell-IPs).
+    dim_label = dict(_ANOMALY_DIM_LABEL)
+    dim_label["dst_ips"] = "Ziel-IPs" if entity_col == "src_ip" else "Quell-IPs"
+    available = [dict(d, label=dim_label[d["key"]]) for d in ANOMALY_DIMENSIONS]
+
+    from app import anomaly
+    feature_keys = [f"f_{k}" for k in selected]
+    dim_labels = {f"f_{k}": dim_label[k] for k in selected}
+
+    def _score():
+        res = anomaly.score_items(items, feature_keys)
+        return anomaly.attribute_drivers(res, feature_keys, dim_labels)
+
+    result = await asyncio.to_thread(_score)
+    ranked = result["items"]
+
+    # Per-point raw values for the chosen dimensions so the dashboard can render
+    # the rotatable 3-D point cloud + bubble view on the selected axes.
+    scatter = [{"ip": it["ip"], "vals": it["vals"], "country": it["country"],
+                "score": it["score"], "anom": it["is_anomaly"]} for it in ranked]
+    # Drop internal scoring helpers from the table payload.
+    table = [{k: v for k, v in it.items() if not (k.startswith("f_") or k == "vals")}
+             for it in ranked[:limit]]
+
+    # Top counterpart (by volume) per displayed entity — the "Ziel-IP" column.
+    # Bounded to just the shown rows, so it stays cheap; the full per-peer
+    # breakdown is available on row-click via /api/ip/{ip}/connections.
+    entity_ips = [it["ip"] for it in table]
+    if entity_ips:
+        peer_where = ["n.bucket_start >= :since", f"n.{entity_col} = ANY(:ips)"]
+        peer_params = {"since": params["since"], "ips": entity_ips}
+        if focus_ip:
+            peer_where.append(f"n.{filter_col} = :focus_ip")
+            peer_params["focus_ip"] = focus_ip
+        peer_rows = (await db.execute(text(f"""
+            SELECT DISTINCT ON (e) e, peer FROM (
+                SELECT n.{entity_col} AS e, n.{peer_col} AS peer, SUM(n.bytes) AS b
+                FROM netflow_buckets n
+                WHERE {" AND ".join(peer_where)}
+                GROUP BY n.{entity_col}, n.{peer_col}
+            ) t
+            ORDER BY e, b DESC
+        """), peer_params)).all()
+        top_peer = {r[0]: r[1] for r in peer_rows}
+        for it in table:
+            it["top_peer"] = top_peer.get(it["ip"])
+
+    # Human description of what was scored, for the dashboard header.
+    scored_label = "Quell-IPs" if entity_col == "src_ip" else "Ziel-IPs"
+    if focus_ip:
+        focus_desc = (f"Ziel-IPs, die von {focus_ip} (Quelle) kontaktiert werden"
+                      if role == "src" else
+                      f"Quell-IPs, die {focus_ip} (Ziel) kontaktieren")
+    else:
+        focus_desc = "Alle Quell-IPs (global)" if entity_col == "src_ip" else "Alle Ziel-IPs (global)"
+
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "window_hours": hours,
+        "source": "netflow",
+        "selected_dims": selected,
+        "dimensions": [dim_label[k] for k in selected],
+        "available_dimensions": available,
+        "focus": {"ip": focus_ip, "role": role, "entity": entity_col,
+                  "scored": scored_label, "description": focus_desc},
+        "params": {"min_flows": min_flows, "max_ips": max_ips,
+                   "threshold": result["threshold"]},
+        "analyzed": result["analyzed"],
+        "anomaly_count": result["anomaly_count"],
+        "anomalies": table,
+        "scatter": scatter,
+    }
+
+
+@app.get("/api/ip/{ip}/connections")
+@cached(ttl=120)
+async def ip_connections(
+    ip: str,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    """All known past connections from and to an IP, from the NetFlow ledger.
+
+    Outbound = the IP as source (IP → peer), inbound = the IP as destination
+    (peer → IP). Aggregated per (peer, server-port, protocol) with bytes/flows
+    and first/last seen, plus the peer's country. Powers the 'Bekannte
+    Verbindungen' section of the OSINT panel. Cached 120s."""
+    import asyncio
+    import ipaddress as _ip
+    try:
+        _ip.ip_address(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP")
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    def _empty_nf() -> dict:
+        return {"connections": [], "truncated": False, "peers": 0, "bytes": 0, "flows": 0}
+
+    def _empty_fw() -> dict:
+        return {"connections": [], "truncated": False, "peers": 0, "events": 0}
+
+    async def _nf_side(sess, self_col: str, peer_col: str) -> dict:
+        rows = (await sess.execute(text(f"""
+            SELECT n.{peer_col} AS peer, n.dst_port AS port, n.protocol AS proto,
+                   SUM(n.bytes) AS bytes, SUM(n.packets) AS packets, SUM(n.flows) AS flows,
+                   MIN(n.bucket_start) AS first_seen, MAX(n.bucket_start) AS last_seen,
+                   MAX(g.country) AS country
+            FROM netflow_buckets n
+            LEFT JOIN geoip_cache g ON g.ip = n.{peer_col}
+            WHERE n.{self_col} = :ip AND n.bucket_start >= :since
+            GROUP BY n.{peer_col}, n.dst_port, n.protocol
+            ORDER BY SUM(n.bytes) DESC
+            LIMIT :lim
+        """), {"ip": ip, "since": since, "lim": limit + 1})).all()
+        truncated = len(rows) > limit
+        rows = rows[:limit]
+        conns = [{
+            "peer": r[0], "port": r[1], "protocol": r[2],
+            "bytes": int(r[3] or 0), "packets": int(r[4] or 0), "flows": int(r[5] or 0),
+            "first_seen": r[6].isoformat() if r[6] else None,
+            "last_seen": r[7].isoformat() if r[7] else None,
+            "country": r[8],
+        } for r in rows]
+        # Headline derived from the shown rows (a '≥' lower bound when truncated)
+        # — avoids a second full aggregation that's expensive for very busy IPs.
+        return {
+            "connections": conns, "truncated": truncated,
+            "peers": len({c["peer"] for c in conns}),
+            "bytes": sum(c["bytes"] for c in conns),
+            "flows": sum(c["flows"] for c in conns),
+        }
+
+    # Blocked/denied attempts from the firewall logs — connections NetFlow never
+    # records as a flow (the packet was dropped). Denied actions only.
+    _deny = ("(f.action ILIKE 'den%' OR f.action ILIKE 'drop%' "
+             "OR f.action ILIKE 'block%' OR f.action ILIKE 'rej%')")
+
+    async def _fw_side(sess, self_col: str, peer_col: str) -> dict:
+        rows = (await sess.execute(text(f"""
+            SELECT f.{peer_col} AS peer, f.destination_port AS port, f.protocol AS proto,
+                   f.action AS action, COUNT(*) AS events, MAX(f.created_at) AS last_seen,
+                   MAX(g.country) AS country
+            FROM firewall_logs f
+            LEFT JOIN geoip_cache g ON g.ip = f.{peer_col}
+            WHERE f.{self_col} = :ip AND f.created_at >= :since AND {_deny}
+            GROUP BY f.{peer_col}, f.destination_port, f.protocol, f.action
+            ORDER BY COUNT(*) DESC
+            LIMIT :lim
+        """), {"ip": ip, "since": since, "lim": limit + 1})).all()
+        truncated = len(rows) > limit
+        rows = rows[:limit]
+        conns = [{
+            "peer": r[0], "port": r[1], "protocol": r[2], "action": r[3],
+            "events": int(r[4] or 0),
+            "last_seen": r[5].isoformat() if r[5] else None,
+            "country": r[6],
+        } for r in rows]
+        return {
+            "connections": conns, "truncated": truncated,
+            "peers": len({c["peer"] for c in conns}),
+            "events": sum(c["events"] for c in conns),
+        }
+
+    # Each source runs in its own isolated session, bounded by both a server-side
+    # statement_timeout and a wall-clock wait_for, so a very busy IP (NetFlow) or a
+    # non-selective destination (firewall logs) degrades to "unavailable" instead
+    # of hanging the panel. The two run concurrently → worst case ≈ max of the caps.
+    async def _run_side(stmt_timeout_ms: int, wall_s: float, runner,
+                        cols_out: tuple, cols_in: tuple, empty, reason: str) -> dict:
+        async def _go():
+            async with async_session() as sess:
+                await sess.execute(text(f"SET statement_timeout = {stmt_timeout_ms}"))
+                out = await runner(sess, *cols_out)
+                inb = await runner(sess, *cols_in)
+                return {"outbound": out, "inbound": inb, "available": True}
+        try:
+            return await asyncio.wait_for(_go(), wall_s)
+        except Exception as e:
+            logger.warning(f"ip_connections: {reason} for {ip}: {str(e)[:120]}")
+            return {"outbound": empty(), "inbound": empty(), "available": False, "reason": reason}
+
+    nf, firewall_blocked = await asyncio.gather(
+        _run_side(7000, 8.0, _nf_side, ("src_ip", "dst_ip"), ("dst_ip", "src_ip"), _empty_nf,
+                  "NetFlow-Abfrage zu langsam (sehr aktive IP — kleineres Zeitfenster wählen)"),
+        _run_side(4500, 5.0, _fw_side, ("source_ip", "destination_ip"), ("destination_ip", "source_ip"), _empty_fw,
+                  "Firewall-Log-Abfrage zu langsam (Index fehlt oder im Aufbau)"),
+    )
+
+    return {
+        "ip": ip, "days": days,
+        "outbound": nf["outbound"], "inbound": nf["inbound"],
+        "netflow_available": nf.get("available", True),
+        "netflow_reason": nf.get("reason"),
+        "firewall_blocked": firewall_blocked,
+    }
 
 
 @app.get("/api/firewalls/{fw_ip}/interfaces")
@@ -3694,6 +4087,7 @@ class AdminSettingsIn(BaseModel):
     abuseipdb_api_key: str | None = None
     virustotal_api_key: str | None = None
     shodan_api_key: str | None = None
+    shodan_auto_every_lookup: bool | None = None
     shodan_auto_on_malicious: bool | None = None
     shodan_auto_abuse_threshold: int | None = None
     sophos_intelix_client_id: str | None = None
@@ -3734,9 +4128,11 @@ class AdminSettingsIn(BaseModel):
     agent_failed_login_distributed_window_minutes: int | None = Field(default=None, ge=5, le=10080)
     agent_failed_login_distributed_attempts: int | None = Field(default=None, ge=1, le=100000)
     agent_failed_login_distributed_min_ips: int | None = Field(default=None, ge=2, le=10000)
+    agent_failed_login_network_block_enabled: bool | None = None
     agent_failed_login_distributed_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_triage_system_prompt: str | None = Field(default=None, max_length=20000)
     analyst_system_prompt: str | None = Field(default=None, max_length=20000)
+    chat_sql_enabled: bool | None = None
     osint_abuseipdb_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_abuseipdb_monthly_limit: int | None = Field(default=None, ge=0, le=10000000)
     osint_virustotal_daily_limit: int | None = Field(default=None, ge=0, le=10000000)
@@ -4198,7 +4594,7 @@ async def get_agent_workflow():
 
     pipeline = [
         {"step": "Kandidaten", "detail": "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)"},
-        {"step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo)"},
+        {"step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ Block-Indikator"},
         {"step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
         {"step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
         {"step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},
@@ -4221,7 +4617,7 @@ async def get_agent_workflow():
         },
         {
             "key": "waf", "label": "WAF",
-            "trigger": "Frische 4xx/5xx-WAF-Events pro IP",
+            "trigger": "Frische 4xx/5xx-WAF-Events pro IP · Pfad-Cache (Redis, 24 h) erkennt Wordlist-/Directory-Brute-Force",
             "enabled_key": "agent_waf_enabled",
             "enabled": settings.agent_waf_enabled,
             "prompt_source": "waf", "prompt_key": "agent_waf_system_prompt",
@@ -4492,7 +4888,7 @@ _WARM_TARGETS: list[tuple[str, dict]] = [
     ("get_recent_fw_logs", {"limit": 500, "log_type": None}),
     ("get_failed_logins", {"days": 7, "limit": 300}),
     ("get_waf_stats", {"days": 7}),
-    ("get_waf_recent", {"days": 7, "limit": 300, "include_allowed": False}),
+    ("get_waf_recent", {"days": 7, "limit": 300, "status_class": "4xx_5xx"}),
     ("get_ips_stats", {"days": 7}),
     ("get_ips_recent", {"days": 7, "limit": 300}),
     ("get_endpoints_list", {"limit": 200, "health": None, "isolation": None, "search": None}),

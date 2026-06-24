@@ -381,18 +381,18 @@ _HANDLERS = {
 }
 
 
-async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
-    """Free-form conversation with the LLM using the analyst persona. Returns
-    None when the agent/LLM isn't configured."""
-    base = (settings.agent_base_url or "").rstrip("/")
-    if not (settings.agent_enabled and base):
-        return None
-    system_prompt = (getattr(settings, "analyst_system_prompt", "") or "").strip() or DEFAULT_ANALYST_PROMPT
-    messages = [{"role": "system", "content": system_prompt}]
-    for h in (history or [])[-8:]:
-        if h.get("role") in ("user", "assistant") and h.get("content"):
-            messages.append({"role": h["role"], "content": str(h["content"])[:4000]})
-    messages.append({"role": "user", "content": text})
+def _strip_reasoning(content: str) -> str:
+    """Strip reasoning some models leak: <think>…</think> tags, and a leading
+    English "thinking process" preamble before the actual answer."""
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.S)
+    content = re.sub(r"^\s*(?:here'?s?\s+(?:a|my)\s+thinking\s+process|let me think|thinking)\b.*?(?:\n\n|\Z)",
+                     "", content, flags=re.S | re.I, count=1)
+    return content
+
+
+async def _llm_call(messages: list[dict], base: str, timeout: float = 90) -> str:
+    """One /chat/completions round-trip. Returns the assistant content, or a
+    'WARN …' string on transport/HTTP error (surfaced to the user as-is)."""
     headers = {"Content-Type": "application/json"}
     if settings.agent_api_key:
         headers["Authorization"] = f"Bearer {settings.agent_api_key}"
@@ -403,20 +403,69 @@ async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
         "messages": messages,
     }
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(f"{base}/chat/completions", headers=headers, json=payload)
         if r.status_code != 200:
             return f"WARN LLM-Fehler (HTTP {r.status_code})."
-        content = (((r.json().get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
-        # Strip reasoning some models leak: <think>…</think> tags, and a leading
-        # English "thinking process" preamble before the actual answer.
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.S)
-        content = re.sub(r"^\s*(?:here'?s?\s+(?:a|my)\s+thinking\s+process|let me think|thinking)\b.*?(?:\n\n|\Z)",
-                         "", content, flags=re.S | re.I, count=1)
-        return content.strip() or "(keine Antwort)"
+        return (((r.json().get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
     except Exception as e:
-        logger.warning(f"llm_chat failed: {e}")
+        logger.warning(f"llm_chat call failed: {e}")
         return f"WARN LLM nicht erreichbar: {str(e)[:160]}"
+
+
+# How many read-only SQL round-trips the chat may take before it must answer.
+_MAX_SQL_STEPS = 3
+
+
+async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
+    """Free-form conversation with the LLM using the analyst persona. When
+    ``chat_sql_enabled`` is on, the model may issue read-only SQL queries (via a
+    {"sql": …} reply) that the system runs against Postgres and feeds back before
+    the model answers. Returns None when the agent/LLM isn't configured."""
+    base = (settings.agent_base_url or "").rstrip("/")
+    if not (settings.agent_enabled and base):
+        return None
+
+    db_enabled = bool(getattr(settings, "chat_sql_enabled", True))
+    system_prompt = (getattr(settings, "analyst_system_prompt", "") or "").strip() or DEFAULT_ANALYST_PROMPT
+    if db_enabled:
+        from app import sql_query
+        system_prompt = f"{system_prompt}\n\n{sql_query.prompt_section()}"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in (history or [])[-8:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": str(h["content"])[:4000]})
+    messages.append({"role": "user", "content": text})
+
+    for _ in range(_MAX_SQL_STEPS):
+        content = _strip_reasoning(await _llm_call(messages, base))
+        sql = None
+        if db_enabled:
+            obj = _extract_json(content)
+            cand = obj.get("sql") if isinstance(obj, dict) else None
+            if isinstance(cand, str) and cand.strip().lower().startswith(("select", "with")):
+                sql = cand
+        if sql is None:
+            return content.strip() or "(keine Antwort)"
+        # The model asked for data: run it read-only and feed the rows back.
+        from app import sql_query
+        messages.append({"role": "assistant", "content": content})
+        try:
+            res = await sql_query.run_select(sql)
+            feedback = ("[DB-Ergebnis] " + json.dumps(res, ensure_ascii=False)[:6000]
+                        + "\nBeantworte jetzt die Frage des Nutzers auf Deutsch, ohne weiteres JSON.")
+        except sql_query.SqlError as e:
+            feedback = f"[DB-Fehler] {e}. Korrigiere die Abfrage oder antworte ohne Datenbank."
+        except Exception as e:
+            logger.warning(f"chat sql failed: {e}")
+            feedback = f"[DB-Fehler] Abfrage fehlgeschlagen: {str(e)[:160]}. Antworte ohne Datenbank."
+        messages.append({"role": "user", "content": feedback})
+
+    # Query budget exhausted — force a final answer with no further SQL.
+    messages.append({"role": "user",
+                     "content": "Gib jetzt die finale Antwort auf Deutsch, ohne weitere DB-Abfrage und ohne JSON."})
+    return _strip_reasoning(await _llm_call(messages, base)).strip() or "(keine Antwort)"
 
 
 async def run_command(text: str, actor: str = "chat", history: list[dict] | None = None) -> dict[str, Any]:

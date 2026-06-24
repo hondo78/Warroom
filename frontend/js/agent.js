@@ -114,10 +114,14 @@ async function updateAgentList() {
                 alertCell = `<code style="font-size:.78rem">${escapeHtml(truncate(val, 32))}</code>${isIp ? osintBtn(val) : ''}<br><span class="ip-country" style="font-size:.72rem">Triage · ${escapeHtml(ctx.value_type || 'ip')}</span>`;
             } else if (d.source_type === 'failed_login' && (d.action_args || {}).context && d.action_args.context.distributed_brute_force_indicator) {
                 const ctx = d.action_args.context;
-                const summ = ctx.subnet_summary || [];
+                // New decisions carry network_summary (real CIDRs via OSINT);
+                // older ones carry subnet_summary (/24). Support both.
+                const summ = ctx.network_summary || ctx.subnet_summary || [];
                 const top = summ[0];
-                const topTxt = top ? `${top.subnet24} (${top.attempts}× / ${top.distinct_ips} IPs)` : '—';
-                alertCell = `<span class="ip-country" style="font-size:.78rem">👥 verteilter Brute-Force</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} Logins · ${summ.length} /24 · Top: ${escapeHtml(topTxt)}</span>`;
+                const topNet = top ? (top.network || top.subnet24) : null;
+                const topTxt = top ? `${topNet} (${top.attempts}× / ${top.distinct_ips} IPs)` : '—';
+                const unit = ctx.network_summary ? 'Netz(e)' : '/24';
+                alertCell = `<span class="ip-country" style="font-size:.78rem">👥 verteilter Brute-Force</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} Logins · ${summ.length} ${unit} · Top: ${escapeHtml(topTxt)}</span>`;
             } else if (['waf','ips','failed_login'].includes(d.source_type) && d.source_ip) {
                 const ctx = (d.action_args || {}).context || {};
                 let sub;
@@ -243,17 +247,23 @@ function renderAgentDetail(d) {
                 ['Operator-Hinweis', ctx.note ? escapeHtml(ctx.note) : '—'],
             );
         } else if (isDistributed) {
-            const summ = ctx.subnet_summary || [];
+            // New decisions: network_summary (real CIDRs); older: subnet_summary (/24).
+            const isNet = !!ctx.network_summary;
+            const summ = ctx.network_summary || ctx.subnet_summary || [];
             const aa = d.action_args || {};
             const targetTxt = aa.target_subnet
-                ? '<code style="font-size:.8rem">' + escapeHtml(aa.target_subnet) + '</code>'
+                ? '<code style="font-size:.8rem">' + escapeHtml(aa.target_subnet) + '</code> (ganzes Netz)'
                 : (Array.isArray(aa.target_ips) ? '<strong>' + aa.target_ips.length + ' IP(s)</strong>: ' + aa.target_ips.slice(0, 15).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') : '—');
             rows.push(
                 ['Login-Versuche im Fenster', ctx.total_login_attempts ?? '-'],
                 ['Zeitfenster', (ctx.window_minutes ?? '-') + ' min'],
-                ['Betroffene /24-Netze', summ.length],
+                [isNet ? 'Betroffene Netze' : 'Betroffene /24-Netze', summ.length],
                 ['Block-Ziel', targetTxt],
-                ['Top /24 (Versuche / IPs)', summ.slice(0, 10).map(s => '<code style="font-size:.78rem">' + escapeHtml(s.subnet24) + '</code> (' + s.attempts + '× / ' + s.distinct_ips + ' IPs)').join('<br>') || '-'],
+                [isNet ? 'Top-Netze (Versuche / IPs)' : 'Top /24 (Versuche / IPs)',
+                    summ.slice(0, 10).map(s => '<code style="font-size:.78rem">' + escapeHtml(s.network || s.subnet24) + '</code>'
+                        + (s.network_name ? ' <span class="ip-country" style="font-size:.72rem">' + escapeHtml(s.network_name) + '</span>' : '')
+                        + ' (' + s.attempts + '× / ' + s.distinct_ips + ' IPs)'
+                        + (s.too_large ? ' <span class="ip-country" style="font-size:.7rem">⚠ zu groß</span>' : '')).join('<br>') || '-'],
             );
         } else if (isSubnet) {
             rows.push(

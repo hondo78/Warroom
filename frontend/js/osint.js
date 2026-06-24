@@ -172,6 +172,7 @@ async function _osintRun(value, type, force) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         body.innerHTML = _osintRender(d, type);
+        if (type === 'ip') _osintLoadConnections(value);
     } catch (err) {
         body.innerHTML = `<div class="detail-error">Fehler: ${_osintEscape(err.message)}</div>`;
     }
@@ -210,7 +211,123 @@ function _osintRender(d, type) {
     const cacheNote = d.cached
         ? '<div class="osint-cache-note">Daten aus dem 1h-Cache (Knopf „Neu prüfen" für Live-Abfrage)</div>'
         : '';
-    return cacheNote + `<div class="osint-grid">${cards}</div>`;
+    // Connection history (NetFlow) is loaded asynchronously for IPs only.
+    const conn = type === 'ip'
+        ? '<div id="osintConnections" style="margin-top:1rem"><div class="osint-loading">Bekannte Verbindungen werden geladen…</div></div>'
+        : '';
+    return cacheNote + `<div class="osint-grid">${cards}</div>` + conn;
+}
+
+// --- Connection history (from/to the IP, via NetFlow) ---------------------------
+
+async function _osintLoadConnections(ip) {
+    const el = document.getElementById('osintConnections');
+    if (!el) return;
+    try {
+        const r = await fetch(`/api/ip/${encodeURIComponent(ip)}/connections?days=30&limit=100`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        el.innerHTML = _osintRenderConnections(d);
+    } catch (err) {
+        el.innerHTML = `<div class="detail-error">Verbindungen konnten nicht geladen werden: ${_osintEscape(err.message)}</div>`;
+    }
+}
+
+function _osintProtoName(p) {
+    return ({ 1: 'ICMP', 6: 'TCP', 17: 'UDP', 47: 'GRE', 50: 'ESP', 58: 'ICMPv6' })[p] || (p != null ? 'proto ' + p : '—');
+}
+
+function _osintFmtBytes(b) {
+    b = Number(b) || 0;
+    const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return `${b.toFixed(b >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function _osintFmtTs(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return '—'; }
+}
+
+function _osintConnTable(side, label, arrow) {
+    const c = (side && side.connections) || [];
+    if (!c.length) return `<div class="osint-conn-head">${arrow} ${label}: <span class="osint-na">keine Verbindungen</span></div>`;
+    const rows = c.map(x => `<tr>
+        <td><code style="font-size:.8rem">${_osintEscape(x.peer || '')}</code>${x.country ? ` <span class="ip-country" style="font-size:.7rem">${_osintEscape(x.country)}</span>` : ''}</td>
+        <td>${x.port != null ? x.port : '—'}</td>
+        <td>${_osintEscape(_osintProtoName(x.protocol))}</td>
+        <td style="text-align:right">${_osintFmtBytes(x.bytes)}</td>
+        <td style="text-align:right">${(x.flows || 0).toLocaleString('de-DE')}</td>
+        <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
+    </tr>`).join('');
+    const ge = side.truncated ? '≥ ' : '';
+    const trunc = side.truncated ? ` · Top ${c.length}` : '';
+    return `
+        <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
+            ${arrow} <strong>${label}</strong>: ${ge}${(side.peers || 0).toLocaleString('de-DE')} Peers ·
+            ${ge}${_osintFmtBytes(side.bytes)} · ${ge}${(side.flows || 0).toLocaleString('de-DE')} Flows${trunc}
+        </div>
+        <div class="table-scroll" style="max-height:240px">
+            <table class="table table-sm table-hover align-middle" style="margin:0">
+                <thead><tr><th>Peer</th><th>Port</th><th>Proto</th><th style="text-align:right">Bytes</th><th style="text-align:right">Flows</th><th>Zuletzt</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
+function _osintFwTable(side, label, arrow) {
+    const c = (side && side.connections) || [];
+    if (!c.length) return `<div class="osint-conn-head" style="margin:.6rem 0 .3rem">${arrow} <strong>${label}</strong>: <span class="osint-na">keine</span></div>`;
+    const rows = c.map(x => `<tr>
+        <td><code style="font-size:.8rem">${_osintEscape(x.peer || '')}</code>${x.country ? ` <span class="ip-country" style="font-size:.7rem">${_osintEscape(x.country)}</span>` : ''}</td>
+        <td>${x.port != null ? x.port : '—'}</td>
+        <td>${_osintEscape(x.protocol || '—')}</td>
+        <td><span class="badge text-bg-danger" style="font-size:.66rem">${_osintEscape(x.action || 'deny')}</span></td>
+        <td style="text-align:right">${(x.events || 0).toLocaleString('de-DE')}</td>
+        <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
+    </tr>`).join('');
+    const trunc = side.truncated ? ` · Top ${c.length}` : '';
+    return `
+        <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
+            ${arrow} <strong>${label}</strong>: ${(side.peers || 0).toLocaleString('de-DE')} Peers ·
+            ${(side.events || 0).toLocaleString('de-DE')} Versuche${trunc}
+        </div>
+        <div class="table-scroll" style="max-height:240px">
+            <table class="table table-sm table-hover align-middle" style="margin:0">
+                <thead><tr><th>Peer</th><th>Port</th><th>Proto</th><th>Action</th><th style="text-align:right">Versuche</th><th>Zuletzt</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
+function _osintRenderConnections(d) {
+    const nfBody = (d.netflow_available === false)
+        ? `<div class="osint-na">${_osintEscape(d.netflow_reason || 'nicht verfügbar')}</div>`
+        : `${_osintConnTable(d.outbound, 'Ausgehend (IP → Ziel)', '↗')}
+           ${_osintConnTable(d.inbound, 'Eingehend (Quelle → IP)', '↘')}`;
+    const netflowCard = `<div class="osint-card osint-conn-card">
+        <h4>Bekannte Verbindungen <span class="text-secondary" style="font-size:.8rem">(NetFlow, letzte ${d.days} Tage)</span></h4>
+        ${nfBody}
+    </div>`;
+    const fb = d.firewall_blocked || {};
+    let fwCard = '';
+    if (fb.available === false) {
+        fwCard = `<div class="osint-card osint-conn-card" style="margin-top:1rem">
+            <h4>Firewall: geblockte/abgelehnte Versuche</h4>
+            <div class="osint-na">${_osintEscape(fb.reason || 'nicht verfügbar')}</div>
+        </div>`;
+    } else {
+        const hasFw = ((fb.outbound && fb.outbound.connections && fb.outbound.connections.length) ||
+                       (fb.inbound && fb.inbound.connections && fb.inbound.connections.length));
+        if (hasFw) fwCard = `<div class="osint-card osint-conn-card" style="margin-top:1rem">
+            <h4>Firewall: geblockte/abgelehnte Versuche <span class="text-secondary" style="font-size:.8rem">(letzte ${d.days} Tage)</span></h4>
+            ${_osintFwTable(fb.outbound, 'Ausgehend (IP → Ziel)', '↗')}
+            ${_osintFwTable(fb.inbound, 'Eingehend (Quelle → IP)', '↘')}
+        </div>`;
+    }
+    return netflowCard + fwCard;
 }
 
 function _osintHead(p) {

@@ -118,6 +118,46 @@ def _pct(n: int, limit: int) -> float | None:
     return round((n / limit) * 100, 1)
 
 
+async def _real_counts(provider: str) -> tuple[int, int]:
+    """(today_real, month_real) outbound calls for ``provider`` — excludes
+    cache_hit, includes both the flushed DB rows and the not-yet-flushed
+    in-memory counters so a hard quota gate can't overshoot within a flush
+    window."""
+    now = datetime.now(timezone.utc)
+    today = _day_bucket(now)
+    month_start = today.replace(day=1)
+    async with _lock:
+        pend_today = sum(c for (p, s, d), c in _counter.items()
+                         if p == provider and s != "cache_hit" and d == today)
+        pend_month = sum(c for (p, s, d), c in _counter.items()
+                         if p == provider and s != "cache_hit" and d >= month_start)
+    async with async_session() as db:
+        rows = (await db.execute(text("""
+            SELECT bucket_day, COALESCE(SUM(count), 0)
+            FROM osint_usage
+            WHERE provider = :p AND status <> 'cache_hit' AND bucket_day >= :m
+            GROUP BY bucket_day
+        """), {"p": provider, "m": month_start})).all()
+    db_today = sum(int(c) for d, c in rows if d == today)
+    db_month = sum(int(c) for _d, c in rows)
+    return db_today + pend_today, db_month + pend_month
+
+
+async def quota_exhausted(provider: str) -> bool:
+    """True if ``provider`` has reached its configured DAILY or MONTHLY limit
+    (0 = no limit). Used to hard-stop automatic lookups before they burn through
+    a paid allowance."""
+    daily, monthly = _limits_for(provider)
+    if daily <= 0 and monthly <= 0:
+        return False
+    today_real, month_real = await _real_counts(provider)
+    if daily > 0 and today_real >= daily:
+        return True
+    if monthly > 0 and month_real >= monthly:
+        return True
+    return False
+
+
 async def query_usage(days: int = 30) -> dict[str, Any]:
     """Per-provider aggregation with quota utilization.
 

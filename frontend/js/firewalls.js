@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     refreshFirewalls();
-    setInterval(refreshFirewalls, 60000);
+    // 120s matches the /api/firewalls/extended cache TTL — refreshing more often
+    // just re-fetches the same cached payload.
+    setInterval(refreshFirewalls, 120000);
 });
 
 async function refreshFirewalls() {

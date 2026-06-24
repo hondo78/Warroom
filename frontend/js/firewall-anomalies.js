@@ -1,0 +1,552 @@
+// NetFlow anomaly dashboard — Isolation Forest over 3 FREELY CHOSEN dimensions.
+// The user picks any 3 of AN_DIMS; the backend scores each IP in exactly that
+// 3-D space and both charts plot the chosen axes (x=X, y=Y, z/size=Z).
+//
+// Mirror of the backend ANOMALY_DIMENSIONS registry (backend/app/main.py).
+// `axis` drives log vs linear scaling; `color` gives each dimension a stable
+// colour used for the driver chips and chart series.
+const AN_DIMS = [
+    { key: 'volume',  label: 'Volumen (Bytes)',   axis: 'log',    color: '#0dcaf0' },
+    { key: 'ports',   label: 'Ziel-Ports',        axis: 'linear', color: '#ffc107' },
+    { key: 'dst_ips', label: 'Ziel-IPs',          axis: 'linear', color: '#fd7e14' },
+    { key: 'flows',   label: 'Flows',             axis: 'log',    color: '#20c997' },
+    { key: 'packets', label: 'Pakete',            axis: 'log',    color: '#6f42c1' },
+    { key: 'night',   label: 'Tageszeit (Nacht)', axis: 'linear', color: '#0d6efd' },
+    { key: 'country', label: 'Land-Seltenheit',   axis: 'linear', color: '#198754' },
+];
+const AN_DIM_BY_KEY = Object.fromEntries(AN_DIMS.map(d => [d.key, d]));
+const AN_DIM_BY_LABEL = Object.fromEntries(AN_DIMS.map(d => [d.label, d]));
+const AN_DEFAULT_DIMS = ['volume', 'ports', 'night'];
+// Currently selected dimension keys for [X, Y, Z].
+let _anDims = AN_DEFAULT_DIMS.slice();
+
+let _anScatter = null;
+let _anItems = [];
+const _anSort = { key: 'score', dir: 'desc' };
+const AN_COLS = 11;
+
+// Format a raw dimension value for axis ticks / hover, per dimension type.
+function fmtDimVal(key, v) {
+    if (key === 'volume') return fmtBytes(v);
+    if (key === 'night') return Math.round((v || 0) * 100) + '%';
+    if (key === 'country') return 'r' + (Number(v) || 0).toFixed(1);
+    return (Number(v) || 0).toLocaleString('de-DE');
+}
+
+// Numeric plot value; log axes need a positive floor so 0 doesn't break them.
+function dimPlotVal(key, v) {
+    const n = Number(v) || 0;
+    return AN_DIM_BY_KEY[key]?.axis === 'log' ? Math.max(1, n) : n;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initFilters();
+    initDimSelectors();
+    document.getElementById('anHours').addEventListener('change', anomalyRefresh);
+    document.getElementById('anMinFlows').addEventListener('change', anomalyRefresh);
+    document.getElementById('anRole').addEventListener('change', anomalyRefresh);
+    const ipInput = document.getElementById('anIp');
+    ipInput.addEventListener('change', anomalyRefresh);
+    ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); anomalyRefresh(); } });
+    // Row click → connection detail (ignore clicks on the inline buttons/links).
+    document.getElementById('anTable').addEventListener('click', e => {
+        if (e.target.closest('button, a, input')) return;
+        const tr = e.target.closest('tr[data-ip]');
+        if (tr) anShowConnections(tr.dataset.ip);
+    });
+    document.getElementById('connModal').addEventListener('click', e => {
+        if (e.target.id === 'connModal') closeConn();
+    });
+    // Click a column header to sort; click again to flip direction.
+    document.querySelectorAll('#anSortRow th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (_anSort.key === key) {
+                _anSort.dir = _anSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _anSort.key = key;
+                // text columns read better ascending, numbers descending first
+                _anSort.dir = (key === 'ip' || key === 'country') ? 'asc' : 'desc';
+            }
+            _anRenderRows();
+        });
+    });
+    anomalyRefresh();
+});
+
+function initFilters() {
+    document.querySelectorAll('input[data-filter-for]').forEach(input => {
+        const tbody = document.getElementById(input.dataset.filterFor);
+        if (!tbody) return;
+        input.addEventListener('input', () => {
+            const t = input.value.toLowerCase().trim();
+            tbody.querySelectorAll(':scope > tr').forEach(tr => {
+                tr.style.display = (!t || tr.textContent.toLowerCase().includes(t)) ? '' : 'none';
+            });
+        });
+    });
+}
+
+// Build the three X/Y/Z dimension dropdowns and keep them mutually exclusive
+// (a dimension picked in one select is disabled in the others).
+const AN_DIM_SELECTS = ['anDimX', 'anDimY', 'anDimZ'];
+function initDimSelectors() {
+    AN_DIM_SELECTS.forEach((id, i) => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = AN_DIMS.map(d => `<option value="${d.key}">${escapeHtml(d.label)}</option>`).join('');
+        sel.value = _anDims[i];
+        sel.addEventListener('change', () => onDimChange(i, sel.value));
+    });
+    syncDimOptionStates();
+}
+
+function onDimChange(idx, key) {
+    // If the newly picked dimension is already used elsewhere, swap the two so
+    // all three stay distinct.
+    const dup = _anDims.indexOf(key);
+    if (dup !== -1 && dup !== idx) {
+        _anDims[dup] = _anDims[idx];
+        const other = document.getElementById(AN_DIM_SELECTS[dup]);
+        if (other) other.value = _anDims[dup];
+    }
+    _anDims[idx] = key;
+    syncDimOptionStates();
+    anomalyRefresh();
+}
+
+// Disable, in each select, the options currently chosen in the OTHER selects.
+function syncDimOptionStates() {
+    AN_DIM_SELECTS.forEach((id, i) => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const takenElsewhere = _anDims.filter((_, j) => j !== i);
+        Array.from(sel.options).forEach(o => { o.disabled = takenElsewhere.includes(o.value); });
+        sel.value = _anDims[i];
+    });
+}
+
+function fmtTs(iso) {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return '—'; }
+}
+
+function fmtBytes(b) {
+    b = Number(b) || 0;
+    const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return `${b.toFixed(b >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+function scoreBadge(s) {
+    const pct = Math.round(s * 100);
+    const cls = s >= 0.8 ? 'text-bg-danger' : s >= 0.62 ? 'text-bg-warning' : 'text-bg-secondary';
+    return `<span class="badge ${cls}">${s.toFixed(3)}</span> <span class="text-secondary" style="font-size:.72rem">${pct}%</span>`;
+}
+
+function driverChips(drivers) {
+    if (!drivers || !drivers.length) return '';
+    return '<div style="margin-top:.2rem">' + drivers.map(d => {
+        const color = AN_DIM_BY_LABEL[d.dim]?.color || '#6c757d';
+        return `<span class="badge" style="font-size:.66rem;background:${color};color:#0b0e14" title="Perzentil ${Math.round((d.pct || 0) * 100)}%">${escapeHtml(d.dim)}</span>`;
+    }).join(' ') + '</div>';
+}
+
+// Reflect the chosen dimensions in the chart titles + table caption.
+function updateDimLabels() {
+    const [x, y, z] = _anDims.map(k => AN_DIM_BY_KEY[k]?.label || k);
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    set('anScatterTitle', `Bubble: ${x} × ${y} · Blasengröße = ${z} · rot = Anomalie`);
+    set('an3dTitle', `3-D-Ansicht — ${x} × ${y} × ${z} (rot = Anomalie)`);
+    set('anDimsText', `${x}, ${y} und ${z}`);
+}
+
+// Apply the API's contextual dimension labels (e.g. Ziel-IPs ↔ Quell-IPs depending
+// on whether source or destination IPs are scored) to the registry, dropdowns and
+// the label→colour map used by the driver chips. Selections are preserved (by key).
+function applyDimMeta(avail) {
+    if (!Array.isArray(avail)) return;
+    avail.forEach(d => { if (AN_DIM_BY_KEY[d.key]) AN_DIM_BY_KEY[d.key].label = d.label; });
+    Object.keys(AN_DIM_BY_LABEL).forEach(k => delete AN_DIM_BY_LABEL[k]);
+    AN_DIMS.forEach(d => { AN_DIM_BY_LABEL[d.label] = d; });
+    AN_DIM_SELECTS.forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        Array.from(sel.options).forEach(o => {
+            const dd = AN_DIM_BY_KEY[o.value];
+            if (dd) o.textContent = dd.label;
+        });
+    });
+}
+
+async function anomalyRefresh() {
+    const hours = document.getElementById('anHours').value || '24';
+    const minFlows = document.getElementById('anMinFlows').value || '5';
+    const ip = (document.getElementById('anIp').value || '').trim();
+    const role = document.getElementById('anRole').value || 'src';
+    const tbody = document.getElementById('anTable');
+    tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">Analysiere…</td></tr>`;
+    updateDimLabels();
+    try {
+        const params = new URLSearchParams({ hours, min_flows: minFlows, limit: '80', dims: _anDims.join(','), role });
+        if (ip) params.set('ip', ip);
+        const r = await fetch('/api/firewall/anomalies?' + params.toString());
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        const d = await r.json();
+
+        // Adopt contextual dimension labels, then refresh chart titles + scope line.
+        applyDimMeta(d.available_dimensions);
+        updateDimLabels();
+        const fi = document.getElementById('anFocusInfo');
+        if (fi) fi.textContent = d.focus?.description ? `Analyse: ${d.focus.description} · ${(d.analyzed || 0).toLocaleString('de-DE')} IPs` : '';
+        const ipHdr = document.getElementById('anIpHdr');
+        if (ipHdr) ipHdr.textContent = d.focus?.entity === 'dst_ip' ? 'Ziel-IP' : 'Quell-IP';
+        const peerHdr = document.getElementById('anPeerHdr');
+        if (peerHdr) peerHdr.textContent = d.focus?.entity === 'dst_ip' ? 'Quell-IP' : 'Ziel-IP';
+
+        document.getElementById('anAnalyzed').textContent = (d.analyzed || 0).toLocaleString('de-DE');
+        document.getElementById('anAnomalies').textContent = (d.anomaly_count || 0).toLocaleString('de-DE');
+        document.getElementById('anWindow').textContent = `letzte ${d.window_hours} h · NetFlow`;
+        document.getElementById('anThreshold').textContent = (d.params?.threshold ?? '—').toString();
+        const top = (d.anomalies || [])[0];
+        document.getElementById('anTopScore').textContent = top ? top.score.toFixed(3) : '—';
+        document.getElementById('anTopIp').textContent = top ? top.ip : '—';
+
+        renderScatter(d.scatter || []);
+        render3d(d.scatter || []);
+        renderTable(d.anomalies || []);
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">Analyse fehlgeschlagen: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+function renderTable(items) {
+    _anItems = items || [];
+    _anRenderRows();
+}
+
+function _anSortVal(it, k) {
+    switch (k) {
+        case 'bytes': return it.bytes || 0;
+        case 'flows': return it.flows || 0;
+        case 'dports': return it.distinct_dst_ports || 0;
+        case 'dips': return it.distinct_dst_ips || 0;
+        case 'night': return it.night_ratio || 0;
+        case 'ip': return it.ip || '';
+        case 'peer': return it.top_peer || '';
+        case 'country': return it.country || '';
+        case 'last_seen': return it.last_seen || '';
+        case 'score':
+        default: return it.score || 0;
+    }
+}
+
+function _anUpdateSortIndicators() {
+    document.querySelectorAll('#anSortRow th[data-sort]').forEach(th => {
+        const ind = th.querySelector('.sort-ind');
+        if (ind) ind.textContent = th.dataset.sort === _anSort.key ? (_anSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    });
+}
+
+function _anRenderRows() {
+    const tbody = document.getElementById('anTable');
+    if (!tbody) return;
+    _anUpdateSortIndicators();
+    if (!_anItems.length) {
+        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">Keine NetFlow-Daten im Zeitfenster.</td></tr>`;
+        return;
+    }
+    const mul = _anSort.dir === 'asc' ? 1 : -1;
+    const key = _anSort.key;
+    const items = _anItems.slice().sort((a, b) => {
+        const va = _anSortVal(a, key), vb = _anSortVal(b, key);
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return mul * String(va).localeCompare(String(vb), 'de', { numeric: true });
+        }
+        return mul * (va - vb);
+    });
+    tbody.innerHTML = items.map(it => {
+        const osint = typeof osintButton === 'function' ? osintButton(it.ip, 'osint-btn', 'ip') : '';
+        const baseBg = it.is_anomaly ? 'background:rgba(220,53,69,.08);' : '';
+        const night = Math.round((it.night_ratio || 0) * 100);
+        const country = it.country
+            ? `${escapeHtml(it.country)} <span class="text-secondary" style="font-size:.7rem" title="Seltenheit (höher = ungewöhnlicher)">r${(it.country_rarity ?? 0).toFixed(1)}</span>`
+            : '<span class="text-secondary">intern</span>';
+        // Top counterpart + how many more distinct peers there are.
+        const more = Math.max(0, (it.distinct_dst_ips || 0) - 1);
+        const peer = it.top_peer
+            ? `<code style="font-size:.82rem">${escapeHtml(it.top_peer)}</code>` +
+              (more > 0 ? ` <span class="text-secondary" style="font-size:.7rem" title="weitere Gegenstellen">+${more}</span>` : '')
+            : '<span class="text-secondary">—</span>';
+        return `<tr data-ip="${escapeAttr(it.ip)}" style="${baseBg}cursor:pointer" title="Klick: alle Verbindungen anzeigen">
+            <td>${scoreBadge(it.score)}${driverChips(it.drivers)}</td>
+            <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${osint}</td>
+            <td>${peer}</td>
+            <td>${country}</td>
+            <td>${fmtBytes(it.bytes)}</td>
+            <td>${(it.flows || 0).toLocaleString('de-DE')}</td>
+            <td>${(it.distinct_dst_ports || 0).toLocaleString('de-DE')}</td>
+            <td>${(it.distinct_dst_ips || 0).toLocaleString('de-DE')}</td>
+            <td>${night}%</td>
+            <td style="white-space:nowrap">${fmtTs(it.last_seen)}</td>
+            <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">blocken</button></td>
+        </tr>`;
+    }).join('');
+    // Re-apply the active text filter (rows were rebuilt by the sort).
+    const f = document.querySelector('input[data-filter-for="anTable"]');
+    if (f && f.value.trim()) {
+        const t = f.value.toLowerCase().trim();
+        tbody.querySelectorAll(':scope > tr').forEach(tr => {
+            tr.style.display = tr.textContent.toLowerCase().includes(t) ? '' : 'none';
+        });
+    }
+}
+
+// Bubble view of the 3 chosen dimensions: x=X, y=Y, bubble size=Z, colour=Anomalie.
+function renderScatter(points) {
+    const ctx = document.getElementById('anScatter');
+    if (!ctx) return;
+    const [kx, ky, kz] = _anDims;
+    const dx = AN_DIM_BY_KEY[kx], dy = AN_DIM_BY_KEY[ky], dz = AN_DIM_BY_KEY[kz];
+    const valOf = (p, k) => (p.vals ? p.vals[k] : 0) || 0;
+
+    // The Z dimension drives bubble size. Heavy-tailed (log) dims are mapped via
+    // log1p so a few huge values don't swamp the rest; map min–max onto 4–24px.
+    const zScale = v => (dz.axis === 'log' ? Math.log1p(v || 0) : (v || 0));
+    let zMin = Infinity, zMax = -Infinity;
+    for (const p of points) { const v = zScale(valOf(p, kz)); zMin = Math.min(zMin, v); zMax = Math.max(zMax, v); }
+    const zSpan = (zMax - zMin) || 1;
+    const radius = v => 4 + ((zScale(v) - zMin) / zSpan) * 20;
+
+    const mk = p => ({ x: dimPlotVal(kx, valOf(p, kx)), y: dimPlotVal(ky, valOf(p, ky)),
+                       r: radius(valOf(p, kz)), ip: p.ip, score: p.score,
+                       rawx: valOf(p, kx), rawy: valOf(p, ky), rawz: valOf(p, kz) });
+    const normal = [], anom = [];
+    for (const p of points) (p.anom ? anom : normal).push(mk(p));
+    const data = {
+        datasets: [
+            { label: 'normal', data: normal, backgroundColor: 'rgba(120,144,170,.40)' },
+            { label: 'Anomalie', data: anom, backgroundColor: 'rgba(220,53,69,.75)' },
+        ],
+    };
+    const axisType = d => (d.axis === 'log' ? 'logarithmic' : 'linear');
+    const opts = {
+        responsive: true,
+        scales: {
+            x: { type: axisType(dx), title: { display: true, text: dx.label } },
+            y: { type: axisType(dy), title: { display: true, text: dy.label } },
+        },
+        plugins: {
+            legend: { labels: { usePointStyle: true } },
+            tooltip: {
+                callbacks: {
+                    label: (c) => {
+                        const r = c.raw;
+                        return `${r.ip} · score ${r.score.toFixed(3)} · `
+                            + `${dx.label} ${fmtDimVal(kx, r.rawx)} · `
+                            + `${dy.label} ${fmtDimVal(ky, r.rawy)} · `
+                            + `${dz.label} ${fmtDimVal(kz, r.rawz)}`;
+                    },
+                },
+            },
+        },
+    };
+    if (_anScatter) { _anScatter.data = data; _anScatter.options = opts; _anScatter.update(); }
+    else _anScatter = new Chart(ctx, { type: 'bubble', data, options: opts });
+}
+
+// 3-D scatter (Plotly): rotatable point cloud over the 3 chosen dimensions.
+// x=X, y=Y, z=Z, colour=Anomalie; Land + score shown on hover.
+let _an3dKey = '';   // dimension signature of the current plot
+function render3d(points) {
+    const el = document.getElementById('an3d');
+    if (!el || typeof Plotly === 'undefined') return;
+    if (!points.length) { Plotly.purge(el); _an3dKey = ''; return; }
+
+    const [kx, ky, kz] = _anDims;
+    const dx = AN_DIM_BY_KEY[kx], dy = AN_DIM_BY_KEY[ky], dz = AN_DIM_BY_KEY[kz];
+    const valOf = (p, k) => (p.vals ? p.vals[k] : 0) || 0;
+
+    const hover = p => `<b>${p.ip}</b><br>Score ${p.score.toFixed(3)}`
+        + `<br>${dx.label} ${fmtDimVal(kx, valOf(p, kx))}`
+        + `<br>${dy.label} ${fmtDimVal(ky, valOf(p, ky))}`
+        + `<br>${dz.label} ${fmtDimVal(kz, valOf(p, kz))}`
+        + (p.country ? `<br>Land ${p.country}` : '');
+    const trace = (pts, name, color, size) => ({
+        type: 'scatter3d', mode: 'markers', name,
+        x: pts.map(p => dimPlotVal(kx, valOf(p, kx))),
+        y: pts.map(p => dimPlotVal(ky, valOf(p, ky))),
+        z: pts.map(p => dimPlotVal(kz, valOf(p, kz))),
+        text: pts.map(hover),
+        hoverinfo: 'text',
+        marker: { size, color, opacity: name === 'Anomalie' ? 0.95 : 0.5,
+                  line: { width: 0 } },
+    });
+    const norm = points.filter(p => !p.anom);
+    const anom = points.filter(p => p.anom);
+    const data = [
+        trace(norm, 'normal', 'rgba(120,144,170,.55)', 3),
+        trace(anom, 'Anomalie', 'rgba(220,53,69,.95)', 5),
+    ];
+    const ax = (dim) => {
+        const a = { title: { text: dim.label }, gridcolor: 'rgba(148,163,184,.25)',
+                    zerolinecolor: 'rgba(148,163,184,.4)', color: '#cbd5e1' };
+        if (dim.axis === 'log') a.type = 'log';
+        return a;
+    };
+    const layout = {
+        margin: { l: 0, r: 0, t: 0, b: 0 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#cbd5e1' },
+        legend: { orientation: 'h', y: 1.02 },
+        scene: { xaxis: ax(dx), yaxis: ax(dy), zaxis: ax(dz) },
+    };
+    // Plotly.react does not reliably re-apply 3-D scene axis type (log/linear)
+    // or titles when the plot already exists. So when the chosen dimensions
+    // change, purge and rebuild so the axes fully adopt them; for a same-dimension
+    // refresh we react() to preserve the user's current rotation/zoom.
+    const cfg = { responsive: true, displaylogo: false };
+    const key = _anDims.join(',');
+    if (_an3dKey !== key) {
+        Plotly.purge(el);
+        _an3dKey = key;
+        Plotly.newPlot(el, data, layout, cfg);
+    } else {
+        Plotly.react(el, data, layout, cfg);
+    }
+}
+
+async function anomBlockIp(ip, btn) {
+    if (!ip || !confirm(`IP ${ip} auf die Blocklist setzen?`)) return;
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+        const r = await fetch('/api/firewall/block-ip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, comment: 'FW-Anomalie-Dashboard (Isolation Forest / NetFlow)' }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+        if (btn) { btn.textContent = '✓ geblockt'; btn.classList.add('text-success'); }
+    } catch (err) {
+        alert('Block fehlgeschlagen: ' + err.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'blocken'; }
+    }
+}
+
+// ---- Connection detail modal (row click) -------------------------------------
+// Pulls everything we know about an IP's connections from /api/ip/{ip}/connections:
+// NetFlow outbound (IP→peer) + inbound (peer→IP), plus blocked firewall attempts.
+let _connIp = null;          // IP currently shown in the modal (for the day buttons)
+function closeConn() {
+    document.getElementById('connModal').classList.remove('active');
+}
+
+// Time-window buttons. Busy IPs (many peers) can time out on large windows, so we
+// default to 7 days and let the user widen/narrow it.
+function connDayBar(days) {
+    const opts = [[1, '24 h'], [7, '7 Tage'], [30, '30 Tage']];
+    return '<div style="margin:0 0 .75rem;display:flex;gap:.4rem;align-items:center">'
+        + '<span class="text-secondary" style="font-size:.78rem">Zeitfenster:</span>'
+        + opts.map(([v, l]) => `<button class="btn btn-sm ${v === days ? 'btn-primary' : 'btn-outline-secondary'}" onclick="anShowConnections(_connIp, ${v})">${l}</button>`).join('')
+        + '</div>';
+}
+
+async function anShowConnections(ip, days = 7) {
+    if (!ip) return;
+    _connIp = ip;
+    const modal = document.getElementById('connModal');
+    const body = document.getElementById('connModalBody');
+    document.getElementById('connModalTitle').textContent = `Verbindungen · ${ip}`;
+    body.innerHTML = connDayBar(days) + '<div class="text-secondary py-3">Wird geladen…</div>';
+    modal.classList.add('active');
+    try {
+        const r = await fetch(`/api/ip/${encodeURIComponent(ip)}/connections?days=${days}`);
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        body.innerHTML = connDayBar(days) + renderConnBody(await r.json());
+    } catch (err) {
+        body.innerHTML = connDayBar(days) + `<div class="detail-error">Konnte Verbindungen nicht laden: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+// One NetFlow direction → a table (peer, country, port, proto, volume, flows, packets, seen).
+function connNfTable(side, peerLabel) {
+    const rows = (side && side.connections) || [];
+    if (!rows.length) return '<p class="text-secondary" style="margin:.25rem 0 1rem">Keine NetFlow-Verbindungen.</p>';
+    const trs = rows.map(c => `<tr>
+        <td><code style="font-size:.8rem">${escapeHtml(c.peer || '')}</code></td>
+        <td>${c.country ? escapeHtml(c.country) : '<span class="text-secondary">—</span>'}</td>
+        <td>${c.port ?? '—'}</td>
+        <td>${escapeHtml(c.protocol || '—')}</td>
+        <td>${fmtBytes(c.bytes)}</td>
+        <td>${(c.flows || 0).toLocaleString('de-DE')}</td>
+        <td>${(c.packets || 0).toLocaleString('de-DE')}</td>
+        <td style="white-space:nowrap">${fmtTs(c.first_seen)}</td>
+        <td style="white-space:nowrap">${fmtTs(c.last_seen)}</td>
+    </tr>`).join('');
+    const trunc = side.truncated ? ' <span class="text-secondary" style="font-size:.72rem">(gekürzt — nur Top nach Volumen)</span>' : '';
+    return `<div class="table-scroll"><table class="table table-sm table-hover align-middle">
+        <thead><tr>
+            <th>${peerLabel}</th><th>Land</th><th>Port</th><th>Proto</th>
+            <th>Volumen</th><th>Flows</th><th>Pakete</th><th>Erstmals</th><th>Zuletzt</th>
+        </tr></thead><tbody>${trs}</tbody></table></div>${trunc ? `<div>${trunc}</div>` : ''}`;
+}
+
+// Blocked firewall attempts for one direction (peer, country, port, proto, action, events, last seen).
+function connFwTable(side, peerLabel) {
+    const rows = (side && side.connections) || [];
+    if (!rows.length) return '';
+    const trs = rows.map(c => `<tr>
+        <td><code style="font-size:.8rem">${escapeHtml(c.peer || '')}</code></td>
+        <td>${c.country ? escapeHtml(c.country) : '<span class="text-secondary">—</span>'}</td>
+        <td>${c.port ?? '—'}</td>
+        <td>${escapeHtml(c.protocol || '—')}</td>
+        <td><span class="badge text-bg-danger">${escapeHtml(c.action || 'deny')}</span></td>
+        <td>${(c.events || 0).toLocaleString('de-DE')}</td>
+        <td style="white-space:nowrap">${fmtTs(c.last_seen)}</td>
+    </tr>`).join('');
+    return `<div class="table-scroll"><table class="table table-sm table-hover align-middle">
+        <thead><tr>
+            <th>${peerLabel}</th><th>Land</th><th>Port</th><th>Proto</th><th>Aktion</th><th>Versuche</th><th>Zuletzt</th>
+        </tr></thead><tbody>${trs}</tbody></table></div>`;
+}
+
+function connSummary(side) {
+    if (!side) return '';
+    return `<span class="text-secondary" style="font-size:.78rem">`
+        + `${(side.peers || 0).toLocaleString('de-DE')} Gegenstellen · ${fmtBytes(side.bytes || 0)} · ${(side.flows || 0).toLocaleString('de-DE')} Flows</span>`;
+}
+
+function renderConnBody(d) {
+    const parts = [];
+    parts.push(`<p class="admin-hint" style="margin:0 0 .75rem">Alle bekannten Verbindungen der letzten <strong>${d.days} Tage</strong> für <code>${escapeHtml(d.ip)}</code> aus dem NetFlow-Ledger, plus geblockte Firewall-Versuche.</p>`);
+
+    // NetFlow outbound (IP as source → peers) and inbound (peers → IP).
+    if (d.netflow_available === false) {
+        parts.push(`<div class="detail-error" style="margin-bottom:1rem">NetFlow nicht verfügbar: ${escapeHtml(d.netflow_reason || 'Zeitüberschreitung')}</div>`);
+    }
+    parts.push(`<h4 style="margin:.25rem 0">Ausgehend <small class="text-secondary">(${escapeHtml(d.ip)} → Ziel)</small> ${connSummary(d.outbound)}</h4>`);
+    parts.push(connNfTable(d.outbound, 'Ziel-IP'));
+    parts.push(`<h4 style="margin:1rem 0 .25rem">Eingehend <small class="text-secondary">(Quelle → ${escapeHtml(d.ip)})</small> ${connSummary(d.inbound)}</h4>`);
+    parts.push(connNfTable(d.inbound, 'Quell-IP'));
+
+    // Blocked firewall attempts (only shown when present).
+    const fb = d.firewall_blocked || {};
+    const fbOut = connFwTable(fb.outbound, 'Ziel-IP');
+    const fbIn = connFwTable(fb.inbound, 'Quell-IP');
+    if (fbOut || fbIn) {
+        parts.push('<h4 style="margin:1.25rem 0 .25rem">Geblockte Firewall-Versuche</h4>');
+        if (fbOut) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.25rem 0">Ausgehend (${escapeHtml(d.ip)} → Ziel)</div>`); parts.push(fbOut); }
+        if (fbIn) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.5rem 0 .25rem">Eingehend (Quelle → ${escapeHtml(d.ip)})</div>`); parts.push(fbIn); }
+    }
+    return parts.join('');
+}

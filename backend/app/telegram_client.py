@@ -145,6 +145,13 @@ async def _edit_caption(message_id: int, text: str) -> None:
     })
 
 
+def _actor_name(frm: dict | None) -> str:
+    """First name of the Telegram user for the approver record, falling back to
+    the @username and then a generic label."""
+    frm = frm or {}
+    return (frm.get("first_name") or "").strip() or frm.get("username") or "telegram"
+
+
 async def _handle_callback(cb: dict) -> None:
     data = cb.get("data") or ""
     cb_id = cb.get("id")
@@ -166,7 +173,7 @@ async def _handle_callback(cb: dict) -> None:
         await _answer_callback(cb_id, "Ungültige Decision-ID.")
         return
 
-    actor = (cb.get("from") or {}).get("username") or (cb.get("from") or {}).get("first_name") or "telegram"
+    actor = _actor_name(cb.get("from"))
 
     async with async_session() as db:
         rec = await db.get(AgentDecision, decision_id)
@@ -223,8 +230,7 @@ async def _handle_message(msg: dict) -> None:
     text = (msg.get("text") or "").strip()
     if not text or text.startswith("/"):  # ignore slash-commands / empty
         return
-    actor = ((msg.get("from") or {}).get("username")
-             or (msg.get("from") or {}).get("first_name") or "telegram")
+    actor = _actor_name(msg.get("from"))
     try:
         from app.command_service import run_command
         result = await run_command(text, actor=actor)

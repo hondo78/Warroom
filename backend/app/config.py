@@ -49,10 +49,15 @@ class Settings(BaseSettings):
     sophos_intelix_client_id: str = ""
     sophos_intelix_client_secret: str = ""
 
-    # Shodan credits are scarce. Routine/automated OSINT never queries Shodan;
-    # only human-initiated lookups do. Exception: automated agent loops may
-    # spend a credit when the cheaper providers already flag the IP as clearly
-    # malicious. Set shodan_auto_on_malicious=False to make Shodan human-only.
+    # When on, EVERY OSINT IP lookup also queries Shodan (spends a credit each
+    # time). Turn off to make Shodan credit-frugal again (human-only + the
+    # malicious-IP exception below).
+    shodan_auto_every_lookup: bool = True
+    # Shodan credits are scarce. With shodan_auto_every_lookup off, routine OSINT
+    # skips Shodan; only human-initiated lookups query it. Exception: automated
+    # agent loops may still spend a credit when the cheaper providers already
+    # flag the IP as clearly malicious. Set shodan_auto_on_malicious=False to
+    # make Shodan strictly human-only.
     shodan_auto_on_malicious: bool = True
     shodan_auto_abuse_threshold: int = 80   # AbuseIPDB confidence % that counts as "malicious"
 
@@ -87,6 +92,9 @@ class Settings(BaseSettings):
     # think block, so keep this generous (≈3000).
     agent_temperature: float = 0.2
     agent_max_tokens: int = 3000
+    # Let the free-form analyst chat run read-only SQL against Postgres to answer
+    # data questions (validated SELECT-only, READ ONLY txn, statement timeout).
+    chat_sql_enabled: bool = True
     # Use OpenAI-style structured outputs (response_format json_schema). The
     # decision schema is derived from the Pydantic LLMDecision model. Disable
     # for servers/models that don't support response_format (then the tolerant
@@ -132,9 +140,26 @@ class Settings(BaseSettings):
     agent_failed_login_distributed_enabled: bool = True
     agent_failed_login_distributed_window_minutes: int = 60
     agent_failed_login_distributed_attempts: int = 20   # per-/24 attempts hint
-    agent_failed_login_distributed_min_ips: int = 4     # per-/24 distinct-IP hint
+    agent_failed_login_distributed_min_ips: int = 4     # per-network distinct-IP hint
+    # When on, the distributed sweep resolves each busy /24 to its real allocated
+    # network (CIDR) via the OSINT/ipinfo-RDAP lookup and can block the whole
+    # network (with human approval). Off ⇒ legacy naive-/24 grouping.
+    agent_failed_login_network_block_enabled: bool = True
     # Empty ⇒ DEFAULT_DISTRIBUTED_LOGIN_PROMPT in app.agent.
     agent_failed_login_distributed_system_prompt: str = ""
+
+    # User-centric brute-force alert: failed logins are aggregated by USERNAME
+    # (every IP that tried that user + its failed-attempt count) and handed to the
+    # LLM, which classifies "bruteforce" (few IPs, many tries) vs
+    # "distributed_bruteforce" (many IPs, same user). On a hit we send a Telegram
+    # notification that the user is endangered — no block, just a warning.
+    agent_failed_login_user_alert_enabled: bool = True
+    agent_failed_login_user_window_minutes: int = 60
+    agent_failed_login_user_min_attempts: int = 10      # pre-filter before the LLM
+    agent_failed_login_user_distributed_min_ips: int = 3  # distinct-IP hint for "distributed"
+    agent_failed_login_user_alert_cooldown_minutes: int = 60  # re-notify the same user at most this often
+    # Empty ⇒ DEFAULT_USER_LOGIN_PROMPT in app.agent.
+    agent_failed_login_user_system_prompt: str = ""
 
     # Triage prompt — used by the manual / OSINT-initiated LLM triage path.
     # Empty ⇒ fall back to DEFAULT_TRIAGE_PROMPT in app.agent.
