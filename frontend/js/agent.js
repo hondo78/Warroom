@@ -92,13 +92,12 @@ async function updateAgentList() {
                 ips:           '<span class="severity-badge severity-critical" title="IPS/IDP rule-based">IPS</span>',
                 failed_login:  '<span class="severity-badge severity-high" title="Brute-force rule-based">Login</span>',
                 triage:        '<span class="severity-badge severity-medium" title="OSINT/Manual-Triage">Triage</span>',
+                event:         '<span class="severity-badge severity-critical" title="Sophos Central Event">Event</span>',
             })[d.source_type] || '<span class="severity-badge severity-medium" title="Sophos Alert">Alert</span>';
             const actor = d.decided_by === 'human'
                 ? '<span class="severity-badge severity-low">Mensch</span>'
                 : `<span class="severity-badge severity-medium">Agent</span> ${sourceBadge}`;
             const actionBadge = `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`;
-            const conf = Math.round((d.confidence || 0) * 100);
-            const confCls = conf >= 80 ? 'severity-critical' : conf >= 50 ? 'severity-high' : 'severity-medium';
             // Inline OSINT button: stop propagation so clicking 🔍 doesn't
             // also fire the row-level showAgentDetail(d.id).
             const osintBtn = (ip) => (typeof osintButton === 'function')
@@ -122,6 +121,12 @@ async function updateAgentList() {
                 const topTxt = top ? `${topNet} (${top.attempts}× / ${top.distinct_ips} IPs)` : '—';
                 const unit = ctx.network_summary ? 'Netz(e)' : '/24';
                 alertCell = `<span class="ip-country" style="font-size:.78rem">👥 verteilter Brute-Force</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} Logins · ${summ.length} ${unit} · Top: ${escapeHtml(topTxt)}</span>`;
+            } else if (d.source_type === 'event') {
+                const ctx = (d.action_args || {}).context || {};
+                const ip = ctx.destination_ip || ctx.source_ip || d.source_ip;
+                const shortType = (ctx.event_type || '').split('::').pop() || 'Event';
+                const ep = ctx.endpoint ? ' · ' + escapeHtml(truncate(ctx.endpoint, 24)) : '';
+                alertCell = `<span class="ip-country" style="font-size:.78rem">🖥 ${escapeHtml(shortType)}</span>${ep}${ip ? '<br><code style="font-size:.78rem">' + escapeHtml(ip) + '</code>' + osintBtn(ip) : ''}`;
             } else if (['waf','ips','failed_login'].includes(d.source_type) && d.source_ip) {
                 const ctx = (d.action_args || {}).context || {};
                 let sub;
@@ -142,7 +147,6 @@ async function updateAgentList() {
                     <td>${formatTime(d.created_at)}</td>
                     <td>${actor}</td>
                     <td>${actionBadge}</td>
-                    <td>${d.decided_by === 'human' ? '<span class="ack-label">—</span>' : '<span class="severity-badge ' + confCls + '">' + conf + '%</span>'}</td>
                     <td title="${escapeHtml(d.reasoning || '')}">${escapeHtml(truncate(d.reasoning || '-', 60))}${d.human_comment ? '<br><small class="ip-country">💬 ' + escapeHtml(truncate(d.human_comment, 60)) + '</small>' : ''}</td>
                     <td>${alertCell}</td>
                     <td><span class="health-badge ${statusCls}">${escapeHtml(d.status)}</span></td>
@@ -177,7 +181,6 @@ function closeAgentDetail() {
 
 function renderAgentDetail(d) {
     const a = d.alert || {};
-    const conf = Math.round((d.confidence || 0) * 100);
     const isPending = d.status === 'pending';
     const candidateIp = a.source_ip || d.source_ip || '';
     const isPublicIp = /^(?!10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|0\.)\d+\.\d+\.\d+\.\d+$/.test(candidateIp);
@@ -187,7 +190,6 @@ function renderAgentDetail(d) {
         ['Entschieden von', d.decided_by === 'human' ? 'Mensch' : `Agent (${escapeHtml(d.model || '?')})`],
         ['Aktion', `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`, true],
         ['Aktion-Args', '<code>' + escapeHtml(JSON.stringify(d.action_args || {})) + '</code>', true],
-        ['Konfidenz', d.decided_by === 'human' ? '—' : `${conf}%`],
         ['Status', d.status],
         ['Erstellt', formatTime(d.created_at)],
         ['Entschieden', d.decided_at ? formatTime(d.decided_at) : '—'],

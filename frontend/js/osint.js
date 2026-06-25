@@ -112,10 +112,9 @@ async function triageFromOsint() {
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        const conf = Math.round((d.confidence || 0) * 100);
         const acted = d.action && d.action !== 'no_action';
         _osintTriageMsg(
-            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${_osintEscape(d.action || '?')}</strong> (${conf}% Konfidenz)` +
+            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${_osintEscape(d.action || '?')}</strong>` +
             `${d.reasoning ? '<br><small>' + _osintEscape(d.reasoning) + '</small>' : ''}` +
             `<br><a href="/agent.html" class="alert-link">Decision #${d.decision_id} im Agent-Log ansehen ↗</a>`,
             acted ? 'warning' : 'secondary'

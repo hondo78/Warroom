@@ -160,11 +160,10 @@ async function triageCurrent() {
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        const conf = Math.round((d.confidence || 0) * 100);
         const acted = d.action && d.action !== 'no_action';
         const kind = acted ? 'warning' : 'secondary';
         showActionMsg(
-            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${escapeHtml(d.action || '?')}</strong> (${conf}% Konfidenz)` +
+            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${escapeHtml(d.action || '?')}</strong>` +
             `${d.reasoning ? '<br><small>' + escapeHtml(d.reasoning) + '</small>' : ''}` +
             `<br><a href="/agent.html" class="alert-link">Decision #${d.decision_id} im Agent-Log ansehen ↗</a>`,
             kind

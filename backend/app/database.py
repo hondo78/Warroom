@@ -118,7 +118,6 @@ _MIGRATIONS = [
         action VARCHAR(50) NOT NULL,
         action_args JSONB,
         reasoning TEXT,
-        confidence DOUBLE PRECISION,
         status VARCHAR(30) NOT NULL DEFAULT 'pending',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         decided_at TIMESTAMP WITH TIME ZONE,
@@ -140,6 +139,8 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_agent_decisions_source_ip ON agent_decisions(source_ip)",
     # alert_id is no longer mandatory for synthetic (WAF) decisions
     "ALTER TABLE agent_decisions ALTER COLUMN alert_id DROP NOT NULL",
+    # confidence scoring removed — actions are chosen purely from per-source thresholds
+    "ALTER TABLE agent_decisions DROP COLUMN IF EXISTS confidence",
     """
     CREATE TABLE IF NOT EXISTS whitelisted_ips (
         ip VARCHAR(45) PRIMARY KEY,

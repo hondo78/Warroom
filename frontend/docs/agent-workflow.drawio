@@ -65,7 +65,7 @@
         <mxCell id="llmEdit" value="leeres Feld → eingebauter Default-Prompt&#xa;Bearbeitung über /admin.html" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#94a3b8;fontSize=9" vertex="1" parent="1">
           <mxGeometry x="790" y="285" width="340" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="llmOutput" value="&lt;b style='color:#22c55e'&gt;JSON-Antwort&lt;/b&gt;&lt;br&gt;{action, args, confidence, reasoning}" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#e2e8f0;fontSize=10" vertex="1" parent="1">
+        <mxCell id="llmOutput" value="&lt;b style='color:#22c55e'&gt;JSON-Antwort&lt;/b&gt;&lt;br&gt;{action, args, reasoning}" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#e2e8f0;fontSize=10" vertex="1" parent="1">
           <mxGeometry x="790" y="335" width="340" height="40" as="geometry" />
         </mxCell>
         <mxCell id="llmAllow" value="allowed_actions: block_ip · block_subnet · acknowledge · no_action" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontColor=#94a3b8;fontSize=9" vertex="1" parent="1">
@@ -78,12 +78,12 @@
         </mxCell>
 
         <!-- agent_decisions DB -->
-        <mxCell id="db" value="&lt;b&gt;agent_decisions&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#64748b'&gt;source_type · source_ip · action · args&lt;br&gt;confidence · reasoning · status&lt;/span&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fef3c7;strokeColor=#f59e0b;strokeWidth=2;fontSize=11" vertex="1" parent="1">
+        <mxCell id="db" value="&lt;b&gt;agent_decisions&lt;/b&gt;&lt;br&gt;&lt;span style='font-size:10px;color:#64748b'&gt;source_type · source_ip · action · args&lt;br&gt;reasoning · status&lt;/span&gt;" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fef3c7;strokeColor=#f59e0b;strokeWidth=2;fontSize=11" vertex="1" parent="1">
           <mxGeometry x="1200" y="450" width="180" height="90" as="geometry" />
         </mxCell>
 
         <!-- Zeile 2 — Decision Branch -->
-        <mxCell id="diamond" value="auto_execute&#xa;OR conf ≥ Schwelle?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;strokeWidth=2;fontSize=11" vertex="1" parent="1">
+        <mxCell id="diamond" value="auto_execute?auto_execute&#xa;OR conf ≥ Schwelle?#xa;(Blocks immer manuell)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#475569;strokeWidth=2;fontSize=11" vertex="1" parent="1">
           <mxGeometry x="790" y="570" width="200" height="100" as="geometry" />
         </mxCell>
 

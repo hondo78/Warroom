@@ -30,7 +30,7 @@ from app.config import settings
 from app.database import async_session
 from app.models import (
     AgentDecision, Alert, BlockedDomain, BlockedIp, BlockedUrl,
-    FirewallLog, WhitelistedIp,
+    Event, FirewallLog, WhitelistedIp,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,10 +39,8 @@ ALLOWED_ACTIONS = {
     "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
     "acknowledge", "isolate", "notify", "no_action",
 }
-# isolate stays manual; every "block_*" action is auto-executable (same risk
-# class) so high-confidence/auto-execute settings act on them uniformly.
-# Block actions ALWAYS require human approval and are never auto-executed —
-# regardless of agent_auto_execute or the confidence fast-lane. Only the listed
+# isolate stays manual. Block actions ALWAYS require human approval and are
+# never auto-executed — regardless of agent_auto_execute. Only the listed
 # non-destructive actions may auto-run.
 BLOCK_ACTIONS = {
     "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
@@ -65,6 +63,7 @@ _SOURCE_LABELS: dict[str, str] = {
     "ips":   "IPS",
     "failed_login": "Login",
     "triage": "Triage",
+    "event": "Event",
 }
 
 
@@ -82,16 +81,7 @@ class LLMDecision(BaseModel):
 
     action: str
     args: dict[str, Any] = Field(default_factory=dict)
-    confidence: float = 0.0
     reasoning: str = ""
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def _clamp_confidence(cls, v: Any) -> float:
-        try:
-            return max(0.0, min(1.0, float(v)))
-        except (TypeError, ValueError):
-            return 0.0
 
     @field_validator("reasoning", mode="before")
     @classmethod
@@ -119,10 +109,9 @@ def _decision_response_format(allowed_actions: list[str]) -> dict[str, Any]:
                 "properties": {
                     "action": {"type": "string", "enum": list(allowed_actions)},
                     "args": {"type": "object"},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "reasoning": {"type": "string"},
                 },
-                "required": ["action", "confidence", "reasoning"],
+                "required": ["action", "reasoning"],
                 "additionalProperties": True,
             },
         },
@@ -146,12 +135,12 @@ def _validate_decision(content: str) -> dict[str, Any]:
     return LLMDecision.model_validate(raw).model_dump()
 
 
-def _should_auto_execute(action: str, confidence: float | None) -> tuple[bool, str]:
+def _should_auto_execute(action: str) -> tuple[bool, str]:
     """Decide whether a fresh decision can auto-execute and tell us why.
 
-    Two independent triggers:
-      1) ``agent_auto_execute`` (master switch) → any confidence
-      2) ``confidence`` ≥ ``agent_auto_execute_threshold`` (in %)
+    The action is chosen purely from per-source thresholds (in the prompt) —
+    there is no confidence score. Auto-execution is gated only by the action's
+    risk class and the ``agent_auto_execute`` master switch.
 
     Returns (should_execute, reason). The reason is logged so the audit
     trail explains why an action ran without human approval.
@@ -161,12 +150,8 @@ def _should_auto_execute(action: str, confidence: float | None) -> tuple[bool, s
         return False, ""
     if action not in AUTO_EXECUTABLE_ACTIONS:
         return False, ""
-    conf_pct = float(confidence or 0.0) * 100.0
-    threshold = int(getattr(settings, "agent_auto_execute_threshold", 90) or 90)
     if settings.agent_auto_execute:
         return True, "agent_auto_execute master switch is ON"
-    if conf_pct >= threshold:
-        return True, f"confidence {conf_pct:.0f}% ≥ threshold {threshold}%"
     return False, ""
 
 DEFAULT_SYSTEM_PROMPT = """Du bist ein Security-Operations-Assistent für Warroom.
@@ -178,16 +163,18 @@ Erlaubte Aktionen:
 - "isolate": Endpoint isolieren (nur bei aktivem Malware-/Threat-Befund mit klarem Endpoint-Bezug).
 - "no_action": Mehr Daten abwarten, weder blocken noch acknowledgen.
 
+Die Aktion ergibt sich allein aus den Indikatoren/Schwellenwerten — gib KEINE
+confidence aus.
+
 Antworte ausschließlich mit gültigem JSON (kein ```-Fence, kein zusätzlicher Text).
 BEISPIEL:
 {
   "action": "block_ip",
   "args": {"target_ip": "203.0.113.45"},
-  "confidence": 0.9,
   "reasoning": "Bekannte C2-IP mit mehrfachen failed logins von öffentlicher Quelle. Klar bösartig."
 }
 
-Sei konservativ: hohe Konfidenz nur bei klar bösartigen Indikatoren (bekannte C2-IPs,
+Wähle block_ip / isolate nur bei klar bösartigen Indikatoren (bekannte C2-IPs,
 mehrfache failed logins von public IP, dokumentierte Malware-Treffer, etc.).
 Bei privaten IPs (10.x, 172.16-31.x, 192.168.x) niemals block_ip empfehlen.
 
@@ -219,34 +206,35 @@ INPUT (JSON, vom System gestellt):
                        keinen Key/Account hat.
   - allowed_actions — erlaubte Werte für `action`
 
-ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift):
+ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift). Ist eine
+Schwelle erreicht ⇒ action="block_ip", sonst action="no_action". Gib KEINE
+confidence aus.
 1. WORDLIST-/DIRECTORY-BRUTE-FORCE (forced browsing / Verzeichnis-Scan):
    Viele UNTERSCHIEDLICHE Pfade von einer IP, überwiegend 404 — typischer
    Scanner/Wordlist-Angriff (z. B. /wp-admin, /.env, /.git, /phpmyadmin,
    /admin, /config.php, /backup.zip …). Prüfe sample_paths auf solche Muster.
    Indiz: distinct_paths_24h >= 15 UND der Großteil ist 4xx (path_4xx_count)
-                                                    → action="block_ip", confidence=0.9.
+                                                    → block_ip.
    Begründe im reasoning, dass es ein Wordlist-/Verzeichnis-Brute-Force ist,
    und nenne 2-3 verdächtige Pfade aus sample_paths.
-2. count_4xx_24h + count_5xx_24h >= threshold       → action="block_ip", confidence=0.95.
+2. count_4xx_24h + count_5xx_24h >= threshold       → block_ip.
 3. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, High Risk, Bad})
-                                                    → action="block_ip", confidence=0.95.
+                                                    → block_ip.
 4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern — die IP exponiert
    mehrere bekannte Schwachstellen und ist damit ein verwundbares/kompromittiertes
    System bzw. eine angreifende Maschine mit großer Angriffsfläche.
-                                                    → action="block_ip", confidence=0.9.
+                                                    → block_ip.
    Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs aus shodan.vulns.
 5. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
-                                                    → action="block_ip", confidence=0.85.
-6. Sonst                                            → action="no_action", confidence=0.6.
+                                                    → block_ip.
+6. Sonst                                            → no_action.
 
 AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
   "action": "block_ip",
   "args": {"target_ip": "203.0.113.45"},
-  "confidence": 0.9,
   "reasoning": "Wordlist-Scan: 42 unterschiedliche Pfade, fast alle 404 (u.a. /.env, /wp-admin, /phpmyadmin). Klarer Directory-Brute-Force."
 }
 """
@@ -261,23 +249,23 @@ INPUT (JSON):
   - osint           — wie WAF
   - allowed_actions
 
-ENTSCHEIDUNGSREGELN (erste passende greift):
-1. severities enthält "high" oder "critical"         → action="block_ip", confidence=0.92.
+ENTSCHEIDUNGSREGELN (erste passende greift). Ist eine Schwelle erreicht ⇒
+action="block_ip", sonst action="no_action". Gib KEINE confidence aus.
+1. severities enthält "high" oder "critical"         → block_ip.
    IPS klassifiziert das System bereits als Intrusion-Attempt; bei hoher
    Schwere ist Block ohne weitere Belege gerechtfertigt.
-2. count_24h >= threshold                            → action="block_ip", confidence=0.95.
-3. OSINT-Sophos-Intelix-Treffer                      → action="block_ip", confidence=0.95.
+2. count_24h >= threshold                            → block_ip.
+3. OSINT-Sophos-Intelix-Treffer                      → block_ip.
 4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
-   kompromittiertes System, große Angriffsfläche)    → action="block_ip", confidence=0.9.
+   kompromittiertes System, große Angriffsfläche)    → block_ip.
    Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
-5. OSINT-Treffer anderer Provider                    → action="block_ip", confidence=0.85.
-6. Sonst                                             → action="no_action", confidence=0.6.
+5. OSINT-Treffer anderer Provider                    → block_ip.
+6. Sonst                                             → no_action.
 
 AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
   "action": "block_ip",
   "args": {"target_ip": "198.51.100.7"},
-  "confidence": 0.92,
   "reasoning": "IPS-Treffer mit Schweregrad 'high' (Signatur SQL-Injection), 18 Hits in 24h. Eindeutiger Intrusion-Versuch."
 }
 """
@@ -294,20 +282,20 @@ INPUT (JSON):
                        intelix, ipinfo). Felder können fehlen.
   - allowed_actions — "block_ip", "no_action"
 
-ENTSCHEIDUNGSREGELN (erste passende greift):
-1. count_24h >= threshold                          → "block_ip", confidence=0.95.
-2. OSINT Sophos-Intelix-Treffer                    → "block_ip", confidence=0.95.
+ENTSCHEIDUNGSREGELN (erste passende greift). Ist eine Schwelle erreicht ⇒
+action="block_ip", sonst action="no_action". Gib KEINE confidence aus.
+1. count_24h >= threshold                          → block_ip.
+2. OSINT Sophos-Intelix-Treffer                    → block_ip.
 3. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
-   kompromittiertes System)                        → "block_ip", confidence=0.9.
+   kompromittiertes System)                        → block_ip.
    Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
-4. OSINT-Treffer anderer Provider                  → "block_ip", confidence=0.85.
-5. Sonst                                           → "no_action", confidence=0.6.
+4. OSINT-Treffer anderer Provider                  → block_ip.
+5. Sonst                                           → no_action.
 
 AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
   "action": "block_ip",
   "args": {"target_ip": "192.0.2.88"},
-  "confidence": 0.95,
   "reasoning": "61 fehlgeschlagene SSL-VPN-Logins in 24h auf mehrere User (admin, root). Schwelle (10) klar überschritten — Brute-Force."
 }
 """
@@ -338,14 +326,14 @@ VORGEHEN:
 1. Betrachte `networks`. Ein Netz gilt als verteilter Brute-Force, wenn
    attempts >= thresholds.min_attempts_per_net UND distinct_ips >=
    thresholds.min_distinct_ips_per_net (bei klarem Muster begründet abweichen).
-2. Entscheidung:
+2. Entscheidung (Aktion ergibt sich aus den Schwellen — gib KEINE confidence aus):
    - Genau EIN auffälliges Netz mit too_large=false → action="block_subnet",
-       args={"target_subnet":"<CIDR aus networks.network>"}, confidence ~0.9.
+       args={"target_subnet":"<CIDR aus networks.network>"}.
        So wird das GANZE Netz geblockt (Mensch muss bestätigen).
    - Auffälliges Netz aber too_large=true, ODER MEHRERE auffällige Netze, ODER
        gestreute Einzel-IPs → action="block_ips",
-       args={"target_ips":[... die auffälligen Quell-IPs ...]}, confidence ~0.88.
-   - Kein Netz über der Schwelle → action="no_action", confidence ~0.6.
+       args={"target_ips":[... die auffälligen Quell-IPs ...]}.
+   - Kein Netz über der Schwelle → action="no_action".
 3. reasoning: nenne das/die betroffenen Netze (CIDR + network_name), deren
    attempts und distinct_ips.
 
@@ -357,7 +345,6 @@ AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
   "action": "block_subnet",
   "args": {"target_subnet": "203.0.113.0/24"},
-  "confidence": 0.9,
   "reasoning": "Netz 203.0.113.0/24 (ExampleHoster): 240 Versuche von 17 unterschiedlichen IPs in 15 Min — koordinierter verteilter Brute-Force."
 }
 """
@@ -376,19 +363,20 @@ INPUT (JSON):
   - allowed_actions — erlaubte Werte für `action` (genau eine Block-Aktion
                        passend zum value_type, plus "no_action")
 
-ENTSCHEIDUNGSREGELN (erste passende greift):
+ENTSCHEIDUNGSREGELN (erste passende greift). Ist ein Indikator/eine Schwelle
+erreicht ⇒ Block, sonst no_action. Gib KEINE confidence aus.
 1. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, Phishing, Spam,
-   High Risk, Bad})                                  → Block, confidence=0.95.
+   High Risk, Bad})                                  → Block.
 2. SHODAN-VULNS (nur bei value_type="ip"): shodan.vulns enthält MEHR ALS 2
-   CVE-Nummern (verwundbares/kompromittiertes System) → Block, confidence=0.9.
+   CVE-Nummern (verwundbares/kompromittiertes System) → Block.
    Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
 3. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
-                                                      → Block, confidence=0.85.
+                                                      → Block.
 4. Eindeutiger Hinweis des Operators in `note`, der bösartiges Verhalten
-   belegt                                             → Block, confidence=0.8.
-5. Sonst (keine belastbaren Indikatoren)              → "no_action", confidence=0.55.
+   belegt                                             → Block.
+5. Sonst (keine belastbaren Indikatoren)              → no_action.
 
 Die Block-Aktion ist genau die in allowed_actions enthaltene
 (block_ip / block_domain / block_url). Bei privaten/reservierten IPs niemals
@@ -398,7 +386,6 @@ AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 {
   "action": "block_ip",
   "args": {},
-  "confidence": 0.9,
   "reasoning": "Shodan meldet 5 CVEs (u.a. CVE-2021-44228, CVE-2019-0708) — exponiertes, verwundbares System. Block empfohlen."
 }
 """
@@ -418,16 +405,17 @@ INPUT (JSON):
   - countries                — beobachtete Herkunftsländer
   - allowed_actions          — ["notify", "no_action"]
 
-ENTSCHEIDUNGSREGELN (erste passende greift):
+ENTSCHEIDUNGSREGELN (erste passende greift). Ist ein Muster/eine Schwelle
+erreicht ⇒ action="notify", sonst action="no_action". Gib KEINE confidence aus.
 1. DISTRIBUTED BRUTEFORCE: viele unterschiedliche Quell-IPs (distinct_ips >=
    distributed_hint_min_ips), die denselben User attackieren — typischerweise je
    IP wenige Versuche, in Summe aber viele. → action="notify",
-   args={"classification":"distributed_bruteforce", ...}, confidence ~0.9.
+   args={"classification":"distributed_bruteforce", ...}.
 2. BRUTEFORCE: eine oder sehr wenige IPs mit vielen Fehlversuchen auf den User
    (klares Hochfrequenz-Muster). → action="notify",
-   args={"classification":"bruteforce", ...}, confidence ~0.85.
+   args={"classification":"bruteforce", ...}.
 3. Sonst (vereinzelte Fehlversuche, kein Muster, plausibel Tippfehler/abgelaufenes
-   Passwort) → action="no_action", confidence ~0.5.
+   Passwort) → action="no_action".
 
 Beziehe die Zahlen ein: total_failed_attempts, distinct_ips und die Verteilung in
 ip_breakdown. Ein einzelner Fehlversuch von einer IP ist KEINE Bruteforce.
@@ -438,8 +426,46 @@ AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
   "args": {"classification": "distributed_bruteforce",
            "endangered_user": "administrator",
            "distinct_ips": 23, "total_attempts": 145},
-  "confidence": 0.9,
   "reasoning": "145 Fehlversuche auf 'administrator' von 23 unterschiedlichen IPs — klares verteiltes Brute-Force-Muster (je IP nur wenige Versuche)."
+}
+"""
+
+
+DEFAULT_EVENT_PROMPT = """Du bist ein Endpoint-Security-Analyst für Warroom.
+Du bewertest EIN einzelnes Sophos-Central-Event (Endpoint-Threat / Exploit /
+Command-and-Control / verdächtige Anwendung).
+
+INPUT (JSON):
+  - source_ip       — Quell-IP des Events (kann fehlen / privat sein)
+  - context         — Event-Details: event_type, name, severity, endpoint
+                       (Gerätename), source_ip, destination_ip (externe/C2-IP,
+                       falls vorhanden), group, time
+  - osint           — OSINT-Lookup der relevanten öffentlichen IP (abuseipdb,
+                       virustotal, shodan, greynoise, intelix, ipinfo). Felder
+                       können fehlen.
+  - allowed_actions — "block_ip", "isolate", "acknowledge", "no_action"
+
+ENTSCHEIDUNGSREGELN (erste passende greift). Gib KEINE confidence aus.
+1. C2 / aktiver Threat mit bekannter externer IP (destination_ip ODER source_ip
+   öffentlich) und bösartigem Befund — Event-Typ enthält "CommandAndControl"
+   oder "Threat::Detected", ODER OSINT belegt Bösartigkeit (intelix-Treffer,
+   abuseipdb.abuse_score >= 75, virustotal.malicious >= 2,
+   greynoise.classification = "malicious", ODER shodan.vulns > 2 CVEs)
+                                                    → block_ip (target_ip = die
+       bösartige externe IP). Nenne im reasoning die ausschlaggebenden Signale.
+2. Aktiver Endpoint-Befund OHNE blockbare externe IP, aber mit klarem Gerätebezug
+   (Threat::Detected / CleanupFailed / HmpaExploitPrevented auf einem Endpoint)
+                                                    → isolate. Der Endpoint muss
+       isoliert und untersucht werden (Ausführung erfolgt manuell über Endpoints).
+3. Eindeutig harmlos / bereits bereinigt / reines Informations-Event
+                                                    → acknowledge.
+4. Sonst (unklar, mehr Daten nötig)                 → no_action.
+
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
+{
+  "action": "block_ip",
+  "args": {"target_ip": "203.0.113.45"},
+  "reasoning": "C2-Detection (CommandAndControlDetected) auf Endpoint PC-07 zu 203.0.113.45; AbuseIPDB 95%, Intelix 'Malicious'. Externe C2-IP blocken."
 }
 """
 
@@ -448,6 +474,7 @@ AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
 _RULE_PROMPTS = {
     "waf":          ("agent_waf_system_prompt", DEFAULT_WAF_PROMPT),
     "ips":          ("agent_ips_system_prompt", DEFAULT_IPS_PROMPT),
+    "event":        ("agent_event_system_prompt", DEFAULT_EVENT_PROMPT),
     "failed_login": ("agent_failed_login_system_prompt", DEFAULT_FAILED_LOGIN_PROMPT),
     "failed_login_distributed": ("agent_failed_login_distributed_system_prompt", DEFAULT_DISTRIBUTED_LOGIN_PROMPT),
     "failed_login_user": ("agent_failed_login_user_system_prompt", DEFAULT_USER_LOGIN_PROMPT),
@@ -461,6 +488,10 @@ def _prompt_for(source_type: str) -> str:
 
 
 def _allowed_actions_for_source(source_type: str) -> list[str]:
+    # Central events relate to endpoints/threats, so they may additionally
+    # isolate the endpoint or acknowledge the event (block stays IP-based).
+    if source_type == "event":
+        return ["block_ip", "isolate", "acknowledge", "no_action"]
     # Per-entity LLM paths (WAF/IPS/per-IP failed-login) only ever block or skip
     # a single IP. Subnet-/bulk-blocks come from the distributed sweep, which
     # validates its own action set inline.
@@ -705,13 +736,8 @@ def _parse_decision(content: str) -> dict[str, Any]:
     args = obj.get("args") or {}
     if not isinstance(args, dict):
         args = {}
-    try:
-        confidence = float(obj.get("confidence", 0))
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence))
     reasoning = str(obj.get("reasoning") or "")[:2000]
-    return {"action": action, "args": args, "confidence": confidence, "reasoning": reasoning}
+    return {"action": action, "args": args, "reasoning": reasoning}
 
 
 async def analyze_alert(alert: Alert) -> dict[str, Any] | None:
@@ -773,6 +799,72 @@ async def agent_loop() -> None:
         await _persist_decision(alert, decision)
 
 
+def _event_types() -> list[str]:
+    """Configured Sophos event_type filter (CSV) → list, empties stripped."""
+    raw = settings.agent_event_types or ""
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+async def agent_event_loop(force: bool = False) -> None:
+    """Feed fresh, security-relevant Sophos Central *events* (the event stream,
+    separate from alerts) to the LLM. Events of the configured types that don't
+    yet have an agent decision are handed to ``_llm_decide_rule`` — the decision
+    logic lives in ``agent_event_system_prompt`` (admin-editable).
+
+    ``force=True`` runs even when otherwise disabled (manual trigger)."""
+    if (not settings.agent_enabled or not settings.agent_event_enabled) and not force:
+        return
+    types = _event_types()
+    if not types:
+        return
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    async with async_session() as db:
+        # Events of the configured types, < 24h old, without an existing
+        # event-decision (dedup via the event_id we stash in the decision context).
+        rows = (await db.execute(text("""
+            SELECT e.id, e.event_type, e.severity, e.name, e.source_ip,
+                   e.destination_ip, e.group_name, e.created_at,
+                   e.raw_data->'endpoint'->>'name'      AS endpoint_name,
+                   COALESCE(e.raw_data->>'managedAgentName',
+                            e.raw_data->'managedAgent'->>'name') AS managed_agent
+            FROM events e
+            WHERE e.created_at >= :cutoff
+              AND e.event_type = ANY(:types)
+              AND NOT EXISTS (
+                    SELECT 1 FROM agent_decisions d
+                    WHERE d.source_type = 'event'
+                      AND d.action_args->'context'->>'event_id' = e.id
+              )
+            ORDER BY e.created_at DESC
+            LIMIT 20
+        """), {"cutoff": cutoff, "types": types})).fetchall()
+
+    if not rows:
+        return
+
+    logger.info(f"agent[event]: analyzing {len(rows)} new event(s)")
+    for r in rows:
+        ev_id, ev_type, severity, name, src_ip, dst_ip, group, created, endpoint_name, managed_agent = r
+        # Prefer a public IP as the OSINT/block target — for C2/threat events the
+        # malicious party is usually the external destination, not the endpoint.
+        candidate_ip = next(
+            (ip for ip in (dst_ip, src_ip) if ip and _is_public_ip(ip)), None
+        )
+        context = {
+            "event_id": ev_id,
+            "event_type": ev_type,
+            "name": name,
+            "severity": severity,
+            "source_ip": src_ip,
+            "destination_ip": dst_ip,
+            "endpoint": endpoint_name or managed_agent,
+            "group": group,
+            "time": created.isoformat() if created else None,
+        }
+        await _llm_decide_rule(source_type="event", ip=candidate_ip, context=context)
+
+
 async def _notify_telegram_pending(decision_id: int) -> None:
     """Push an interactive approval prompt for a freshly-stored pending
     decision. Best-effort — never blocks the agent if Telegram is down.
@@ -799,7 +891,6 @@ async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
         action=decision["action"],
         action_args=decision.get("args") or {},
         reasoning=decision.get("reasoning") or "",
-        confidence=decision.get("confidence", 0.0),
         status="pending",
         model=settings.agent_model or "local-model",
     )
@@ -808,7 +899,7 @@ async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
         await db.commit()
         await db.refresh(record)
 
-    should, why = _should_auto_execute(decision["action"], decision.get("confidence"))
+    should, why = _should_auto_execute(decision["action"])
     if should:
         logger.info(f"agent: auto-executing decision {record.id} ({why})")
         try:
@@ -1164,7 +1255,7 @@ async def agent_waf_loop(window_minutes: int | None = None, force: bool = False)
 
 
 async def _store_rule_decision(
-    source_type: str, ip: str | None, action: str, reasoning: str, confidence: float,
+    source_type: str, ip: str | None, action: str, reasoning: str,
     args: dict[str, Any], context: dict[str, Any],
 ) -> int:
     """Persist a rule-based agent decision (WAF/IPS/failed-login).
@@ -1177,7 +1268,6 @@ async def _store_rule_decision(
         action=action,
         action_args={**(args or {}), "context": context},
         reasoning=reasoning[:2000],
-        confidence=confidence,
         status="pending",
         decided_by="agent",
         model=settings.agent_model or "local-model",
@@ -1187,7 +1277,7 @@ async def _store_rule_decision(
         await db.commit()
         await db.refresh(rec)
 
-    should, why = _should_auto_execute(action, confidence)
+    should, why = _should_auto_execute(action)
     if should:
         logger.info(f"agent[{source_type}]: auto-executing decision {rec.id} for {ip} ({why})")
         try:
@@ -1287,7 +1377,6 @@ async def _llm_decide_rule(
         source_type=source_type, ip=ip,
         action=decision["action"],
         reasoning=decision.get("reasoning") or "",
-        confidence=decision.get("confidence", 0.0),
         args=action_args,
         context={
             **context,
@@ -1356,7 +1445,6 @@ async def triage_value(
         ip=(value if value_type == "ip" else None),
         action=action,
         reasoning=decision.get("reasoning") or "",
-        confidence=decision.get("confidence", 0.0),
         args=args,
         context={
             "triage": True,
@@ -1369,7 +1457,6 @@ async def triage_value(
     return {
         "decision_id": decision_id,
         "action": action,
-        "confidence": decision.get("confidence", 0.0),
         "reasoning": decision.get("reasoning") or "",
     }
 
@@ -1816,7 +1903,6 @@ async def _distributed_login_sweep(
     await _store_rule_decision(
         source_type="failed_login", ip=None, action=action,
         reasoning=reasoning,
-        confidence=decision.get("confidence", 0.0),
         args=args,
         context={
             "distributed_brute_force_indicator": True,
@@ -1868,12 +1954,11 @@ async def _mark_user_alerted(user_key: str, ttl_seconds: int) -> None:
 
 async def _notify_user_endangered(user: str, classification: str, total: int,
                                   distinct_ips: int, countries: list[str],
-                                  confidence: float, reasoning: str) -> None:
+                                  reasoning: str) -> None:
     """Fire-and-forget Telegram warning that a user is under (distributed) brute-force."""
     import html
     from app import telegram_client
     label = "Distributed Bruteforce" if classification == "distributed_bruteforce" else "Bruteforce"
-    conf = round(float(confidence or 0) * 100)
     lines = [
         "🚨 <b>Warroom — User gefährdet</b>",
         f"<b>User:</b> <code>{html.escape(str(user))}</code>",
@@ -1882,7 +1967,6 @@ async def _notify_user_endangered(user: str, classification: str, total: int,
     ]
     if countries:
         lines.append(f"<b>Länder:</b> {html.escape(', '.join(countries))}")
-    lines.append(f"<b>Konfidenz:</b> {conf}%")
     if reasoning:
         lines.append("\n" + html.escape(str(reasoning)[:600]))
     await telegram_client.send_notification("\n".join(lines))
@@ -1967,7 +2051,7 @@ async def _user_login_bruteforce_sweep(now: datetime) -> None:
             classification = str(args.get("classification") or "bruteforce")
             await _notify_user_endangered(
                 g["display"], classification, g["total"], len(ips),
-                sorted(g["countries"])[:6], decision.get("confidence", 0.0),
+                sorted(g["countries"])[:6],
                 decision.get("reasoning") or "",
             )
             await _mark_user_alerted(user_key, cooldown_min * 60)

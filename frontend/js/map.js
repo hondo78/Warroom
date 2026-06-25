@@ -210,7 +210,7 @@ async function updateMap(days) {
         const fwPositions = [];
         data.firewalls.forEach(fw => {
             const marker = L.circleMarker([fw.lat, fw.lon], {
-                radius: 10,
+                radius: 6,
                 fillColor: '#3b82f6',
                 color: '#60a5fa',
                 weight: 2,
@@ -242,7 +242,7 @@ function renderAttackerLayer() {
     _lastAttackData.attackers.forEach(atk => {
         if (!isAttackVisible(atk)) return;
 
-        const radius = Math.min(3 + Math.log2(atk.count + 1) * 3, 18);
+        const radius = Math.min(2 + Math.log2(atk.count + 1) * 2, 12);
         const color = ATTACK_COLOR_BY_KEY[atk._category];
         const direction = atk.direction || 'unknown';
         const dirStyle = getDirectionStyle(direction);

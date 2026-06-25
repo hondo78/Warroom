@@ -49,7 +49,6 @@ async def _call(method: str, payload: dict, timeout: float = 15.0) -> dict | Non
 
 
 def _decision_caption(rec: AgentDecision, ip: str | None) -> str:
-    conf = round((rec.confidence or 0) * 100)
     src = rec.source_type or "alert"
     reason = (rec.reasoning or "").strip()
     if len(reason) > 600:
@@ -61,7 +60,7 @@ def _decision_caption(rec: AgentDecision, ip: str | None) -> str:
     if ip:
         lines.append(f"<b>IP:</b> <code>{ip}</code>")
     lines += [
-        f"<b>Quelle:</b> {src}   <b>Konfidenz:</b> {conf}%",
+        f"<b>Quelle:</b> {src}",
         f"<b>Decision:</b> #{rec.id}",
     ]
     if reason:

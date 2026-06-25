@@ -100,13 +100,11 @@ class Settings(BaseSettings):
     # for servers/models that don't support response_format (then the tolerant
     # parser handles plain JSON / reasoning output).
     agent_structured_output: bool = True
-    # If true, "block_ip" / "acknowledge" recommendations execute automatically
-    # at any confidence; otherwise they stay pending. The threshold below acts
-    # as an independent fast-lane: any decision whose confidence (in %) is
-    # ≥ this value auto-executes even when ``agent_auto_execute`` is false.
-    # Set to 101 to disable the fast-lane entirely.
+    # Master switch: if true, non-destructive recommendations (acknowledge)
+    # execute automatically; otherwise they stay pending. Block actions ALWAYS
+    # require human approval regardless of this switch. Actions are chosen purely
+    # from per-source thresholds in the prompts — there is no confidence score.
     agent_auto_execute: bool = False
-    agent_auto_execute_threshold: int = 90  # percent (0..100)
     # Empty -> fall back to DEFAULT_SYSTEM_PROMPT in app.agent.
     agent_system_prompt: str = ""
     # Per-source LLM system prompts for rule-based decisions. Empty -> fall
@@ -124,6 +122,24 @@ class Settings(BaseSettings):
     agent_ips_enabled: bool = False
     agent_ips_threshold: int = 3       # 3+ IPS hits in 24h -> block
     agent_ips_interval_seconds: int = 60
+    # Central-Event loop — rule-based; analyses the Sophos Central *event* stream
+    # (separate from alerts) filtered to security-relevant event_types. The
+    # high-volume firewall ATP events are deliberately excluded (already covered
+    # by the WAF/IPS loops via firewall_logs).
+    agent_event_enabled: bool = True
+    agent_event_interval_seconds: int = 120
+    # Comma-separated Sophos event_type values fed to the LLM. Default: the
+    # endpoint threat / exploit / C2 / malicious-app detections that have no
+    # other path to the LLM.
+    agent_event_types: str = (
+        "Event::Endpoint::Threat::CommandAndControlDetected,"
+        "Event::Endpoint::Threat::Detected,"
+        "Event::Endpoint::Threat::CleanupFailed,"
+        "Event::Endpoint::HmpaExploitPrevented,"
+        "Event::Endpoint::Application::Detected"
+    )
+    # Empty ⇒ DEFAULT_EVENT_PROMPT in app.agent.
+    agent_event_system_prompt: str = ""
     # Failed-login loop — rule-based; brute-force detection.
     agent_failed_login_enabled: bool = False
     agent_failed_login_threshold: int = 5  # 5+ failed logins in 24h -> block

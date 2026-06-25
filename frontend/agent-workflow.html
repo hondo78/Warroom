@@ -100,10 +100,7 @@
                             <div class="col-md-3"><input type="number" min="1" max="32000" class="form-control form-control-sm" id="g_agent_max_tokens"></div>
                             <div class="col-md-3"><label class="form-label">Auto-Execute</label></div>
                             <div class="col-md-3"><div class="form-check form-switch mt-1"><input class="form-check-input" type="checkbox" id="g_agent_auto_execute"></div></div>
-
-                            <div class="col-md-3"><label class="form-label">Auto-Execute-Schwelle (% Konfidenz)</label></div>
-                            <div class="col-md-3"><input type="number" min="0" max="101" class="form-control form-control-sm" id="g_agent_auto_execute_threshold"></div>
-                            <div class="col-md-6"><small class="admin-hint">101 = Fast-Lane aus (alles bleibt pending bis zur Freigabe).</small></div>
+                            <div class="col-md-6"><small class="admin-hint">Führt nur nicht-destruktive Aktionen (acknowledge) automatisch aus. Block-Aktionen bleiben immer bis zur Freigabe pending.</small></div>
                         </div>
                         <div class="text-end mt-3"><button class="btn btn-primary btn-sm" onclick="saveGlobal()">Global speichern</button></div>
                     </div>

@@ -47,7 +47,6 @@ function populateGlobal(g) {
     document.getElementById('g_agent_temperature').value = g.temperature ?? 0.2;
     document.getElementById('g_agent_max_tokens').value = g.max_tokens ?? 3000;
     document.getElementById('g_agent_auto_execute').checked = !!g.auto_execute;
-    document.getElementById('g_agent_auto_execute_threshold').value = g.auto_execute_threshold ?? 90;
 }
 
 async function saveGlobal() {
@@ -58,7 +57,6 @@ async function saveGlobal() {
         agent_temperature: parseFloat(document.getElementById('g_agent_temperature').value),
         agent_max_tokens: parseInt(document.getElementById('g_agent_max_tokens').value, 10),
         agent_auto_execute: document.getElementById('g_agent_auto_execute').checked,
-        agent_auto_execute_threshold: parseInt(document.getElementById('g_agent_auto_execute_threshold').value, 10),
     };
     await putSettings(payload, 'Global gespeichert');
 }

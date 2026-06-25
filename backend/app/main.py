@@ -77,12 +77,17 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
-    from app.agent import (agent_loop, agent_waf_loop, agent_ips_loop,
+    from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
                            agent_failed_login_loop, agent_user_login_alert_loop)
     scheduler.add_job(
         agent_loop, "interval",
         seconds=max(30, settings.agent_interval_seconds),
         id="agent_loop",
+    )
+    scheduler.add_job(
+        agent_event_loop, "interval",
+        seconds=max(30, settings.agent_event_interval_seconds),
+        id="agent_event_loop",
     )
     scheduler.add_job(
         agent_waf_loop, "interval",
@@ -4108,9 +4113,12 @@ class AdminSettingsIn(BaseModel):
     agent_max_tokens: int | None = Field(default=None, ge=1, le=32000)
     agent_structured_output: bool | None = None
     agent_auto_execute: bool | None = None
-    agent_auto_execute_threshold: int | None = Field(default=None, ge=0, le=101)
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_event_enabled: bool | None = None
+    agent_event_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_event_types: str | None = Field(default=None, max_length=8000)
+    agent_event_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_ips_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_failed_login_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_enabled: bool | None = None
@@ -4264,7 +4272,6 @@ def _serialize_decision(r: AgentDecision, alert: Alert | None) -> dict:
         "action": r.action,
         "action_args": r.action_args or {},
         "reasoning": r.reasoning,
-        "confidence": r.confidence,
         "status": r.status,
         "model": r.model,
         "decided_by": r.decided_by,
@@ -4485,7 +4492,6 @@ async def manual_agent_decision(body: HumanDecisionIn, db: AsyncSession = Depend
         action=body.action,
         action_args=body.action_args or {},
         reasoning="(manual decision)",
-        confidence=1.0,
         status="pending",
         decided_by="human",
         human_comment=body.comment,
@@ -4588,7 +4594,6 @@ async def get_agent_workflow():
         "temperature": settings.agent_temperature,
         "max_tokens": settings.agent_max_tokens,
         "auto_execute": settings.agent_auto_execute,
-        "auto_execute_threshold": settings.agent_auto_execute_threshold,
         "interval_seconds": settings.agent_interval_seconds,
     }
 
@@ -4598,7 +4603,7 @@ async def get_agent_workflow():
         {"step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
         {"step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
         {"step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},
-        {"step": "Ausführung", "detail": "Auto-Execute (Master-Switch oder Konfidenz ≥ Schwelle) — sonst pending zur Freigabe"},
+        {"step": "Ausführung", "detail": "Auto-Execute nur für acknowledge (Master-Switch); Block-Aktionen immer pending zur Freigabe"},
     ]
 
     stages = [
@@ -4614,6 +4619,19 @@ async def get_agent_workflow():
                 {"key": "agent_interval_seconds", "label": "Intervall (s)", "value": settings.agent_interval_seconds, "type": "int", "min": 30, "max": 86400},
             ],
             "run_now": "/api/agent/run-now",
+        },
+        {
+            "key": "event", "label": "Central Events",
+            "trigger": "Sophos-Central-Event-Stream (Endpoint-Threat/C2/Exploit), gefiltert nach event_type",
+            "enabled_key": "agent_event_enabled",
+            "enabled": settings.agent_event_enabled,
+            "prompt_source": "event", "prompt_key": "agent_event_system_prompt",
+            "prompt_overridden": _set("agent_event_system_prompt"),
+            "allowed_actions": ["block_ip", "isolate", "acknowledge", "no_action"],
+            "settings": [
+                {"key": "agent_event_interval_seconds", "label": "Intervall (s)", "value": settings.agent_event_interval_seconds, "type": "int", "min": 30, "max": 86400},
+            ],
+            "run_now": "/api/agent/event-run-now",
         },
         {
             "key": "waf", "label": "WAF",
@@ -4692,6 +4710,19 @@ async def agent_run_now():
     from the admin UI without waiting for the scheduler."""
     from app.agent import agent_loop
     scheduler.add_job(agent_loop, "date", id="agent_manual", replace_existing=True)
+    return {"ok": True}
+
+
+@app.post("/api/agent/event-run-now")
+async def agent_event_run_now():
+    """Trigger one immediate pass of the Central-event agent loop. Runs even
+    when the event agent is otherwise disabled — admin-initiated."""
+    from app.agent import agent_event_loop
+    scheduler.add_job(
+        agent_event_loop, "date",
+        id="agent_event_manual", replace_existing=True,
+        kwargs={"force": True},
+    )
     return {"ok": True}
 
 

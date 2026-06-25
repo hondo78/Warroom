@@ -273,7 +273,6 @@ class AgentDecision(Base):
     action = Column(String(50), nullable=False)           # block_ip | acknowledge | isolate | no_action
     action_args = Column(JSONB)                            # e.g. {"ip": "1.2.3.4"} or {"endpoint_id": "..."}
     reasoning = Column(Text)
-    confidence = Column(Float)                             # 0..1, from the model
     status = Column(String(30), nullable=False, default="pending")  # pending | approved | rejected | executed | failed | superseded
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     decided_at = Column(DateTime(timezone=True), nullable=True)

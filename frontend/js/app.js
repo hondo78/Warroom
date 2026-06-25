@@ -85,12 +85,10 @@ async function updateAgentDecisions() {
         if (!tbody) return;
         const items = data.items || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Agent-Empfehlungen für den aktuellen Filter. In der <a href="/admin.html">Admin-Seite</a> Agent aktivieren und Modell wählen.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Agent-Empfehlungen für den aktuellen Filter. In der <a href="/admin.html">Admin-Seite</a> Agent aktivieren und Modell wählen.</td></tr>';
             return;
         }
         tbody.innerHTML = items.map(d => {
-            const conf = Math.round((d.confidence || 0) * 100);
-            const confCls = conf >= 80 ? 'severity-critical' : conf >= 50 ? 'severity-high' : 'severity-medium';
             const actionBadge = `<span class="severity-badge severity-${actionToSev(d.action)}">${escapeHtml(d.action)}</span>`;
             const alertSummary = d.alert
                 ? `${escapeHtml(d.alert.severity || '')} · ${escapeHtml(truncate(d.alert.type || '', 30))}`
@@ -112,7 +110,6 @@ async function updateAgentDecisions() {
                 <tr title="${escapeHtml(d.reasoning || '')}">
                     <td>${formatTime(d.created_at)}</td>
                     <td>${actionBadge}</td>
-                    <td><span class="severity-badge ${confCls}">${conf}%</span></td>
                     <td>${escapeHtml(truncate(d.reasoning || '-', 80))}</td>
                     <td>${alertSummary}</td>
                     <td>${srcIp}</td>
