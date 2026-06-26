@@ -20,7 +20,7 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 <span id="emailApiStatus" class="badge text-bg-secondary">API: —</span>
-                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEmail()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEmail()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
     </nav>
@@ -57,7 +57,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">✉️ Email Management — Sophos Central</h3>
+                <h3 class="mb-0" data-i18n="email.page_title">✉️ Email Management — Sophos Central</h3>
             </div>
         </div>
 
@@ -66,29 +66,29 @@
 
                 <div id="emailUnavailable" class="alert alert-warning d-none" role="alert">
                     <i class="bi bi-exclamation-triangle"></i>
-                    <strong>Email Management API nicht erreichbar.</strong>
+                    <strong data-i18n="email.unavailable_title">Email Management API nicht erreichbar.</strong>
                     <span id="emailUnavailableMsg"></span>
-                    Diese Seite nutzt die in <a href="/admin.html" class="alert-link">Admin</a> hinterlegten
+                    <span data-i18n-html="email.unavailable_hint">Diese Seite nutzt die in <a href="/admin.html" class="alert-link">Admin</a> hinterlegten
                     Sophos-Central-Zugangsdaten. Eine <code>404</code> bedeutet meist, dass der Tenant keine
-                    Email-Security-Lizenz hat.
+                    Email-Security-Lizenz hat.</span>
                 </div>
 
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="statMailboxes">-</h3><p>Mailboxen</p></div><div class="small-box-footer">verwaltete Postfächer</div><span class="icon"><i class="bi bi-person-rolodex"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="statQuarantine">-</h3><p>Quarantäne</p></div><div class="small-box-footer">Nachrichten im Zeitfenster</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
-                    <div class="small-box bg-danger"><div class="inner"><h3 id="statPostDelivery">-</h3><p>Post-Delivery</p></div><div class="small-box-footer">nachträglich isoliert</div><span class="icon"><i class="bi bi-envelope-x"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="statSelected">0</h3><p>Ausgewählt</p></div><div class="small-box-footer">für Bulk-Aktionen</div><span class="icon"><i class="bi bi-check2-square"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="statMailboxes">-</h3><p data-i18n="email.stat_mailboxes">Mailboxen</p></div><div class="small-box-footer" data-i18n="email.stat_mailboxes_sub">verwaltete Postfächer</div><span class="icon"><i class="bi bi-person-rolodex"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="statQuarantine">-</h3><p data-i18n="email.stat_quarantine">Quarantäne</p></div><div class="small-box-footer" data-i18n="email.stat_quarantine_sub">Nachrichten im Zeitfenster</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="statPostDelivery">-</h3><p data-i18n="email.stat_postdelivery">Post-Delivery</p></div><div class="small-box-footer" data-i18n="email.stat_postdelivery_sub">nachträglich isoliert</div><span class="icon"><i class="bi bi-envelope-x"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="statSelected">0</h3><p data-i18n="email.stat_selected">Ausgewählt</p></div><div class="small-box-footer" data-i18n="email.stat_selected_sub">für Bulk-Aktionen</div><span class="icon"><i class="bi bi-check2-square"></i></span></div>
                 </div>
 
                 <ul class="nav nav-tabs mb-3" id="emailTabs" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="tab-mailboxes" data-bs-toggle="tab" data-bs-target="#pane-mailboxes" type="button" role="tab"><i class="bi bi-person-rolodex"></i> Mailboxen</button>
+                        <button class="nav-link active" id="tab-mailboxes" data-bs-toggle="tab" data-bs-target="#pane-mailboxes" type="button" role="tab"><i class="bi bi-person-rolodex"></i> <span data-i18n="email.stat_mailboxes">Mailboxen</span></button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="tab-quarantine" data-bs-toggle="tab" data-bs-target="#pane-quarantine" type="button" role="tab"><i class="bi bi-shield-lock"></i> Quarantäne</button>
+                        <button class="nav-link" id="tab-quarantine" data-bs-toggle="tab" data-bs-target="#pane-quarantine" type="button" role="tab"><i class="bi bi-shield-lock"></i> <span data-i18n="email.stat_quarantine">Quarantäne</span></button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="tab-postdelivery" data-bs-toggle="tab" data-bs-target="#pane-postdelivery" type="button" role="tab"><i class="bi bi-envelope-x"></i> Post-Delivery</button>
+                        <button class="nav-link" id="tab-postdelivery" data-bs-toggle="tab" data-bs-target="#pane-postdelivery" type="button" role="tab"><i class="bi bi-envelope-x"></i> <span data-i18n="email.stat_postdelivery">Post-Delivery</span></button>
                     </li>
                 </ul>
 
@@ -98,20 +98,20 @@
                     <div class="tab-pane fade show active" id="pane-mailboxes" role="tabpanel">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <h3 class="card-title mb-0">Mailbox-Verwaltung</h3>
-                                <button class="btn btn-success btn-sm" onclick="openMailboxModal()"><i class="bi bi-plus-lg"></i> Neue Mailbox</button>
+                                <h3 class="card-title mb-0" data-i18n="email.mailbox_management">Mailbox-Verwaltung</h3>
+                                <button class="btn btn-success btn-sm" onclick="openMailboxModal()"><i class="bi bi-plus-lg"></i> <span data-i18n="email.new_mailbox">Neue Mailbox</span></button>
                             </div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="mbSearch" class="form-control form-control-sm" placeholder="Suche (E-Mail, Name…) — Enter">
+                                    <input type="text" id="mbSearch" class="form-control form-control-sm" placeholder="Suche (E-Mail, Name…) — Enter" data-i18n-placeholder="email.search_mailbox">
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadMailboxes()"><i class="bi bi-search"></i></button>
                                 </div>
                                 <div class="table-scroll">
                                     <table class="table table-sm table-hover align-middle">
                                         <thead><tr>
-                                            <th>E-Mail</th><th>Anzeigename</th><th>Typ</th><th>Domain</th><th>Status</th><th>Aktionen</th>
+                                            <th data-i18n="email.col_email">E-Mail</th><th data-i18n="email.col_displayname">Anzeigename</th><th data-i18n="email.col_type">Typ</th><th data-i18n="email.col_domain">Domain</th><th data-i18n="common.status">Status</th><th data-i18n="common.action">Aktionen</th>
                                         </tr></thead>
-                                        <tbody id="mailboxTable"><tr><td colspan="6" class="text-center text-secondary py-4">Lade…</td></tr></tbody>
+                                        <tbody id="mailboxTable"><tr><td colspan="6" class="text-center text-secondary py-4" data-i18n="common.loading">Lade…</td></tr></tbody>
                                     </table>
                                 </div>
                             </div>
@@ -122,19 +122,19 @@
                     <div class="tab-pane fade" id="pane-quarantine" role="tabpanel">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                <h3 class="card-title mb-0">Quarantäne</h3>
+                                <h3 class="card-title mb-0" data-i18n="email.stat_quarantine">Quarantäne</h3>
                                 <div class="d-flex gap-2 flex-wrap">
-                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(false)"><i class="bi bi-box-arrow-up"></i> Freigeben</button>
-                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(false)"><i class="bi bi-trash"></i> Löschen</button>
+                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(false)"><i class="bi bi-box-arrow-up"></i> <span data-i18n="email.release">Freigeben</span></button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(false)"><i class="bi bi-trash"></i> <span data-i18n="common.delete">Löschen</span></button>
                                 </div>
                             </div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="qSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter">
+                                    <input type="text" id="qSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter" data-i18n-placeholder="email.search_quarantine">
                                     <select id="qHours" class="form-select form-select-sm" style="max-width:160px">
-                                        <option value="24">Letzte 24 h</option>
-                                        <option value="168" selected>Letzte 7 Tage</option>
-                                        <option value="720">Letzte 30 Tage</option>
+                                        <option value="24" data-i18n="email.last_24h">Letzte 24 h</option>
+                                        <option value="168" selected data-i18n="email.last_7d">Letzte 7 Tage</option>
+                                        <option value="720" data-i18n="email.last_30d">Letzte 30 Tage</option>
                                     </select>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadQuarantine(false)"><i class="bi bi-search"></i></button>
                                 </div>
@@ -142,9 +142,9 @@
                                     <table class="table table-sm table-hover align-middle">
                                         <thead><tr>
                                             <th style="width:32px"><input type="checkbox" onclick="toggleAll(this, false)"></th>
-                                            <th>Empfangen</th><th>Absender</th><th>Empfänger</th><th>Betreff</th><th>Grund</th><th>Aktionen</th>
+                                            <th data-i18n="email.col_received">Empfangen</th><th data-i18n="common.sender">Absender</th><th data-i18n="email.col_recipient">Empfänger</th><th data-i18n="common.subject">Betreff</th><th data-i18n="common.reason">Grund</th><th data-i18n="common.action">Aktionen</th>
                                         </tr></thead>
-                                        <tbody id="quarantineTable"><tr><td colspan="7" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody>
+                                        <tbody id="quarantineTable"><tr><td colspan="7" class="text-center text-secondary py-4" data-i18n="email.open_tab_load">Tab öffnen zum Laden…</td></tr></tbody>
                                     </table>
                                 </div>
                             </div>
@@ -155,19 +155,19 @@
                     <div class="tab-pane fade" id="pane-postdelivery" role="tabpanel">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                <h3 class="card-title mb-0">Post-Delivery Quarantäne</h3>
+                                <h3 class="card-title mb-0" data-i18n="email.postdelivery_quarantine">Post-Delivery Quarantäne</h3>
                                 <div class="d-flex gap-2 flex-wrap">
-                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(true)"><i class="bi bi-box-arrow-up"></i> Freigeben</button>
-                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(true)"><i class="bi bi-trash"></i> Löschen</button>
+                                    <button class="btn btn-success btn-sm" onclick="releaseSelected(true)"><i class="bi bi-box-arrow-up"></i> <span data-i18n="email.release">Freigeben</span></button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteSelected(true)"><i class="bi bi-trash"></i> <span data-i18n="common.delete">Löschen</span></button>
                                 </div>
                             </div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="pdSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter">
+                                    <input type="text" id="pdSearch" class="form-control form-control-sm" placeholder="Suche (Absender, Betreff…) — Enter" data-i18n-placeholder="email.search_quarantine">
                                     <select id="pdHours" class="form-select form-select-sm" style="max-width:160px">
-                                        <option value="24">Letzte 24 h</option>
-                                        <option value="168" selected>Letzte 7 Tage</option>
-                                        <option value="720">Letzte 30 Tage</option>
+                                        <option value="24" data-i18n="email.last_24h">Letzte 24 h</option>
+                                        <option value="168" selected data-i18n="email.last_7d">Letzte 7 Tage</option>
+                                        <option value="720" data-i18n="email.last_30d">Letzte 30 Tage</option>
                                     </select>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadQuarantine(true)"><i class="bi bi-search"></i></button>
                                 </div>
@@ -175,9 +175,9 @@
                                     <table class="table table-sm table-hover align-middle">
                                         <thead><tr>
                                             <th style="width:32px"><input type="checkbox" onclick="toggleAll(this, true)"></th>
-                                            <th>Empfangen</th><th>Absender</th><th>Empfänger</th><th>Betreff</th><th>Grund</th><th>Aktionen</th>
+                                            <th data-i18n="email.col_received">Empfangen</th><th data-i18n="common.sender">Absender</th><th data-i18n="email.col_recipient">Empfänger</th><th data-i18n="common.subject">Betreff</th><th data-i18n="common.reason">Grund</th><th data-i18n="common.action">Aktionen</th>
                                         </tr></thead>
-                                        <tbody id="postdeliveryTable"><tr><td colspan="7" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody>
+                                        <tbody id="postdeliveryTable"><tr><td colspan="7" class="text-center text-secondary py-4" data-i18n="email.open_tab_load">Tab öffnen zum Laden…</td></tr></tbody>
                                     </table>
                                 </div>
                             </div>
@@ -195,10 +195,10 @@
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="detailTitle">Detail</h5>
+                <h5 class="modal-title" id="detailTitle" data-i18n="email.detail">Detail</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body" id="detailBody"><div class="text-secondary">Lade…</div></div>
+            <div class="modal-body" id="detailBody"><div class="text-secondary" data-i18n="common.loading">Lade…</div></div>
         </div>
     </div>
 </div>
@@ -208,38 +208,43 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="mailboxModalTitle">Neue Mailbox</h5>
+                <h5 class="modal-title" id="mailboxModalTitle" data-i18n="email.new_mailbox">Neue Mailbox</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="mbId">
                 <div class="mb-3">
-                    <label class="form-label">E-Mail-Adresse</label>
+                    <label class="form-label" data-i18n="email.email_address">E-Mail-Adresse</label>
                     <input type="email" id="mbEmail" class="form-control" placeholder="user@example.com">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Anzeigename</label>
+                    <label class="form-label" data-i18n="email.col_displayname">Anzeigename</label>
                     <input type="text" id="mbDisplayName" class="form-control" placeholder="Max Mustermann">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Typ</label>
+                    <label class="form-label" data-i18n="email.col_type">Typ</label>
                     <select id="mbType" class="form-select">
                         <option value="user">user</option>
                         <option value="distributionList">distributionList</option>
                         <option value="publicFolder">publicFolder</option>
                     </select>
                 </div>
-                <div class="text-secondary small">Felder werden 1:1 an die Sophos Mailbox-API übergeben. Pflichtfelder hängen von der Tenant-Konfiguration ab.</div>
+                <div class="text-secondary small" data-i18n="email.mailbox_hint">Felder werden 1:1 an die Sophos Mailbox-API übergeben. Pflichtfelder hängen von der Tenant-Konfiguration ab.</div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                <button type="button" class="btn btn-primary" id="mbSaveBtn" onclick="saveMailbox()">Speichern</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="common.cancel">Abbrechen</button>
+                <button type="button" class="btn btn-primary" id="mbSaveBtn" onclick="saveMailbox()" data-i18n="common.save">Speichern</button>
             </div>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/email.de.js"></script>
+    <script src="/i18n/email.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
 <script src="/js/email.js"></script>

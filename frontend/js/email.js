@@ -69,7 +69,7 @@ function setApiStatus(ok, msg) {
         alertBox.classList.add('d-none');
     } else {
         badge.className = 'badge text-bg-danger';
-        badge.textContent = 'API: nicht erreichbar';
+        badge.textContent = t('email.api_unreachable');
         document.getElementById('emailUnavailableMsg').textContent = msg ? `(${msg})` : '';
         alertBox.classList.remove('d-none');
     }
@@ -85,7 +85,7 @@ function updateSelectedCount() {
 async function loadMailboxes() {
     const tbody = document.getElementById('mailboxTable');
     const search = document.getElementById('mbSearch').value.trim();
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary py-4">Lade…</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary py-4">${t('common.loading')}</td></tr>`;
     try {
         const url = '/api/email/mailboxes' + (search ? `?search=${encodeURIComponent(search)}` : '');
         const r = await fetch(url);
@@ -97,7 +97,7 @@ async function loadMailboxes() {
         document.getElementById('statMailboxes').textContent = d.available ? items.length.toLocaleString('de-DE') : '—';
 
         if (!items.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary py-4">${d.available ? 'Keine Mailboxen gefunden.' : 'Email-API nicht erreichbar.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary py-4">${d.available ? t('email.no_mailboxes') : t('email.api_unreachable_full')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map((m, i) => {
@@ -106,8 +106,8 @@ async function loadMailboxes() {
             const type = pick(m, 'type', 'mailboxType') || '—';
             const domain = pick(m, 'domain') || (email.includes('@') ? email.split('@')[1] : '—');
             const stat = m.blocked
-                ? '<span class="severity-badge severity-critical">blockiert</span>'
-                : '<span class="severity-badge severity-low">aktiv</span>';
+                ? `<span class="severity-badge severity-critical">${t('email.status_blocked')}</span>`
+                : `<span class="severity-badge severity-low">${t('email.status_active')}</span>`;
             return `<tr>
                 <td><code>${escapeHtml(email)}</code></td>
                 <td>${escapeHtml(name)}</td>
@@ -115,9 +115,9 @@ async function loadMailboxes() {
                 <td>${escapeHtml(domain)}</td>
                 <td>${stat}</td>
                 <td>
-                    <button class="osint-btn" onclick="viewMailbox(${i})" title="Details"><i class="bi bi-eye"></i></button>
-                    <button class="ack-btn" onclick="editMailbox(${i})" title="Bearbeiten"><i class="bi bi-pencil"></i></button>
-                    <button class="block-link" onclick="deleteMailbox(${i}, this)" title="Löschen"><i class="bi bi-trash"></i></button>
+                    <button class="osint-btn" onclick="viewMailbox(${i})" title="${t('email.details')}"><i class="bi bi-eye"></i></button>
+                    <button class="ack-btn" onclick="editMailbox(${i})" title="${t('common.edit')}"><i class="bi bi-pencil"></i></button>
+                    <button class="block-link" onclick="deleteMailbox(${i}, this)" title="${t('common.delete')}"><i class="bi bi-trash"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -133,7 +133,7 @@ function mailboxId(m) {
 
 async function viewMailbox(i) {
     const m = cache.mailboxes[i];
-    showDetailModal(`Mailbox · ${escapeHtml(pick(m, 'email', 'primaryEmail') || '')}`, renderJson(m));
+    showDetailModal(`${t('email.stat_mailboxes')} · ${escapeHtml(pick(m, 'email', 'primaryEmail') || '')}`, renderJson(m));
     // Best-effort live fetch for the full record.
     const id = mailboxId(m);
     if (!id) return;
@@ -144,7 +144,7 @@ async function viewMailbox(i) {
 }
 
 function openMailboxModal() {
-    document.getElementById('mailboxModalTitle').textContent = 'Neue Mailbox';
+    document.getElementById('mailboxModalTitle').textContent = t('email.new_mailbox');
     document.getElementById('mbId').value = '';
     document.getElementById('mbEmail').value = '';
     document.getElementById('mbDisplayName').value = '';
@@ -154,7 +154,7 @@ function openMailboxModal() {
 
 function editMailbox(i) {
     const m = cache.mailboxes[i];
-    document.getElementById('mailboxModalTitle').textContent = 'Mailbox bearbeiten';
+    document.getElementById('mailboxModalTitle').textContent = t('email.edit_mailbox');
     document.getElementById('mbId').value = mailboxId(m) || '';
     document.getElementById('mbEmail').value = pick(m, 'email', 'primaryEmail', 'emailAddress') || '';
     document.getElementById('mbDisplayName').value = pick(m, 'displayName', 'name') || '';
@@ -169,7 +169,7 @@ async function saveMailbox() {
         displayName: document.getElementById('mbDisplayName').value.trim(),
         type: document.getElementById('mbType').value,
     };
-    if (!body.email) { alert('E-Mail-Adresse erforderlich.'); return; }
+    if (!body.email) { alert(t('email.email_required')); return; }
     const btn = document.getElementById('mbSaveBtn');
     btn.disabled = true; btn.textContent = '…';
     try {
@@ -184,25 +184,25 @@ async function saveMailbox() {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('mailboxModal')).hide();
         await loadMailboxes();
     } catch (err) {
-        alert('Speichern fehlgeschlagen: ' + err.message);
+        alert(t('email.save_failed') + ' ' + err.message);
     } finally {
-        btn.disabled = false; btn.textContent = 'Speichern';
+        btn.disabled = false; btn.textContent = t('common.save');
     }
 }
 
 async function deleteMailbox(i, btn) {
     const m = cache.mailboxes[i];
     const email = pick(m, 'email', 'primaryEmail') || mailboxId(m);
-    if (!confirm(`Mailbox "${email}" wirklich löschen?\nDiese Aktion wirkt direkt auf den Sophos-Tenant.`)) return;
+    if (!confirm(t('email.confirm_delete_mailbox', { email }))) return;
     const id = mailboxId(m);
-    if (!id) { alert('Keine Mailbox-ID im Datensatz.'); return; }
+    if (!id) { alert(t('email.no_mailbox_id')); return; }
     btn.disabled = true;
     try {
         const r = await fetch(`/api/email/mailboxes/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${r.status}`); }
         await loadMailboxes();
     } catch (err) {
-        alert('Löschen fehlgeschlagen: ' + err.message);
+        alert(t('email.delete_failed') + ' ' + err.message);
         btn.disabled = false;
     }
 }
@@ -215,7 +215,7 @@ async function loadQuarantine(postDelivery) {
     const searchEl = document.getElementById(postDelivery ? 'pdSearch' : 'qSearch');
     const hoursEl = document.getElementById(postDelivery ? 'pdHours' : 'qHours');
     const tbody = document.getElementById(tableId);
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-secondary py-4">Lade…</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-4">${t('common.loading')}</td></tr>`;
     selected[postDelivery].clear();
     updateSelectedCount();
     try {
@@ -229,7 +229,7 @@ async function loadQuarantine(postDelivery) {
         document.getElementById(statId).textContent = d.available ? items.length.toLocaleString('de-DE') : '—';
 
         if (!items.length) {
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-4">${d.available ? 'Keine Nachrichten im Zeitfenster.' : 'Email-API nicht erreichbar.'}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-4">${d.available ? t('email.no_messages') : t('email.api_unreachable_full')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map((msg, i) => {
@@ -237,10 +237,10 @@ async function loadQuarantine(postDelivery) {
             const recv = pick(msg, 'receivedAt', 'quarantinedAt', 'sentAt', 'date');
             const from = formatAddr(pick(msg, 'from', 'envelopeSender', 'sender')) || '—';
             const to = pick(msg, 'forRecipient') || formatRecipients(pick(msg, 'envelopeRecipients', 'recipients', 'to'));
-            const subject = pick(msg, 'subject') || '(kein Betreff)';
+            const subject = pick(msg, 'subject') || t('email.no_subject');
             const reason = pick(msg, 'reason', 'quarantineReason', 'category', 'classification') || '—';
             const att = (pick(msg, 'attachments') || {}).total || 0;
-            const clip = att > 0 ? ` <i class="bi bi-paperclip" title="${att} Anhang/Anhänge"></i>` : '';
+            const clip = att > 0 ? ` <i class="bi bi-paperclip" title="${t('email.attachments_count', { count: att })}"></i>` : '';
             return `<tr>
                 <td><input type="checkbox" class="q-check" data-pd="${postDelivery}" value="${escapeAttr(id || '')}" onclick="toggleOne(this, ${postDelivery})" ${id ? '' : 'disabled'}></td>
                 <td><span class="text-nowrap">${formatTime(recv)}</span></td>
@@ -249,9 +249,9 @@ async function loadQuarantine(postDelivery) {
                 <td>${escapeHtml(truncate(subject, 50))}</td>
                 <td><span class="severity-badge severity-high">${escapeHtml(truncate(String(reason), 24))}</span></td>
                 <td class="text-nowrap">
-                    <button class="osint-btn" onclick="viewMessage(${i}, ${postDelivery})" title="Details"><i class="bi bi-eye"></i></button>
-                    <button class="ack-btn" onclick="releaseOne(${i}, ${postDelivery}, this)" title="Freigeben"><i class="bi bi-box-arrow-up"></i></button>
-                    <button class="block-link" onclick="deleteOne(${i}, ${postDelivery}, this)" title="Löschen"><i class="bi bi-trash"></i></button>
+                    <button class="osint-btn" onclick="viewMessage(${i}, ${postDelivery})" title="${t('email.details')}"><i class="bi bi-eye"></i></button>
+                    <button class="ack-btn" onclick="releaseOne(${i}, ${postDelivery}, this)" title="${t('email.release')}"><i class="bi bi-box-arrow-up"></i></button>
+                    <button class="block-link" onclick="deleteOne(${i}, ${postDelivery}, this)" title="${t('common.delete')}"><i class="bi bi-trash"></i></button>
                 </td>
             </tr>`;
         }).join('');
@@ -300,7 +300,7 @@ function toggleAll(master, pd) {
 async function viewMessage(i, pd) {
     const msg = cache[pd][i];
     const id = msgId(msg);
-    showDetailModal(`Nachricht · ${escapeHtml(truncate(pick(msg, 'subject') || '', 60))}`, renderJson(msg));
+    showDetailModal(`${t('email.message')} · ${escapeHtml(truncate(pick(msg, 'subject') || '', 60))}`, renderJson(msg));
     if (!id) return;
     // The message itself is already in the search result; only attachments need
     // a separate call.
@@ -312,7 +312,7 @@ async function viewMessage(i, pd) {
         const atts = (d.attachments && d.attachments.items) || [];
         let html = renderJson(msg);
         if (Array.isArray(atts) && atts.length) {
-            html += '<hr><h6>Anhänge</h6><ul>' + atts.map(a =>
+            html += `<hr><h6>${t('email.attachments')}</h6><ul>` + atts.map(a =>
                 `<li><code>${escapeHtml(pick(a, 'fileName', 'name', 'filename') || '?')}</code> <span class="text-secondary">${escapeHtml(String(pick(a, 'sizeInBytes', 'size', 'fileSize') || ''))}</span></li>`
             ).join('') + '</ul>';
         }
@@ -324,32 +324,32 @@ async function viewMessage(i, pd) {
 
 async function releaseSelected(pd) {
     const ids = [...selected[pd]];
-    if (!ids.length) { alert('Keine Nachrichten ausgewählt.'); return; }
-    const allow = confirm(`${ids.length} Nachricht(en) freigeben.\n\n[OK] = Absender zusätzlich auf Allow-Liste setzen\n[Abbrechen] = nur freigeben`);
+    if (!ids.length) { alert(t('email.no_messages_selected')); return; }
+    const allow = confirm(t('email.confirm_release_many', { count: ids.length }));
     await runQuarantineAction('release', ids, pd, { allow_sender: allow });
 }
 
 async function deleteSelected(pd) {
     const ids = [...selected[pd]];
-    if (!ids.length) { alert('Keine Nachrichten ausgewählt.'); return; }
-    if (!confirm(`${ids.length} Nachricht(en) endgültig löschen?\nDiese Aktion wirkt direkt auf den Sophos-Tenant.`)) return;
-    const block = confirm('Absender zusätzlich auf Block-Liste setzen?\n[OK] = ja  ·  [Abbrechen] = nur löschen');
+    if (!ids.length) { alert(t('email.no_messages_selected')); return; }
+    if (!confirm(t('email.confirm_delete_many', { count: ids.length }))) return;
+    const block = confirm(t('email.confirm_block_sender'));
     await runQuarantineAction('delete', ids, pd, { block_sender: block });
 }
 
 async function releaseOne(i, pd, btn) {
     const id = msgId(cache[pd][i]);
-    if (!id) { alert('Keine Message-ID.'); return; }
-    const allow = confirm('Nachricht freigeben.\n[OK] = Absender auch erlauben  ·  [Abbrechen] = nur freigeben');
+    if (!id) { alert(t('email.no_message_id')); return; }
+    const allow = confirm(t('email.confirm_release_one'));
     btn.disabled = true;
     await runQuarantineAction('release', [id], pd, { allow_sender: allow });
 }
 
 async function deleteOne(i, pd, btn) {
     const id = msgId(cache[pd][i]);
-    if (!id) { alert('Keine Message-ID.'); return; }
-    if (!confirm('Nachricht endgültig löschen?')) return;
-    const block = confirm('Absender zusätzlich blocken?\n[OK] = ja  ·  [Abbrechen] = nur löschen');
+    if (!id) { alert(t('email.no_message_id')); return; }
+    if (!confirm(t('email.confirm_delete_one'))) return;
+    const block = confirm(t('email.confirm_block_sender'));
     btn.disabled = true;
     await runQuarantineAction('delete', [id], pd, { block_sender: block });
 }
@@ -365,7 +365,7 @@ async function runQuarantineAction(action, ids, pd, extra) {
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
         await loadQuarantine(pd);
     } catch (err) {
-        alert(`Aktion "${action}" fehlgeschlagen: ${err.message}`);
+        alert(t('email.action_failed', { action }) + ' ' + err.message);
         await loadQuarantine(pd);
     }
 }

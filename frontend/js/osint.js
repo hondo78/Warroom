@@ -40,7 +40,8 @@ function osintButton(value, classes = 'osint-btn', type = 'ip') {
     // terminate the surrounding onclick="..." attribute. HTML-escape so the
     // browser decodes &quot; back to " before the JS parser sees it.
     const arg = _osintEscape(JSON.stringify(value));
-    return ` <button class="${classes}" title="OSINT-Check für ${label} ${safe}" onclick="event.stopPropagation();showOsint(${arg}, '${type}')">🔍</button>`;
+    const btnTitle = _osintEscape(t('osint.btn_title', { label, value }));
+    return ` <button class="${classes}" title="${btnTitle}" onclick="event.stopPropagation();showOsint(${arg}, '${type}')">🔍</button>`;
 }
 
 function _osintLooksLikeDomain(v) {
@@ -65,8 +66,8 @@ async function showOsint(value, type = 'ip') {
     }
     _ensureTriageButton(modal);
     const label = { ip: 'IP', domain: 'Domain', url: 'URL' }[type] || 'IP';
-    if (titleEl) titleEl.textContent = `OSINT-Check für ${label}: ${value}`;
-    body.innerHTML = '<div class="osint-loading">Quellen werden parallel abgefragt — 5–10 Sekunden bei nicht gecachten Einträgen…</div>';
+    if (titleEl) titleEl.textContent = t('osint.modal_title_for', { label, value });
+    body.innerHTML = `<div class="osint-loading">${_osintEscape(t('osint.loading_parallel'))}</div>`;
     modal.classList.add('active');
     await _osintRun(value, type, false);
 }
@@ -79,7 +80,7 @@ function _ensureTriageButton(modal) {
     if (!actions) return;
     const btn = document.createElement('button');
     btn.id = 'osintTriageBtn';
-    btn.innerHTML = '🤖 An KI-Triage übergeben';
+    btn.innerHTML = '🤖 ' + _osintEscape(t('osint.triage_hand_over'));
     btn.onclick = triageFromOsint;
     actions.insertBefore(btn, actions.firstChild);
 }
@@ -100,10 +101,10 @@ function _osintTriageMsg(html, kind) {
 async function triageFromOsint() {
     const { value, type } = _osintCurrent;
     if (!value) return;
-    const note = prompt('Optionaler Hinweis für den KI-Agenten (Kontext):', '') || null;
+    const note = prompt(t('osint.triage_note_prompt'), '') || null;
     const btn = document.getElementById('osintTriageBtn');
     if (btn) btn.disabled = true;
-    _osintTriageMsg('<i class="bi bi-robot"></i> KI-Triage läuft — der Agent prüft den Wert (kann einige Sekunden dauern)…', 'info');
+    _osintTriageMsg('<i class="bi bi-robot"></i> ' + _osintEscape(t('osint.triage_running')), 'info');
     try {
         const r = await fetch('/api/agent/triage', {
             method: 'POST',
@@ -114,13 +115,13 @@ async function triageFromOsint() {
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
         const acted = d.action && d.action !== 'no_action';
         _osintTriageMsg(
-            `<i class="bi bi-robot"></i> KI-Entscheidung: <strong>${_osintEscape(d.action || '?')}</strong>` +
+            `<i class="bi bi-robot"></i> ${_osintEscape(t('osint.ai_decision'))}: <strong>${_osintEscape(d.action || '?')}</strong>` +
             `${d.reasoning ? '<br><small>' + _osintEscape(d.reasoning) + '</small>' : ''}` +
-            `<br><a href="/agent.html" class="alert-link">Decision #${d.decision_id} im Agent-Log ansehen ↗</a>`,
+            `<br><a href="/agent.html" class="alert-link">${_osintEscape(t('osint.decision_link', { id: d.decision_id }))} ↗</a>`,
             acted ? 'warning' : 'secondary'
         );
     } catch (err) {
-        _osintTriageMsg(`KI-Triage fehlgeschlagen: ${_osintEscape(err.message)}`, 'danger');
+        _osintTriageMsg(`${_osintEscape(t('osint.triage_failed'))}: ${_osintEscape(err.message)}`, 'danger');
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -128,7 +129,7 @@ async function triageFromOsint() {
 
 async function reloadOsint() {
     if (_osintCurrent.value) {
-        document.getElementById('osintModalBody').innerHTML = '<div class="osint-loading">Cache umgangen, frische Anfrage läuft…</div>';
+        document.getElementById('osintModalBody').innerHTML = `<div class="osint-loading">${_osintEscape(t('osint.loading_fresh'))}</div>`;
         await _osintRun(_osintCurrent.value, _osintCurrent.type, true);
     }
 }
@@ -144,14 +145,14 @@ async function shodanLookup() {
     if (!ip || _osintCurrent.type !== 'ip') return;
     const card = document.getElementById('osintShodanCard');
     const btn = card ? card.querySelector('.osint-shodan-btn') : null;
-    if (btn) { btn.disabled = true; btn.textContent = '🛰️ Shodan wird abgefragt…'; }
+    if (btn) { btn.disabled = true; btn.textContent = '🛰️ ' + t('osint.shodan_querying'); }
     try {
         const r = await fetch(`/api/osint/shodan/${encodeURIComponent(ip)}`, { method: 'POST' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const s = await r.json();
         if (card) card.innerHTML = _osintRenderShodanBody(s);
     } catch (err) {
-        if (card) card.innerHTML = `<div class="detail-error">Shodan-Abfrage fehlgeschlagen: ${_osintEscape(err.message)}</div>`;
+        if (card) card.innerHTML = `<div class="detail-error">${_osintEscape(t('osint.shodan_failed'))}: ${_osintEscape(err.message)}</div>`;
     }
 }
 
@@ -173,7 +174,7 @@ async function _osintRun(value, type, force) {
         body.innerHTML = _osintRender(d, type);
         if (type === 'ip') _osintLoadConnections(value);
     } catch (err) {
-        body.innerHTML = `<div class="detail-error">Fehler: ${_osintEscape(err.message)}</div>`;
+        body.innerHTML = `<div class="detail-error">${_osintEscape(t('osint.error'))}: ${_osintEscape(err.message)}</div>`;
     }
 }
 
@@ -183,13 +184,13 @@ function _osintRender(d, type) {
     if (type === 'domain') {
         sections = [
             ['Sophos Intelix', _osintRenderIntelixUrl(d.intelix)],
-            ['VirusTotal (Domain)', _osintRenderVTDomain(d.virustotal)],
-            ['DNS-Auflösung', _osintRenderDns(d.dns)],
+            [t('osint.sec_vt_domain'), _osintRenderVTDomain(d.virustotal)],
+            [t('osint.sec_dns'), _osintRenderDns(d.dns)],
         ];
     } else if (type === 'url') {
         sections = [
             ['Sophos Intelix', _osintRenderIntelixUrl(d.intelix)],
-            ['VirusTotal (URL)', _osintRenderVTUrl(d.virustotal)],
+            [t('osint.sec_vt_url'), _osintRenderVTUrl(d.virustotal)],
         ];
     } else {
         sections = [
@@ -208,11 +209,11 @@ function _osintRender(d, type) {
         </div>
     `).join('');
     const cacheNote = d.cached
-        ? '<div class="osint-cache-note">Daten aus dem 1h-Cache (Knopf „Neu prüfen" für Live-Abfrage)</div>'
+        ? `<div class="osint-cache-note">${_osintEscape(t('osint.cache_note'))}</div>`
         : '';
     // Connection history (NetFlow) is loaded asynchronously for IPs only.
     const conn = type === 'ip'
-        ? '<div id="osintConnections" style="margin-top:1rem"><div class="osint-loading">Bekannte Verbindungen werden geladen…</div></div>'
+        ? `<div id="osintConnections" style="margin-top:1rem"><div class="osint-loading">${_osintEscape(t('osint.conn_loading'))}</div></div>`
         : '';
     return cacheNote + `<div class="osint-grid">${cards}</div>` + conn;
 }
@@ -228,7 +229,7 @@ async function _osintLoadConnections(ip) {
         const d = await r.json();
         el.innerHTML = _osintRenderConnections(d);
     } catch (err) {
-        el.innerHTML = `<div class="detail-error">Verbindungen konnten nicht geladen werden: ${_osintEscape(err.message)}</div>`;
+        el.innerHTML = `<div class="detail-error">${_osintEscape(t('osint.conn_load_failed'))}: ${_osintEscape(err.message)}</div>`;
     }
 }
 
@@ -252,7 +253,7 @@ function _osintFmtTs(iso) {
 
 function _osintConnTable(side, label, arrow) {
     const c = (side && side.connections) || [];
-    if (!c.length) return `<div class="osint-conn-head">${arrow} ${label}: <span class="osint-na">keine Verbindungen</span></div>`;
+    if (!c.length) return `<div class="osint-conn-head">${arrow} ${label}: <span class="osint-na">${_osintEscape(t('osint.no_connections'))}</span></div>`;
     const rows = c.map(x => `<tr>
         <td><code style="font-size:.8rem">${_osintEscape(x.peer || '')}</code>${x.country ? ` <span class="ip-country" style="font-size:.7rem">${_osintEscape(x.country)}</span>` : ''}</td>
         <td>${x.port != null ? x.port : '—'}</td>
@@ -262,15 +263,15 @@ function _osintConnTable(side, label, arrow) {
         <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
     </tr>`).join('');
     const ge = side.truncated ? '≥ ' : '';
-    const trunc = side.truncated ? ` · Top ${c.length}` : '';
+    const trunc = side.truncated ? ` · ${t('osint.top', { n: c.length })}` : '';
     return `
         <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
-            ${arrow} <strong>${label}</strong>: ${ge}${(side.peers || 0).toLocaleString('de-DE')} Peers ·
-            ${ge}${_osintFmtBytes(side.bytes)} · ${ge}${(side.flows || 0).toLocaleString('de-DE')} Flows${trunc}
+            ${arrow} <strong>${label}</strong>: ${ge}${(side.peers || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.peers'))} ·
+            ${ge}${_osintFmtBytes(side.bytes)} · ${ge}${(side.flows || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.flows'))}${trunc}
         </div>
         <div class="table-scroll" style="max-height:240px">
             <table class="table table-sm table-hover align-middle" style="margin:0">
-                <thead><tr><th>Peer</th><th>Port</th><th>Proto</th><th style="text-align:right">Bytes</th><th style="text-align:right">Flows</th><th>Zuletzt</th></tr></thead>
+                <thead><tr><th>${_osintEscape(t('osint.col_peer'))}</th><th>${_osintEscape(t('osint.col_port'))}</th><th>${_osintEscape(t('osint.col_proto'))}</th><th style="text-align:right">${_osintEscape(t('osint.col_bytes'))}</th><th style="text-align:right">${_osintEscape(t('osint.col_flows'))}</th><th>${_osintEscape(t('osint.col_last'))}</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
@@ -278,7 +279,7 @@ function _osintConnTable(side, label, arrow) {
 
 function _osintFwTable(side, label, arrow) {
     const c = (side && side.connections) || [];
-    if (!c.length) return `<div class="osint-conn-head" style="margin:.6rem 0 .3rem">${arrow} <strong>${label}</strong>: <span class="osint-na">keine</span></div>`;
+    if (!c.length) return `<div class="osint-conn-head" style="margin:.6rem 0 .3rem">${arrow} <strong>${label}</strong>: <span class="osint-na">${_osintEscape(t('osint.none_fw'))}</span></div>`;
     const rows = c.map(x => `<tr>
         <td><code style="font-size:.8rem">${_osintEscape(x.peer || '')}</code>${x.country ? ` <span class="ip-country" style="font-size:.7rem">${_osintEscape(x.country)}</span>` : ''}</td>
         <td>${x.port != null ? x.port : '—'}</td>
@@ -287,51 +288,53 @@ function _osintFwTable(side, label, arrow) {
         <td style="text-align:right">${(x.events || 0).toLocaleString('de-DE')}</td>
         <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
     </tr>`).join('');
-    const trunc = side.truncated ? ` · Top ${c.length}` : '';
+    const trunc = side.truncated ? ` · ${t('osint.top', { n: c.length })}` : '';
     return `
         <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
-            ${arrow} <strong>${label}</strong>: ${(side.peers || 0).toLocaleString('de-DE')} Peers ·
-            ${(side.events || 0).toLocaleString('de-DE')} Versuche${trunc}
+            ${arrow} <strong>${label}</strong>: ${(side.peers || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.peers'))} ·
+            ${(side.events || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.attempts'))}${trunc}
         </div>
         <div class="table-scroll" style="max-height:240px">
             <table class="table table-sm table-hover align-middle" style="margin:0">
-                <thead><tr><th>Peer</th><th>Port</th><th>Proto</th><th>Action</th><th style="text-align:right">Versuche</th><th>Zuletzt</th></tr></thead>
+                <thead><tr><th>${_osintEscape(t('osint.col_peer'))}</th><th>${_osintEscape(t('osint.col_port'))}</th><th>${_osintEscape(t('osint.col_proto'))}</th><th>${_osintEscape(t('common.action'))}</th><th style="text-align:right">${_osintEscape(t('osint.attempts'))}</th><th>${_osintEscape(t('osint.col_last'))}</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
 }
 
 function _osintRenderConnections(d) {
+    const outLabel = t('osint.outbound');
+    const inLabel = t('osint.inbound');
     const nfBody = (d.netflow_available === false)
-        ? `<div class="osint-na">${_osintEscape(d.netflow_reason || 'nicht verfügbar')}</div>`
-        : `${_osintConnTable(d.outbound, 'Ausgehend (IP → Ziel)', '↗')}
-           ${_osintConnTable(d.inbound, 'Eingehend (Quelle → IP)', '↘')}`;
+        ? `<div class="osint-na">${_osintEscape(d.netflow_reason || t('osint.not_available'))}</div>`
+        : `${_osintConnTable(d.outbound, outLabel, '↗')}
+           ${_osintConnTable(d.inbound, inLabel, '↘')}`;
     const netflowCard = `<div class="osint-card osint-conn-card">
-        <h4>Bekannte Verbindungen <span class="text-secondary" style="font-size:.8rem">(NetFlow, letzte ${d.days} Tage)</span></h4>
+        <h4>${_osintEscape(t('osint.known_connections'))} <span class="text-secondary" style="font-size:.8rem">${_osintEscape(t('osint.netflow_last_days', { days: d.days }))}</span></h4>
         ${nfBody}
     </div>`;
     const fb = d.firewall_blocked || {};
     let fwCard = '';
     if (fb.available === false) {
         fwCard = `<div class="osint-card osint-conn-card" style="margin-top:1rem">
-            <h4>Firewall: geblockte/abgelehnte Versuche</h4>
-            <div class="osint-na">${_osintEscape(fb.reason || 'nicht verfügbar')}</div>
+            <h4>${_osintEscape(t('osint.fw_blocked_attempts'))}</h4>
+            <div class="osint-na">${_osintEscape(fb.reason || t('osint.not_available'))}</div>
         </div>`;
     } else {
         const hasFw = ((fb.outbound && fb.outbound.connections && fb.outbound.connections.length) ||
                        (fb.inbound && fb.inbound.connections && fb.inbound.connections.length));
         if (hasFw) fwCard = `<div class="osint-card osint-conn-card" style="margin-top:1rem">
-            <h4>Firewall: geblockte/abgelehnte Versuche <span class="text-secondary" style="font-size:.8rem">(letzte ${d.days} Tage)</span></h4>
-            ${_osintFwTable(fb.outbound, 'Ausgehend (IP → Ziel)', '↗')}
-            ${_osintFwTable(fb.inbound, 'Eingehend (Quelle → IP)', '↘')}
+            <h4>${_osintEscape(t('osint.fw_blocked_attempts'))} <span class="text-secondary" style="font-size:.8rem">${_osintEscape(t('osint.last_days', { days: d.days }))}</span></h4>
+            ${_osintFwTable(fb.outbound, outLabel, '↗')}
+            ${_osintFwTable(fb.inbound, inLabel, '↘')}
         </div>`;
     }
     return netflowCard + fwCard;
 }
 
 function _osintHead(p) {
-    if (!p) return '<div class="osint-na">keine Daten</div>';
-    if (p.available === false) return `<div class="osint-na">nicht verfügbar (${_osintEscape(p.reason || 'unbekannt')})</div>`;
+    if (!p) return `<div class="osint-na">${_osintEscape(t('osint.no_data'))}</div>`;
+    if (p.available === false) return `<div class="osint-na">${_osintEscape(t('osint.not_available'))} (${_osintEscape(p.reason || t('osint.unknown'))})</div>`;
     return null;
 }
 
@@ -351,16 +354,16 @@ function _osintRenderAbuse(p) {
     const sev = score >= 75 ? 'osint-bad' : score >= 25 ? 'osint-warn' : 'osint-ok';
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Confidence', `<span class="osint-score ${sev}">${score}/100</span>`)}
-            ${_osintRow('Reports gesamt', _osintEscape(String(p.total_reports ?? 0)))}
-            ${_osintRow('Distinct Reporter', _osintEscape(String(p.distinct_users ?? 0)))}
-            ${_osintRow('Letzte Meldung', _osintEscape(p.last_reported || '-'))}
+            ${_osintRow(t('osint.l_confidence'), `<span class="osint-score ${sev}">${score}/100</span>`)}
+            ${_osintRow(t('osint.l_total_reports'), _osintEscape(String(p.total_reports ?? 0)))}
+            ${_osintRow(t('osint.l_distinct_reporters'), _osintEscape(String(p.distinct_users ?? 0)))}
+            ${_osintRow(t('osint.l_last_report'), _osintEscape(p.last_reported || '-'))}
             ${_osintRow('ISP', _osintEscape(p.isp || ''))}
             ${_osintRow('Domain', _osintEscape(p.domain || ''))}
             ${_osintRow('Usage', _osintEscape(p.usage_type || ''))}
-            ${_osintRow('Whitelist', p.is_whitelisted === true ? 'ja' : p.is_whitelisted === false ? 'nein' : '')}
+            ${_osintRow(t('osint.l_whitelist'), p.is_whitelisted === true ? t('osint.yes') : p.is_whitelisted === false ? t('osint.no') : '')}
         </dl>
-        ${_osintLink(p.url, 'AbuseIPDB öffnen')}
+        ${_osintLink(p.url, t('osint.open_abuseipdb'))}
     `;
 }
 
@@ -371,16 +374,16 @@ function _osintRenderVT(p) {
     const tags = (p.tags || []).map(t => `<span class="osint-tag">${_osintEscape(t)}</span>`).join(' ');
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Verdict', `<span class="osint-score ${cls}">${mal} bösartig / ${sus} verdächtig</span>`)}
+            ${_osintRow(t('osint.l_verdict'), `<span class="osint-score ${cls}">${t('osint.verdict_value', { mal, sus })}</span>`)}
             ${_osintRow('Harmless', _osintEscape(String(p.harmless ?? 0)))}
             ${_osintRow('Undetected', _osintEscape(String(p.undetected ?? 0)))}
-            ${_osintRow('Reputation', p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
+            ${_osintRow(t('osint.l_reputation'), p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
             ${_osintRow('AS Owner', _osintEscape(p.as_owner || ''))}
             ${_osintRow('ASN', p.asn != null ? _osintEscape(String(p.asn)) : '')}
-            ${_osintRow('Country', _osintEscape(p.country || ''))}
+            ${_osintRow(t('common.country'), _osintEscape(p.country || ''))}
             ${tags ? _osintRow('Tags', tags) : ''}
         </dl>
-        ${_osintLink(p.url, 'VirusTotal öffnen')}
+        ${_osintLink(p.url, t('osint.open_virustotal'))}
     `;
 }
 
@@ -389,8 +392,8 @@ function _osintRenderShodan(p) {
     // so opening the panel never spends a Shodan credit.
     if (p && p.skipped) {
         return `<div id="osintShodanCard">
-            <div class="osint-na">Wird nur auf Anfrage abgefragt — verbraucht ein Shodan-Credit.</div>
-            <button class="osint-shodan-btn" onclick="shodanLookup()">🛰️ Shodan abfragen</button>
+            <div class="osint-na">${_osintEscape(t('osint.shodan_on_demand'))}</div>
+            <button class="osint-shodan-btn" onclick="shodanLookup()">🛰️ ${_osintEscape(t('osint.shodan_query'))}</button>
         </div>`;
     }
     return `<div id="osintShodanCard">${_osintRenderShodanBody(p)}</div>`;
@@ -398,7 +401,7 @@ function _osintRenderShodan(p) {
 
 function _osintRenderShodanBody(p) {
     const head = _osintHead(p); if (head !== null) return head;
-    if (p.no_record) return `<div class="osint-na">kein Eintrag bei Shodan</div>${_osintLink(p.url, 'Shodan-Suche öffnen')}`;
+    if (p.no_record) return `<div class="osint-na">${_osintEscape(t('osint.shodan_no_record'))}</div>${_osintLink(p.url, t('osint.open_shodan_search'))}`;
     const ports = (p.ports || []).slice(0, 30).map(pt => `<span class="osint-tag">${pt}</span>`).join(' ');
     const vulns = (p.vulns || []).slice(0, 30).map(v => `<span class="osint-tag osint-vuln">${_osintEscape(v)}</span>`).join(' ');
     const tags = (p.tags || []).map(t => `<span class="osint-tag">${_osintEscape(t)}</span>`).join(' ');
@@ -406,31 +409,31 @@ function _osintRenderShodanBody(p) {
         <dl class="detail-grid osint-dl">
             ${_osintRow('Org', _osintEscape(p.org || ''))}
             ${_osintRow('ASN', _osintEscape(p.asn || ''))}
-            ${_osintRow('Land/Stadt', _osintEscape([p.country, p.city].filter(Boolean).join(', ')))}
+            ${_osintRow(t('osint.l_country_city'), _osintEscape([p.country, p.city].filter(Boolean).join(', ')))}
             ${_osintRow('OS', _osintEscape(p.os || ''))}
-            ${ports ? _osintRow('Offene Ports', ports) : ''}
+            ${ports ? _osintRow(t('osint.l_open_ports'), ports) : ''}
             ${vulns ? _osintRow('Vulns', vulns) : ''}
             ${tags ? _osintRow('Tags', tags) : ''}
             ${_osintRow('Hostnames', _osintEscape((p.hostnames || []).slice(0, 5).join(', ')))}
-            ${_osintRow('Stand', _osintEscape(p.last_update || ''))}
+            ${_osintRow(t('osint.l_as_of'), _osintEscape(p.last_update || ''))}
         </dl>
-        ${_osintLink(p.url, 'Shodan öffnen')}
+        ${_osintLink(p.url, t('osint.open_shodan'))}
     `;
 }
 
 function _osintRenderGN(p) {
     const head = _osintHead(p); if (head !== null) return head;
     if (p.classification === 'unobserved' || p.noise === false) {
-        return `<div class="osint-na">Nicht im GreyNoise-Datensatz (kein Internet-Scan-Noise von dieser IP)</div>`;
+        return `<div class="osint-na">${_osintEscape(t('osint.gn_unobserved'))}</div>`;
     }
     const cls = p.classification === 'malicious' ? 'osint-bad' : p.classification === 'benign' ? 'osint-ok' : 'osint-warn';
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Klassifikation', `<span class="osint-score ${cls}">${_osintEscape(p.classification || 'unknown')}</span>`)}
-            ${_osintRow('Name', _osintEscape(p.name || ''))}
-            ${_osintRow('Letzte Sichtung', _osintEscape(p.last_seen || ''))}
+            ${_osintRow(t('osint.l_classification'), `<span class="osint-score ${cls}">${_osintEscape(p.classification || 'unknown')}</span>`)}
+            ${_osintRow(t('osint.l_name'), _osintEscape(p.name || ''))}
+            ${_osintRow(t('osint.l_last_seen'), _osintEscape(p.last_seen || ''))}
         </dl>
-        ${_osintLink(p.url, 'GreyNoise öffnen')}
+        ${_osintLink(p.url, t('osint.open_greynoise'))}
     `;
 }
 
@@ -444,7 +447,7 @@ function _osintAsString(value) {
 
 function _osintRenderIntelix(p) {
     const head = _osintHead(p); if (head !== null) return head;
-    if (p.no_record) return `<div class="osint-na">Kein Intelix-Eintrag für diese IP</div>`;
+    if (p.no_record) return `<div class="osint-na">${_osintEscape(t('osint.intelix_no_ip'))}</div>`;
 
     const category = _osintAsString(p.category);
     const description = _osintAsString(p.category_description);
@@ -465,11 +468,11 @@ function _osintRenderIntelix(p) {
 
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Kategorie', category ? `<span class="osint-score ${catCls}">${_osintEscape(category)}</span>` : '')}
-            ${_osintRow('Beschreibung', _osintEscape(description))}
+            ${_osintRow(t('osint.l_category'), category ? `<span class="osint-score ${catCls}">${_osintEscape(category)}</span>` : '')}
+            ${_osintRow(t('osint.l_description'), _osintEscape(description))}
             ${_osintRow('Productivity', _osintEscape(productivity))}
             ${_osintRow('Security', _osintEscape(security))}
-            ${_osintRow('Score', isFinite(score) ? `<span class="osint-score ${scoreCls}">${score}</span>` : '')}
+            ${_osintRow(t('common.score'), isFinite(score) ? `<span class="osint-score ${scoreCls}">${score}</span>` : '')}
         </dl>
     `;
 }
@@ -479,13 +482,13 @@ function _osintRenderIpInfo(p) {
     return `
         <dl class="detail-grid osint-dl">
             ${_osintRow('Hostname', _osintEscape(p.hostname || ''))}
-            ${_osintRow('Ort', _osintEscape([p.city, p.region, p.country].filter(Boolean).join(', ')))}
+            ${_osintRow(t('osint.l_location'), _osintEscape([p.city, p.region, p.country].filter(Boolean).join(', ')))}
             ${_osintRow('Org', _osintEscape(p.org || ''))}
             ${_osintRow('Loc', _osintEscape(p.loc || ''))}
             ${_osintRow('Postal', _osintEscape(p.postal || ''))}
             ${_osintRow('Timezone', _osintEscape(p.timezone || ''))}
         </dl>
-        ${_osintLink(p.url, 'ipinfo.io öffnen')}
+        ${_osintLink(p.url, t('osint.open_ipinfo'))}
     `;
 }
 
@@ -503,22 +506,22 @@ function _osintRenderVTDomain(p) {
         : '';
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Verdict', `<span class="osint-score ${cls}">${mal} bösartig / ${sus} verdächtig</span>`)}
+            ${_osintRow(t('osint.l_verdict'), `<span class="osint-score ${cls}">${t('osint.verdict_value', { mal, sus })}</span>`)}
             ${_osintRow('Harmless', _osintEscape(String(p.harmless ?? 0)))}
             ${_osintRow('Undetected', _osintEscape(String(p.undetected ?? 0)))}
-            ${_osintRow('Reputation', p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
+            ${_osintRow(t('osint.l_reputation'), p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
             ${_osintRow('Registrar', _osintEscape(p.registrar || ''))}
-            ${_osintRow('Registriert', _osintEscape(createdAt))}
+            ${_osintRow(t('osint.l_registered'), _osintEscape(createdAt))}
             ${tags ? _osintRow('Tags', tags) : ''}
-            ${cats ? _osintRow('Kategorien', cats) : ''}
+            ${cats ? _osintRow(t('osint.l_categories'), cats) : ''}
         </dl>
-        ${_osintLink(p.url, 'VirusTotal öffnen')}
+        ${_osintLink(p.url, t('osint.open_virustotal'))}
     `;
 }
 
 function _osintRenderVTUrl(p) {
     const head = _osintHead(p); if (head !== null) return head;
-    if (p.no_record) return `<div class="osint-na">Bei VirusTotal nicht bekannt</div>${_osintLink(p.url, 'VT-Suche öffnen')}`;
+    if (p.no_record) return `<div class="osint-na">${_osintEscape(t('osint.vt_unknown'))}</div>${_osintLink(p.url, t('osint.open_vt_search'))}`;
     const mal = p.malicious ?? 0, sus = p.suspicious ?? 0;
     const cls = mal > 0 ? 'osint-bad' : sus > 0 ? 'osint-warn' : 'osint-ok';
     const tags = (p.tags || []).map(t => `<span class="osint-tag">${_osintEscape(t)}</span>`).join(' ');
@@ -528,23 +531,23 @@ function _osintRenderVTUrl(p) {
         : '';
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Verdict', `<span class="osint-score ${cls}">${mal} bösartig / ${sus} verdächtig</span>`)}
+            ${_osintRow(t('osint.l_verdict'), `<span class="osint-score ${cls}">${t('osint.verdict_value', { mal, sus })}</span>`)}
             ${_osintRow('Harmless', _osintEscape(String(p.harmless ?? 0)))}
             ${_osintRow('Undetected', _osintEscape(String(p.undetected ?? 0)))}
-            ${_osintRow('Reputation', p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
+            ${_osintRow(t('osint.l_reputation'), p.reputation != null ? _osintEscape(String(p.reputation)) : '')}
             ${_osintRow('Title', _osintEscape(p.title || ''))}
             ${_osintRow('Final URL', _osintEscape(p.final_url || ''))}
-            ${_osintRow('HTTP-Status', p.http_status != null ? _osintEscape(String(p.http_status)) : '')}
+            ${_osintRow(t('osint.l_http_status'), p.http_status != null ? _osintEscape(String(p.http_status)) : '')}
             ${tags ? _osintRow('Tags', tags) : ''}
-            ${cats ? _osintRow('Kategorien', cats) : ''}
+            ${cats ? _osintRow(t('osint.l_categories'), cats) : ''}
         </dl>
-        ${_osintLink(p.url, 'VirusTotal öffnen')}
+        ${_osintLink(p.url, t('osint.open_virustotal'))}
     `;
 }
 
 function _osintRenderIntelixUrl(p) {
     const head = _osintHead(p); if (head !== null) return head;
-    if (p.no_record) return `<div class="osint-na">Kein Intelix-Eintrag</div>`;
+    if (p.no_record) return `<div class="osint-na">${_osintEscape(t('osint.intelix_no_record'))}</div>`;
 
     const category = _osintAsString(p.category);
     const description = _osintAsString(p.category_description);
@@ -566,12 +569,12 @@ function _osintRenderIntelixUrl(p) {
 
     return `
         <dl class="detail-grid osint-dl">
-            ${_osintRow('Kategorie', category ? `<span class="osint-score ${catCls}">${_osintEscape(category)}</span>` : '')}
-            ${_osintRow('Beschreibung', _osintEscape(description))}
+            ${_osintRow(t('osint.l_category'), category ? `<span class="osint-score ${catCls}">${_osintEscape(category)}</span>` : '')}
+            ${_osintRow(t('osint.l_description'), _osintEscape(description))}
             ${_osintRow('Productivity', _osintEscape(productivity))}
             ${_osintRow('Security', _osintEscape(security))}
-            ${_osintRow('Risiko', _osintEscape(risk))}
-            ${_osintRow('Score', isFinite(score) ? `<span class="osint-score ${scoreCls}">${score}</span>` : '')}
+            ${_osintRow(t('osint.l_risk'), _osintEscape(risk))}
+            ${_osintRow(t('common.score'), isFinite(score) ? `<span class="osint-score ${scoreCls}">${score}</span>` : '')}
         </dl>
     `;
 }
@@ -579,7 +582,7 @@ function _osintRenderIntelixUrl(p) {
 function _osintRenderDns(p) {
     const head = _osintHead(p); if (head !== null) return head;
     if (p.resolves === false) {
-        return `<div class="osint-na">Löst aktuell nicht auf (${_osintEscape(p.reason || 'NXDOMAIN')})</div>`;
+        return `<div class="osint-na">${_osintEscape(t('osint.dns_no_resolve'))} (${_osintEscape(p.reason || 'NXDOMAIN')})</div>`;
     }
     const ip4 = (p.ipv4 || []).map(ip =>
         `<span class="osint-tag">${_osintEscape(ip)}</span>${osintButton(ip, 'osint-btn')}`
@@ -589,7 +592,7 @@ function _osintRenderDns(p) {
         <dl class="detail-grid osint-dl">
             ${ip4 ? _osintRow('A-Records (IPv4)', ip4) : ''}
             ${ip6 ? _osintRow('AAAA-Records (IPv6)', ip6) : ''}
-            ${!ip4 && !ip6 ? _osintRow('Status', '<span class="osint-na">keine A/AAAA-Records</span>') : ''}
+            ${!ip4 && !ip6 ? _osintRow(t('common.status'), `<span class="osint-na">${_osintEscape(t('osint.dns_no_records'))}</span>`) : ''}
         </dl>
     `;
 }

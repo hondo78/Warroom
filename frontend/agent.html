@@ -19,12 +19,12 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNow()"><i class="bi bi-play"></i> Alerts</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('waf')" title="WAF-Scan über die letzte Stunde"><i class="bi bi-play"></i> WAF</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('ips')" title="IPS-Scan über die letzte Stunde"><i class="bi bi-play"></i> IPS</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('failed-login')" title="Failed-Login-Scan über die letzte Stunde"><i class="bi bi-play"></i> Failed-Login</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="refreshAgentPage()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
-                <a href="/admin.html" class="btn btn-outline-secondary btn-sm" title="Agent konfigurieren"><i class="bi bi-gear"></i></a>
+                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNow()"><i class="bi bi-play"></i> <span data-i18n="agent.run_alerts">Alerts</span></button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('waf')" data-i18n-title="agent.run_waf_title" title="WAF-Scan über die letzte Stunde"><i class="bi bi-play"></i> WAF</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('ips')" data-i18n-title="agent.run_ips_title" title="IPS-Scan über die letzte Stunde"><i class="bi bi-play"></i> IPS</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNowRule('failed-login')" data-i18n-title="agent.run_login_title" title="Failed-Login-Scan über die letzte Stunde"><i class="bi bi-play"></i> Failed-Login</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshAgentPage()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+                <a href="/admin.html" class="btn btn-outline-secondary btn-sm" data-i18n-title="agent.configure_title" title="Agent konfigurieren"><i class="bi bi-gear"></i></a>
             </div>
         </div>
     </nav>
@@ -61,7 +61,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">🤖 Agent — Audit & Human-in-the-loop</h3>
+                <h3 class="mb-0" data-i18n="agent.page_title">🤖 Agent — Audit & Human-in-the-loop</h3>
             </div>
         </div>
 
@@ -70,18 +70,18 @@
 
                 <!-- Stats -->
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="aTotal">-</h3><p>Decisions gesamt</p></div><div class="small-box-footer" id="aActorMix">—</div><span class="icon"><i class="bi bi-list-check"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="aPending">-</h3><p>Pending</p></div><div class="small-box-footer">warten auf Freigabe</div><span class="icon"><i class="bi bi-hourglass-split"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="aExecuted">-</h3><p>Executed</p></div><div class="small-box-footer">ausgeführt</div><span class="icon"><i class="bi bi-check2-circle"></i></span></div>
-                    <div class="small-box bg-info"><div class="inner"><h3 id="aRejected">-</h3><p>Rejected / Superseded</p></div><div class="small-box-footer">abgelehnt oder ersetzt</div><span class="icon"><i class="bi bi-x-circle"></i></span></div>
-                    <div class="small-box bg-danger"><div class="inner"><h3 id="aFailed">-</h3><p>Failed</p></div><div class="small-box-footer">Execution-Fehler</div><span class="icon"><i class="bi bi-exclamation-triangle"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="aTotal">-</h3><p data-i18n="agent.stat_total">Decisions gesamt</p></div><div class="small-box-footer" id="aActorMix">—</div><span class="icon"><i class="bi bi-list-check"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="aPending">-</h3><p data-i18n="agent.stat_pending">Pending</p></div><div class="small-box-footer" data-i18n="agent.stat_pending_sub">warten auf Freigabe</div><span class="icon"><i class="bi bi-hourglass-split"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="aExecuted">-</h3><p data-i18n="agent.stat_executed">Executed</p></div><div class="small-box-footer" data-i18n="agent.stat_executed_sub">ausgeführt</div><span class="icon"><i class="bi bi-check2-circle"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="aRejected">-</h3><p data-i18n="agent.stat_rejected">Rejected / Superseded</p></div><div class="small-box-footer" data-i18n="agent.stat_rejected_sub">abgelehnt oder ersetzt</div><span class="icon"><i class="bi bi-x-circle"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="aFailed">-</h3><p data-i18n="agent.stat_failed">Failed</p></div><div class="small-box-footer" data-i18n="agent.stat_failed_sub">Execution-Fehler</div><span class="icon"><i class="bi bi-exclamation-triangle"></i></span></div>
                 </div>
 
                 <!-- Workflow-Diagramm -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">KI-Workflow</h3>
-                        <a href="/docs/agent-workflow.drawio" download class="btn btn-outline-secondary btn-sm" title="drawio-Diagramm herunterladen"><i class="bi bi-download"></i> drawio</a>
+                        <h3 class="card-title mb-0" data-i18n="agent.workflow_title">KI-Workflow</h3>
+                        <a href="/docs/agent-workflow.drawio" download class="btn btn-outline-secondary btn-sm" data-i18n-title="agent.download_drawio_title" title="drawio-Diagramm herunterladen"><i class="bi bi-download"></i> drawio</a>
                     </div>
                     <div class="card-body" style="overflow-x:auto">
                         <svg viewBox="0 0 1280 640" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;min-width:1000px;font-family:Segoe UI,system-ui,sans-serif">
@@ -290,29 +290,29 @@
                             <text x="260" y="560" font-size="9" fill="#94a3b8">rejected · only audit</text>
                         </svg>
                         <div class="d-flex flex-wrap gap-3 mt-3" style="font-size:.78rem;color:var(--text-secondary)">
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>kritisch (Block / IOC)</span>
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>genehmigt / auto / Whitelist</span>
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>Override / Acknowledge / Scheduler</span>
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#8b5cf6;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>LLM / OSINT</span>
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>Persistierung / Review</span>
-                            <span><span style="display:inline-block;width:10px;height:10px;background:#94a3b8;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span>Reject / Audit / Sonst</span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_critical">kritisch (Block / IOC)</span></span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_approved">genehmigt / auto / Whitelist</span></span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_override">Override / Acknowledge / Scheduler</span></span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#8b5cf6;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_llm">LLM / OSINT</span></span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_persist">Persistierung / Review</span></span>
+                            <span><span style="display:inline-block;width:10px;height:10px;background:#94a3b8;border-radius:2px;margin-right:.3rem;vertical-align:middle"></span><span data-i18n="agent.legend_reject">Reject / Audit / Sonst</span></span>
                         </div>
                     </div>
                 </div>
 
                 <!-- Timeline -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Aktivität — Decisions pro Stunde (Agent vs. Mensch)</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="agent.timeline_title">Aktivität — Decisions pro Stunde (Agent vs. Mensch)</h3></div>
                     <div class="card-body"><canvas id="aTimelineChart" style="max-height:240px"></canvas></div>
                 </div>
 
                 <!-- Filter + Liste -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Decision-Log</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="agent.log_title">Decision-Log</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
                             <select id="aFilterStatus" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
-                                <option value="">Alle Status</option>
+                                <option value="" data-i18n="agent.filter_all_status">Alle Status</option>
                                 <option value="pending">Pending</option>
                                 <option value="executed">Executed</option>
                                 <option value="rejected">Rejected</option>
@@ -320,28 +320,28 @@
                                 <option value="failed">Failed</option>
                             </select>
                             <select id="aFilterActor" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
-                                <option value="">Beide</option>
-                                <option value="agent">Nur Agent</option>
-                                <option value="human">Nur Mensch</option>
+                                <option value="" data-i18n="agent.filter_both">Beide</option>
+                                <option value="agent" data-i18n="agent.filter_only_agent">Nur Agent</option>
+                                <option value="human" data-i18n="agent.filter_only_human">Nur Mensch</option>
                             </select>
                             <select id="aFilterAction" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
-                                <option value="">Alle Actions</option>
+                                <option value="" data-i18n="agent.filter_all_actions">Alle Actions</option>
                                 <option value="block_ip">block_ip</option>
                                 <option value="block_subnet">block_subnet</option>
                                 <option value="acknowledge">acknowledge</option>
                                 <option value="isolate">isolate</option>
                                 <option value="no_action">no_action</option>
                             </select>
-                            <input type="text" data-filter-for="aDecisionsTable" class="form-control form-control-sm" placeholder="Volltext (Begründung, IP, Alert-Typ…)">
-                            <button type="button" class="btn btn-warning btn-sm ms-auto" onclick="approveAllPending()" title="Genehmigt alle aktuell sichtbaren pending Decisions auf einmal. Whitelist-/Sicherheits-Checks greifen pro Decision wie bei Einzel-Approve.">
-                                <i class="bi bi-check2-all"></i> Alle Pending genehmigen
+                            <input type="text" data-filter-for="aDecisionsTable" class="form-control form-control-sm" data-i18n-placeholder="agent.search_placeholder" placeholder="Volltext (Begründung, IP, Alert-Typ…)">
+                            <button type="button" class="btn btn-warning btn-sm ms-auto" onclick="approveAllPending()" data-i18n-title="agent.approve_all_title" title="Genehmigt alle aktuell sichtbaren pending Decisions auf einmal. Whitelist-/Sicherheits-Checks greifen pro Decision wie bei Einzel-Approve.">
+                                <i class="bi bi-check2-all"></i> <span data-i18n="agent.approve_all">Alle Pending genehmigen</span>
                             </button>
                         </div>
                         <div class="table-scroll" style="max-height:560px">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Zeit</th><th>Quelle</th><th>Action</th>
-                                    <th>Begründung</th><th>Alarm</th><th>Status</th><th></th>
+                                    <th data-i18n="common.time">Zeit</th><th data-i18n="agent.col_source">Quelle</th><th data-i18n="common.action">Action</th>
+                                    <th data-i18n="agent.col_reasoning">Begründung</th><th data-i18n="agent.col_alarm">Alarm</th><th data-i18n="common.status">Status</th><th></th>
                                 </tr></thead>
                                 <tbody id="aDecisionsTable"></tbody>
                             </table>
@@ -358,12 +358,12 @@
 <div class="modal-overlay" id="agentDetailModal">
     <div class="modal alert-detail-modal" style="max-width:1000px">
         <div class="alert-detail-header">
-            <h3 id="agentDetailTitle">Decision-Detail</h3>
+            <h3 id="agentDetailTitle" data-i18n="agent.detail_title">Decision-Detail</h3>
             <button class="modal-close" onclick="closeAgentDetail()">×</button>
         </div>
-        <div id="agentDetailBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="agentDetailBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="closeAgentDetail()">Schliessen</button>
+            <button onclick="closeAgentDetail()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>
@@ -384,6 +384,13 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/osint.de.js"></script>
+    <script src="/i18n/osint.en.js"></script>
+    <script src="/i18n/agent.de.js"></script>
+    <script src="/i18n/agent.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="/js/common.js"></script>

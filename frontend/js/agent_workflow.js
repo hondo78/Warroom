@@ -27,10 +27,10 @@ async function loadWorkflow() {
         renderStages(WF.stages || []);
         const badge = document.getElementById('wfStructuredBadge');
         const on = !!(WF.global && WF.global.structured_output);
-        badge.textContent = on ? 'Structured Output: AN' : 'Structured Output: AUS';
+        badge.textContent = on ? t('agentWorkflow.structuredOn') : t('agentWorkflow.structuredOff');
         badge.className = 'badge ' + (on ? 'text-bg-success' : 'text-bg-secondary');
     } catch (e) {
-        toast('Laden fehlgeschlagen: ' + e.message, 'error');
+        toast(t('agentWorkflow.loadFailed', { error: e.message }), 'error');
     }
 }
 
@@ -58,7 +58,7 @@ async function saveGlobal() {
         agent_max_tokens: parseInt(document.getElementById('g_agent_max_tokens').value, 10),
         agent_auto_execute: document.getElementById('g_agent_auto_execute').checked,
     };
-    await putSettings(payload, 'Global gespeichert');
+    await putSettings(payload, t('agentWorkflow.globalSaved'));
 }
 
 function renderStages(stages) {
@@ -74,13 +74,13 @@ function renderStages(stages) {
         ).join('');
         const enableToggle = st.enabled_key
             ? `<div class="form-check form-switch d-inline-block ms-2 align-middle"><input class="form-check-input" type="checkbox" id="st_${st.key}_enabled" ${st.enabled ? 'checked' : ''}></div>`
-            : '<span class="badge text-bg-info ms-2">on-demand</span>';
+            : `<span class="badge text-bg-info ms-2">${t('agentWorkflow.onDemand')}</span>`;
         const promptVal = (SETTINGS && SETTINGS[st.prompt_key]) || '';
         const promptBadge = st.prompt_overridden
-            ? '<span class="badge text-bg-warning">eigener Prompt</span>'
-            : '<span class="badge text-bg-secondary">Default-Prompt</span>';
+            ? `<span class="badge text-bg-warning">${t('agentWorkflow.promptCustom')}</span>`
+            : `<span class="badge text-bg-secondary">${t('agentWorkflow.promptDefault')}</span>`;
         const runBtn = st.run_now
-            ? `<button class="btn btn-outline-secondary btn-sm" onclick="runNow('${st.run_now}')"><i class="bi bi-play"></i> Jetzt ausführen</button>`
+            ? `<button class="btn btn-outline-secondary btn-sm" onclick="runNow('${st.run_now}')"><i class="bi bi-play"></i> ${t('agentWorkflow.runNow')}</button>`
             : '';
         return `
         <div class="card mb-3 ${off}">
@@ -89,16 +89,16 @@ function renderStages(stages) {
                 <div>${acts}</div>
             </div>
             <div class="card-body">
-                <p class="admin-hint mb-2"><strong>Trigger:</strong> ${escapeHtml(st.trigger)} · ${promptBadge}</p>
+                <p class="admin-hint mb-2"><strong>${t('agentWorkflow.triggerLabel')}</strong> ${escapeHtml(st.trigger)} · ${promptBadge}</p>
                 ${numFields ? `<div class="row g-2 align-items-end mb-1">${numFields}</div>` : ''}
-                <label class="form-label mt-2">System-Prompt <span class="text-secondary">(leer ⇒ eingebauter Default)</span></label>
-                <textarea class="form-control form-control-sm wf-prompt" id="st_${st.key}_prompt" rows="10" placeholder="(leer → Default für ${escapeHtml(st.label)})">${escapeHtml(promptVal)}</textarea>
+                <label class="form-label mt-2">${t('agentWorkflow.systemPrompt')} <span class="text-secondary">${t('agentWorkflow.systemPromptHint')}</span></label>
+                <textarea class="form-control form-control-sm wf-prompt" id="st_${st.key}_prompt" rows="10" placeholder="${escapeHtml(t('agentWorkflow.promptPlaceholder', { stage: st.label }))}">${escapeHtml(promptVal)}</textarea>
                 <div class="d-flex justify-content-between gap-2 mt-2 flex-wrap">
                     <div>${runBtn}</div>
                     <div class="d-flex gap-2 flex-wrap">
-                        <button class="btn btn-outline-secondary btn-sm" onclick="loadDefaultPrompt('${st.prompt_source}','st_${st.key}_prompt')"><i class="bi bi-arrow-counterclockwise"></i> Default laden</button>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="clearPromptField('st_${st.key}_prompt')"><i class="bi bi-eraser"></i> Leeren</button>
-                        <button class="btn btn-primary btn-sm" onclick="saveStage('${st.key}')">Stufe speichern</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadDefaultPrompt('${st.prompt_source}','st_${st.key}_prompt')"><i class="bi bi-arrow-counterclockwise"></i> ${t('agentWorkflow.loadDefault')}</button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearPromptField('st_${st.key}_prompt')"><i class="bi bi-eraser"></i> ${t('agentWorkflow.clear')}</button>
+                        <button class="btn btn-primary btn-sm" onclick="saveStage('${st.key}')">${t('agentWorkflow.saveStage')}</button>
                     </div>
                 </div>
             </div>
@@ -120,7 +120,7 @@ function saveStage(key) {
     }
     const pt = document.getElementById(`st_${key}_prompt`);
     if (pt) payload[st.prompt_key] = pt.value;
-    putSettings(payload, `Stufe „${st.label}" gespeichert`);
+    putSettings(payload, t('agentWorkflow.stageSaved', { stage: st.label }));
 }
 
 async function putSettings(payload, okMsg) {
@@ -135,10 +135,10 @@ async function putSettings(payload, okMsg) {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        toast(`${okMsg}: ${(d.updated || []).join(', ') || '—'}`, 'success');
+        toast(`${okMsg}: ${(d.updated || []).join(', ') || t('common.none')}`, 'success');
         await loadWorkflow();
     } catch (e) {
-        toast('Speichern fehlgeschlagen: ' + e.message, 'error');
+        toast(t('agentWorkflow.saveFailed', { error: e.message }), 'error');
     }
 }
 
@@ -149,26 +149,26 @@ async function loadDefaultPrompt(source, targetId) {
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
         const ta = document.getElementById(targetId);
         if (!ta) return;
-        if (ta.value && !confirm('Aktuellen Prompt mit dem Default überschreiben?')) return;
+        if (ta.value && !confirm(t('agentWorkflow.confirmOverwrite'))) return;
         ta.value = d.default || '';
-        toast('Default-Prompt geladen — noch nicht gespeichert.', 'info');
+        toast(t('agentWorkflow.defaultLoaded'), 'info');
     } catch (e) {
-        toast('Fehler: ' + e.message, 'error');
+        toast(t('agentWorkflow.error', { error: e.message }), 'error');
     }
 }
 
 function clearPromptField(id) {
     const ta = document.getElementById(id);
-    if (ta && (!ta.value || confirm('Feld leeren? Beim Speichern greift der eingebaute Default-Prompt.'))) ta.value = '';
+    if (ta && (!ta.value || confirm(t('agentWorkflow.confirmClear')))) ta.value = '';
 }
 
 async function runNow(url) {
     try {
         const r = await fetch(url, { method: 'POST' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        toast('Lauf angestoßen — Ergebnisse erscheinen unter /agent.html.', 'success');
+        toast(t('agentWorkflow.runStarted'), 'success');
     } catch (e) {
-        toast('Fehler: ' + e.message, 'error');
+        toast(t('agentWorkflow.error', { error: e.message }), 'error');
     }
 }
 

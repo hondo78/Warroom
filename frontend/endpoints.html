@@ -24,7 +24,7 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEndpoints()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshEndpoints()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
     </nav>
@@ -60,49 +60,49 @@
 
     <main class="app-main">
         <div class="app-content-header">
-            <div class="container-fluid"><h3 class="mb-0">💻 Endpoint-Verwaltung — Sophos Central</h3></div>
+            <div class="container-fluid"><h3 class="mb-0">💻 <span data-i18n="endpoints.page_title">Endpoint-Verwaltung — Sophos Central</span></h3></div>
         </div>
 
         <div class="app-content">
             <div class="container-fluid">
 
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="epTotal">-</h3><p>Endpoints</p></div><div class="small-box-footer">verwaltete Geräte</div><span class="icon"><i class="bi bi-pc-display"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="epOnline">-</h3><p>Online</p></div><div class="small-box-footer">aktuell verbunden</div><span class="icon"><i class="bi bi-wifi"></i></span></div>
-                    <div class="small-box bg-danger"><div class="inner"><h3 id="epBad">-</h3><p>Health „bad"</p></div><div class="small-box-footer">Handlungsbedarf</div><span class="icon"><i class="bi bi-exclamation-octagon"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="epIsolated">-</h3><p>Isoliert</p></div><div class="small-box-footer">vom Netz getrennt</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="epTotal">-</h3><p data-i18n="endpoints.stat_endpoints">Endpoints</p></div><div class="small-box-footer" data-i18n="endpoints.stat_endpoints_sub">verwaltete Geräte</div><span class="icon"><i class="bi bi-pc-display"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="epOnline">-</h3><p data-i18n="endpoints.stat_online">Online</p></div><div class="small-box-footer" data-i18n="endpoints.stat_online_sub">aktuell verbunden</div><span class="icon"><i class="bi bi-wifi"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="epBad">-</h3><p data-i18n="endpoints.stat_bad">Health „bad"</p></div><div class="small-box-footer" data-i18n="endpoints.stat_bad_sub">Handlungsbedarf</div><span class="icon"><i class="bi bi-exclamation-octagon"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="epIsolated">-</h3><p data-i18n="endpoints.stat_isolated">Isoliert</p></div><div class="small-box-footer" data-i18n="endpoints.stat_isolated_sub">vom Netz getrennt</div><span class="icon"><i class="bi bi-shield-lock"></i></span></div>
                 </div>
 
                 <ul class="nav nav-tabs mb-3" role="tablist">
-                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane-inv" type="button"><i class="bi bi-pc-display"></i> Inventar</button></li>
-                    <li class="nav-item"><button class="nav-link" id="tab-groups" data-bs-toggle="tab" data-bs-target="#pane-groups" type="button"><i class="bi bi-collection"></i> Gruppen</button></li>
-                    <li class="nav-item"><button class="nav-link" id="tab-policies" data-bs-toggle="tab" data-bs-target="#pane-policies" type="button"><i class="bi bi-file-earmark-ruled"></i> Policies</button></li>
-                    <li class="nav-item"><button class="nav-link" id="tab-settings" data-bs-toggle="tab" data-bs-target="#pane-settings" type="button"><i class="bi bi-sliders"></i> Einstellungen</button></li>
-                    <li class="nav-item"><button class="nav-link" id="tab-exploits" data-bs-toggle="tab" data-bs-target="#pane-exploits" type="button"><i class="bi bi-bug"></i> Exploits</button></li>
-                    <li class="nav-item"><button class="nav-link" id="tab-downloads" data-bs-toggle="tab" data-bs-target="#pane-dl" type="button"><i class="bi bi-download"></i> Downloads / Installer</button></li>
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane-inv" type="button"><i class="bi bi-pc-display"></i> <span data-i18n="endpoints.tab_inventory">Inventar</span></button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-groups" data-bs-toggle="tab" data-bs-target="#pane-groups" type="button"><i class="bi bi-collection"></i> <span data-i18n="endpoints.tab_groups">Gruppen</span></button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-policies" data-bs-toggle="tab" data-bs-target="#pane-policies" type="button"><i class="bi bi-file-earmark-ruled"></i> <span data-i18n="endpoints.tab_policies">Policies</span></button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-settings" data-bs-toggle="tab" data-bs-target="#pane-settings" type="button"><i class="bi bi-sliders"></i> <span data-i18n="endpoints.tab_settings">Einstellungen</span></button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-exploits" data-bs-toggle="tab" data-bs-target="#pane-exploits" type="button"><i class="bi bi-bug"></i> <span data-i18n="endpoints.tab_exploits">Exploits</span></button></li>
+                    <li class="nav-item"><button class="nav-link" id="tab-downloads" data-bs-toggle="tab" data-bs-target="#pane-dl" type="button"><i class="bi bi-download"></i> <span data-i18n="endpoints.tab_downloads">Downloads / Installer</span></button></li>
                 </ul>
 
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="pane-inv">
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Geräte-Inventar</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="endpoints.device_inventory">Geräte-Inventar</h3></div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="epSearch" class="form-control form-control-sm" placeholder="Hostname suchen — Enter">
+                                    <input type="text" id="epSearch" class="form-control form-control-sm" placeholder="Hostname suchen — Enter" data-i18n-placeholder="endpoints.search_hostname">
                                     <select id="epHealth" class="form-select form-select-sm" style="max-width:160px" onchange="loadEndpoints()">
-                                        <option value="">Alle Health</option><option value="good">good</option><option value="suspicious">suspicious</option><option value="bad">bad</option>
+                                        <option value="" data-i18n="endpoints.all_health">Alle Health</option><option value="good">good</option><option value="suspicious">suspicious</option><option value="bad">bad</option>
                                     </select>
                                     <select id="epIsolation" class="form-select form-select-sm" style="max-width:170px" onchange="loadEndpoints()">
-                                        <option value="">Alle Isolation</option><option value="isolated">isoliert</option><option value="notIsolated">nicht isoliert</option>
+                                        <option value="" data-i18n="endpoints.all_isolation">Alle Isolation</option><option value="isolated" data-i18n="endpoints.isolated">isoliert</option><option value="notIsolated" data-i18n="endpoints.not_isolated">nicht isoliert</option>
                                     </select>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadEndpoints()"><i class="bi bi-search"></i></button>
                                 </div>
                                 <div class="table-scroll">
                                     <table class="table table-sm table-hover align-middle">
                                         <thead><tr>
-                                            <th>Hostname</th><th>Typ</th><th>OS</th><th>IPv4</th><th>Health</th><th>Isolation</th><th>Tamper</th><th>Zuletzt</th><th>Aktionen</th>
+                                            <th data-i18n="endpoints.col_hostname">Hostname</th><th data-i18n="endpoints.col_type">Typ</th><th data-i18n="endpoints.col_os">OS</th><th data-i18n="endpoints.col_ipv4">IPv4</th><th data-i18n="endpoints.col_health">Health</th><th data-i18n="endpoints.col_isolation">Isolation</th><th data-i18n="endpoints.col_tamper">Tamper</th><th data-i18n="endpoints.col_last_seen">Zuletzt</th><th data-i18n="common.action">Aktionen</th>
                                         </tr></thead>
-                                        <tbody id="epTable"><tr><td colspan="9" class="text-center text-secondary py-4">Lade…</td></tr></tbody>
+                                        <tbody id="epTable"><tr><td colspan="9" class="text-center text-secondary py-4" data-i18n="common.loading">Lade…</td></tr></tbody>
                                     </table>
                                 </div>
                             </div>
@@ -112,26 +112,26 @@
                     <div class="tab-pane fade" id="pane-groups">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                <h3 class="card-title mb-0">Endpoint-Gruppen</h3>
+                                <h3 class="card-title mb-0" data-i18n="endpoints.endpoint_groups">Endpoint-Gruppen</h3>
                                 <div class="d-flex gap-2 flex-wrap">
-                                    <input id="grpName" class="form-control form-control-sm" placeholder="Neue Gruppe…" style="max-width:200px">
+                                    <input id="grpName" class="form-control form-control-sm" placeholder="Neue Gruppe…" style="max-width:200px" data-i18n-placeholder="endpoints.new_group">
                                     <select id="grpType" class="form-select form-select-sm" style="max-width:130px"><option value="computer">computer</option><option value="server">server</option></select>
-                                    <button class="btn btn-success btn-sm" onclick="createGroup()"><i class="bi bi-plus-lg"></i> Anlegen</button>
+                                    <button class="btn btn-success btn-sm" onclick="createGroup()"><i class="bi bi-plus-lg"></i> <span data-i18n="endpoints.create">Anlegen</span></button>
                                 </div>
                             </div>
                             <div class="card-body table-scroll">
-                                <table class="table table-sm table-hover align-middle"><thead><tr><th>Name</th><th>Typ</th><th>Endpoints</th><th>Erstellt</th><th>Aktionen</th></tr></thead>
-                                <tbody id="grpTable"><tr><td colspan="5" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                                <table class="table table-sm table-hover align-middle"><thead><tr><th data-i18n="endpoints.col_name">Name</th><th data-i18n="endpoints.col_type">Typ</th><th data-i18n="endpoints.col_endpoints">Endpoints</th><th data-i18n="endpoints.col_created">Erstellt</th><th data-i18n="common.action">Aktionen</th></tr></thead>
+                                <tbody id="grpTable"><tr><td colspan="5" class="text-center text-secondary py-4" data-i18n="endpoints.open_tab_to_load">Tab öffnen zum Laden…</td></tr></tbody></table>
                             </div>
                         </div>
                     </div>
 
                     <div class="tab-pane fade" id="pane-policies">
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Richtlinien (Policies)</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="endpoints.policies_title">Richtlinien (Policies)</h3></div>
                             <div class="card-body table-scroll">
-                                <table class="table table-sm table-hover align-middle"><thead><tr><th>Name</th><th>Priorität</th><th>gesperrt</th><th></th></tr></thead>
-                                <tbody id="polTable"><tr><td colspan="4" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                                <table class="table table-sm table-hover align-middle"><thead><tr><th data-i18n="endpoints.col_name">Name</th><th data-i18n="endpoints.col_priority">Priorität</th><th data-i18n="endpoints.col_locked">gesperrt</th><th></th></tr></thead>
+                                <tbody id="polTable"><tr><td colspan="4" class="text-center text-secondary py-4" data-i18n="endpoints.open_tab_to_load">Tab öffnen zum Laden…</td></tr></tbody></table>
                             </div>
                         </div>
                     </div>
@@ -139,7 +139,7 @@
                     <div class="tab-pane fade" id="pane-settings">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <h3 class="card-title mb-0">Tamper-Protection (global)</h3>
+                                <h3 class="card-title mb-0" data-i18n="endpoints.tamper_global">Tamper-Protection (global)</h3>
                                 <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="tamperToggle" onchange="setTamper(this)"></div>
                             </div>
                             <div class="card-body"><small class="text-secondary" id="tamperStatus">—</small></div>
@@ -152,12 +152,12 @@
 
                     <div class="tab-pane fade" id="pane-exploits">
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Erkannte Exploits (Exploit-Mitigation)</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="endpoints.detected_exploits_title">Erkannte Exploits (Exploit-Mitigation)</h3></div>
                             <div class="card-body">
-                                <p class="admin-hint mb-2">Erkennungen durch Exploit-Mitigation (CryptoGuard / WipeGuard / Exploit-Blocks). Quelle: <code>/endpoint/v1/settings/exploit-mitigation/detected-exploits</code>.</p>
+                                <p class="admin-hint mb-2" data-i18n-html="endpoints.exploits_hint">Erkennungen durch Exploit-Mitigation (CryptoGuard / WipeGuard / Exploit-Blocks). Quelle: <code>/endpoint/v1/settings/exploit-mitigation/detected-exploits</code>.</p>
                                 <div class="table-scroll">
-                                    <table class="table table-sm table-hover align-middle"><thead><tr><th>Beschreibung</th><th>Anzahl</th><th>Thumbprint</th><th>Zuletzt</th></tr></thead>
-                                    <tbody id="exTable"><tr><td colspan="4" class="text-center text-secondary py-4">Tab öffnen zum Laden…</td></tr></tbody></table>
+                                    <table class="table table-sm table-hover align-middle"><thead><tr><th data-i18n="endpoints.col_description">Beschreibung</th><th data-i18n="endpoints.col_count">Anzahl</th><th data-i18n="endpoints.col_thumbprint">Thumbprint</th><th data-i18n="endpoints.col_last_seen">Zuletzt</th></tr></thead>
+                                    <tbody id="exTable"><tr><td colspan="4" class="text-center text-secondary py-4" data-i18n="endpoints.open_tab_to_load">Tab öffnen zum Laden…</td></tr></tbody></table>
                                 </div>
                             </div>
                         </div>
@@ -166,11 +166,11 @@
                     <div class="tab-pane fade" id="pane-dl">
                         <div class="card mb-3">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <h3 class="card-title mb-0">Installer-Pakete</h3>
+                                <h3 class="card-title mb-0" data-i18n="endpoints.installer_packages">Installer-Pakete</h3>
                                 <span id="epLicensed"></span>
                             </div>
                             <div class="card-body">
-                                <div id="epDownloads"><div class="text-secondary">Tab öffnen zum Laden…</div></div>
+                                <div id="epDownloads"><div class="text-secondary" data-i18n="endpoints.open_tab_to_load">Tab öffnen zum Laden…</div></div>
                             </div>
                         </div>
                     </div>
@@ -186,14 +186,19 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="epDetailTitle">Endpoint</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" data-i18n-aria-label="common.close"></button>
             </div>
-            <div class="modal-body" id="epDetailBody"><div class="text-secondary">Lade…</div></div>
+            <div class="modal-body" id="epDetailBody"><div class="text-secondary" data-i18n="common.loading">Lade…</div></div>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/endpoints.de.js"></script>
+    <script src="/i18n/endpoints.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
 <script src="/js/endpoints.js"></script>

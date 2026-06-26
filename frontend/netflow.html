@@ -22,14 +22,14 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 <select id="nfFirewall" class="form-select form-select-sm" style="width:auto">
-                    <option value="all">Alle Firewalls</option>
+                    <option value="all" data-i18n="netflow.all_firewalls">Alle Firewalls</option>
                 </select>
                 <select id="nfDays" class="form-select form-select-sm" style="width:auto">
-                    <option value="1" selected>24 Stunden</option>
-                    <option value="7">7 Tage</option>
-                    <option value="30">30 Tage</option>
+                    <option value="1" selected data-i18n="netflow.days_1">24 Stunden</option>
+                    <option value="7" data-i18n="netflow.days_7">7 Tage</option>
+                    <option value="30" data-i18n="netflow.days_30">30 Tage</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="netflowRefresh()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="netflowRefresh()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
     </nav>
@@ -67,7 +67,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">NetFlow</h3>
+                <h3 class="mb-0" data-i18n="netflow.page_title">NetFlow</h3>
             </div>
         </div>
 
@@ -78,36 +78,36 @@
                 <div class="row g-3 mb-3">
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-info">
-                            <div class="inner"><h3 id="nfBytes">-</h3><p>Volumen</p></div>
+                            <div class="inner"><h3 id="nfBytes">-</h3><p data-i18n="netflow.tile_volume">Volumen</p></div>
                             <div class="small-box-footer" id="nfBytesRate">- /s</div>
                             <span class="icon"><i class="bi bi-hdd-network"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-success">
-                            <div class="inner"><h3 id="nfFlows">-</h3><p>Flows</p></div>
+                            <div class="inner"><h3 id="nfFlows">-</h3><p data-i18n="netflow.tile_flows">Flows</p></div>
                             <div class="small-box-footer" id="nfFlowsRate">- /min</div>
                             <span class="icon"><i class="bi bi-arrow-left-right"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-warning">
-                            <div class="inner"><h3 id="nfPackets">-</h3><p>Pakete</p></div>
-                            <div class="small-box-footer">gesamt</div>
+                            <div class="inner"><h3 id="nfPackets">-</h3><p data-i18n="netflow.tile_packets">Pakete</p></div>
+                            <div class="small-box-footer" data-i18n="netflow.tile_total">gesamt</div>
                             <span class="icon"><i class="bi bi-box-seam"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-info">
-                            <div class="inner"><h3 id="nfSources">-</h3><p>Source-IPs</p></div>
-                            <div class="small-box-footer">eindeutig</div>
+                            <div class="inner"><h3 id="nfSources">-</h3><p data-i18n="netflow.tile_source_ips">Source-IPs</p></div>
+                            <div class="small-box-footer" data-i18n="netflow.tile_unique">eindeutig</div>
                             <span class="icon"><i class="bi bi-broadcast-pin"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-info">
-                            <div class="inner"><h3 id="nfDests">-</h3><p>Destinations</p></div>
-                            <div class="small-box-footer">eindeutig</div>
+                            <div class="inner"><h3 id="nfDests">-</h3><p data-i18n="netflow.tile_destinations">Destinations</p></div>
+                            <div class="small-box-footer" data-i18n="netflow.tile_unique">eindeutig</div>
                             <span class="icon"><i class="bi bi-geo-alt"></i></span>
                         </div>
                     </div>
@@ -115,32 +115,32 @@
 
                 <!-- Bandbreiten-Timeline -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Bandbreite (Bytes über Zeit)</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.bandwidth_title">Bandbreite (Bytes über Zeit)</h3></div>
                     <div class="card-body"><canvas id="nfTimelineChart"></canvas></div>
                 </div>
 
                 <!-- 2x2 Charts -->
                 <div class="row g-3 mb-3">
-                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0">Top-Talker (Source-IPs nach Bytes)</h3></div><div class="card-body"><canvas id="nfTalkersChart"></canvas></div></div></div>
-                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0">Top-Destinationen nach Bytes</h3></div><div class="card-body"><canvas id="nfDestsChart"></canvas></div></div></div>
-                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0">Top-Ports / Services</h3></div><div class="card-body"><canvas id="nfPortsChart"></canvas></div></div></div>
-                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0">Protokoll-Mix</h3></div><div class="card-body"><canvas id="nfProtoChart"></canvas></div></div></div>
+                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.top_talkers_title">Top-Talker (Source-IPs nach Bytes)</h3></div><div class="card-body"><canvas id="nfTalkersChart"></canvas></div></div></div>
+                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.top_destinations_title">Top-Destinationen nach Bytes</h3></div><div class="card-body"><canvas id="nfDestsChart"></canvas></div></div></div>
+                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.top_ports_title">Top-Ports / Services</h3></div><div class="card-body"><canvas id="nfPortsChart"></canvas></div></div></div>
+                    <div class="col-12 col-lg-6"><div class="card h-100"><div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.protocol_mix_title">Protokoll-Mix</h3></div><div class="card-body"><canvas id="nfProtoChart"></canvas></div></div></div>
                 </div>
 
                 <!-- Interface-Auslastung -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Interface-Auslastung</h3>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="openIfaceNameEditor()"><i class="bi bi-pencil"></i> Namen bearbeiten</button>
+                        <h3 class="card-title mb-0" data-i18n="netflow.iface_util_title">Interface-Auslastung</h3>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="openIfaceNameEditor()"><i class="bi bi-pencil"></i> <span data-i18n="netflow.edit_names">Namen bearbeiten</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint" style="margin: 0 0 .5rem">SNMP-Index aus NetFlow-Records. Namen können editiert und werden persistiert.</p>
+                        <p class="admin-hint" style="margin: 0 0 .5rem" data-i18n="netflow.iface_hint">SNMP-Index aus NetFlow-Records. Namen können editiert und werden persistiert.</p>
                         <canvas id="nfIfaceChart" style="max-height: 320px"></canvas>
                         <div class="table-scroll mt-3">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Firewall</th><th>Interface</th><th>Bytes Ingress</th><th>Bytes Egress</th>
-                                    <th>Ø Mbps In</th><th>Ø Mbps Out</th><th>Flows In/Out</th>
+                                    <th data-i18n="common.firewall">Firewall</th><th data-i18n="netflow.col_interface">Interface</th><th data-i18n="netflow.col_bytes_ingress">Bytes Ingress</th><th data-i18n="netflow.col_bytes_egress">Bytes Egress</th>
+                                    <th data-i18n="netflow.col_mbps_in">Ø Mbps In</th><th data-i18n="netflow.col_mbps_out">Ø Mbps Out</th><th data-i18n="netflow.col_flows_in_out">Flows In/Out</th>
                                 </tr></thead>
                                 <tbody id="nfIfaceTable"></tbody>
                             </table>
@@ -150,33 +150,33 @@
 
                 <!-- Destination-Karte -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Destination-Karte (wo gehen die Bytes hin)</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.dest_map_title">Destination-Karte (wo gehen die Bytes hin)</h3></div>
                     <div class="card-body p-0"><div id="nfMap"></div></div>
                 </div>
 
                 <!-- Top-Flows -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Top-Flows</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="netflow.top_flows_title">Top-Flows</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
-                            <input type="text" data-filter-for="nfFlowsTable" class="form-control form-control-sm" placeholder="Filter (IP, Port, Service…)">
+                            <input type="text" data-filter-for="nfFlowsTable" class="form-control form-control-sm" data-i18n-placeholder="netflow.filter_placeholder" placeholder="Filter (IP, Port, Service…)">
                             <select id="nfGroupBy" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
-                                <option value="none">Gruppierung: keine (5-Tuple)</option>
-                                <option value="src">Quell-IP</option>
-                                <option value="dst">Ziel-IP</option>
-                                <option value="src_dst">Quelle → Ziel</option>
-                                <option value="port">Port + Protokoll</option>
-                                <option value="proto">Protokoll</option>
+                                <option value="none" data-i18n="netflow.group_none">Gruppierung: keine (5-Tuple)</option>
+                                <option value="src" data-i18n="netflow.group_src">Quell-IP</option>
+                                <option value="dst" data-i18n="netflow.group_dst">Ziel-IP</option>
+                                <option value="src_dst" data-i18n="netflow.group_src_dst">Quelle → Ziel</option>
+                                <option value="port" data-i18n="netflow.group_port">Port + Protokoll</option>
+                                <option value="proto" data-i18n="netflow.group_proto">Protokoll</option>
                             </select>
                             <select id="nfMinBytes" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
-                                <option value="0" selected>Min. Bytes: keine</option>
+                                <option value="0" selected data-i18n="netflow.minbytes_none">Min. Bytes: keine</option>
                                 <option value="1024">≥ 1 KB</option>
                                 <option value="1048576">≥ 1 MB</option>
                                 <option value="10485760">≥ 10 MB</option>
                                 <option value="1073741824">≥ 1 GB</option>
                             </select>
                             <select id="nfFlowLimit" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
-                                <option value="50">50 Zeilen</option>
+                                <option value="50" data-i18n="netflow.limit_rows">50 Zeilen</option>
                                 <option value="200" selected>200</option>
                                 <option value="500">500</option>
                                 <option value="1000">1000</option>
@@ -199,20 +199,20 @@
 <!-- Iface-name editor modal (legacy markup; existing JS opens it) -->
 <div class="modal-overlay" id="ifaceModal">
     <div class="modal" style="max-width: 700px">
-        <h3>Firewall- und Interface-Namen</h3>
-        <p class="admin-hint" style="margin-top: 0.8rem">
+        <h3 data-i18n="netflow.iface_modal_title">Firewall- und Interface-Namen</h3>
+        <p class="admin-hint" style="margin-top: 0.8rem" data-i18n-html="netflow.iface_modal_fw_hint">
             <strong>Firewall-Hostnamen</strong> — pro Zeile: <code>firewall_ip Hostname</code><br>
             Beispiel: <code>10.0.1.1 HQ Firewall</code>
         </p>
         <textarea id="fwAliasText" rows="4" style="width: 100%; background: rgba(15,23,42,0.6); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem"></textarea>
-        <p class="admin-hint" style="margin-top: 1rem">
+        <p class="admin-hint" style="margin-top: 1rem" data-i18n-html="netflow.iface_modal_iface_hint">
             <strong>Interface-Namen</strong> — pro Zeile: <code>firewall_ip iface_idx Name</code><br>
             Beispiel: <code>10.0.1.1 7 WAN</code>. Aktuell beobachtete Indizes stehen in der Tabelle oben.
         </p>
         <textarea id="ifaceMapText" rows="10" style="width: 100%; background: rgba(15,23,42,0.6); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; font-family: monospace; font-size: 0.85rem"></textarea>
         <div class="modal-actions">
-            <button onclick="closeIfaceNameEditor()">Abbrechen</button>
-            <button class="primary" onclick="saveIfaceNames()">Speichern</button>
+            <button onclick="closeIfaceNameEditor()" data-i18n="netflow.cancel">Abbrechen</button>
+            <button class="primary" onclick="saveIfaceNames()" data-i18n="netflow.save">Speichern</button>
         </div>
     </div>
 </div>
@@ -221,18 +221,25 @@
 <div class="modal-overlay" id="osintModal">
     <div class="modal alert-detail-modal">
         <div class="alert-detail-header">
-            <h3 id="osintModalTitle">OSINT-Check</h3>
-            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            <h3 id="osintModalTitle" data-i18n="netflow.osint_title">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" data-i18n-title="common.close" title="Schliessen">×</button>
         </div>
-        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="osintModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
-            <button onclick="closeOsint()">Schliessen</button>
+            <button onclick="reloadOsint()" data-i18n="netflow.osint_recheck">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/osint.de.js"></script>
+    <script src="/i18n/osint.en.js"></script>
+    <script src="/i18n/netflow.de.js"></script>
+    <script src="/i18n/netflow.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>

@@ -5,4 +5,5 @@ COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY index.html admin.html chat.html netflow.html blocked.html agent.html agent-workflow.html firewalls.html firewall-anomalies.html endpoints.html email.html o365.html osint.html stats.html /usr/share/nginx/html/
 COPY css/ /usr/share/nginx/html/css/
 COPY js/ /usr/share/nginx/html/js/
+COPY i18n/ /usr/share/nginx/html/i18n/
 COPY docs/ /usr/share/nginx/html/docs/

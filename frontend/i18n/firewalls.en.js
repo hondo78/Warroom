@@ -1,0 +1,63 @@
+window.I18N = window.I18N || {}; window.I18N.en = window.I18N.en || {};
+window.I18N.en.firewalls = {
+    // header
+    whitelistAutoFill: "Whitelist auto-fill",
+    pageTitle: "🔥 Firewalls — Overview",
+
+    // stat boxes
+    statKnownFirewalls: "Known firewalls",
+    statKnownFirewallsHint: "grouped by name",
+    statWhitelistedIps: "IPs on whitelist",
+    statWhitelistedIpsHint: "protected from self-block",
+    statInterfaces: "Interfaces (∑)",
+    statInterfacesHint: "NetFlow exporter indices",
+    statLogs: "Logs (∑)",
+    statLogsHint: "from firewall_logs",
+
+    // firewall list card
+    firewallList: "Firewall list",
+    filterPlaceholder: "Filter (name, IP, country, city…)",
+    colIpsKnown: "IPs (known)",
+    colLocation: "Location",
+    colInterfaces: "Interfaces",
+    colLogs: "Logs ∑",
+    colLastLog: "Last log",
+    colLastFlow: "Last flow",
+    colWhitelist: "Whitelist",
+    colActions: "Actions",
+
+    // interfaces card
+    interfaces: "Interfaces",
+    colIndex: "Index",
+    colName: "Name",
+    colBytesIn: "Bytes In",
+    colBytesOut: "Bytes Out",
+    colFlowsIn: "Flows In",
+    colFlowsOut: "Flows Out",
+    colLastActive: "Last active",
+
+    // table cell content / labels
+    tipWhitelisted: "whitelisted",
+    tipNotWhitelisted: "not whitelisted",
+    tipWhitelistThisIp: "whitelist this IP",
+    wlAll: "all",
+    wlNone: "none",
+    whitelistAll: "Whitelist all",
+    removeLocation: "Remove location",
+    unnamed: "(unnamed)",
+    whitelist: "Whitelist",
+
+    // empty states
+    emptyFirewalls: "No known firewalls. Configure Sophos syslog (port 5514) or add a location via /index.html.",
+    emptyInterfaces: "No NetFlow interface data in the last 24h.",
+
+    // confirms / alerts
+    confirmWhitelistAll: "Whitelist all {count} IP(s) from \"{name}\"?",
+    confirmDeleteLocation: "Remove firewall location \"{label}\"?\nNote: If the firewall keeps sending syslog/NetFlow, it will reappear via those sources.",
+    whitelistFailed: "Whitelist failed: {error}",
+    interfaceListFailed: "Interface list failed: {error}",
+    removeFailed: "Removal failed: {error}",
+    refreshFailed: "Refresh failed: {error}",
+    whitelistUpdated: "Whitelist updated:\n+ {added} new\n· {refreshed} refreshed\n− {removed} stale auto entries removed",
+    whitelistRescued: "⚠ {count} IPs rescued from blocklist",
+};

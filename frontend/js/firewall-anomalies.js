@@ -6,13 +6,13 @@
 // `axis` drives log vs linear scaling; `color` gives each dimension a stable
 // colour used for the driver chips and chart series.
 const AN_DIMS = [
-    { key: 'volume',  label: 'Volumen (Bytes)',   axis: 'log',    color: '#0dcaf0' },
-    { key: 'ports',   label: 'Ziel-Ports',        axis: 'linear', color: '#ffc107' },
-    { key: 'dst_ips', label: 'Ziel-IPs',          axis: 'linear', color: '#fd7e14' },
-    { key: 'flows',   label: 'Flows',             axis: 'log',    color: '#20c997' },
-    { key: 'packets', label: 'Pakete',            axis: 'log',    color: '#6f42c1' },
-    { key: 'night',   label: 'Tageszeit (Nacht)', axis: 'linear', color: '#0d6efd' },
-    { key: 'country', label: 'Land-Seltenheit',   axis: 'linear', color: '#198754' },
+    { key: 'volume',  label: t('fwAnomalies.dim_volume'),  axis: 'log',    color: '#0dcaf0' },
+    { key: 'ports',   label: t('fwAnomalies.dim_ports'),   axis: 'linear', color: '#ffc107' },
+    { key: 'dst_ips', label: t('fwAnomalies.dim_dst_ips'), axis: 'linear', color: '#fd7e14' },
+    { key: 'flows',   label: t('fwAnomalies.dim_flows'),   axis: 'log',    color: '#20c997' },
+    { key: 'packets', label: t('fwAnomalies.dim_packets'), axis: 'log',    color: '#6f42c1' },
+    { key: 'night',   label: t('fwAnomalies.dim_night'),   axis: 'linear', color: '#0d6efd' },
+    { key: 'country', label: t('fwAnomalies.dim_country'), axis: 'linear', color: '#198754' },
 ];
 const AN_DIM_BY_KEY = Object.fromEntries(AN_DIMS.map(d => [d.key, d]));
 const AN_DIM_BY_LABEL = Object.fromEntries(AN_DIMS.map(d => [d.label, d]));
@@ -79,9 +79,9 @@ function initFilters() {
         const tbody = document.getElementById(input.dataset.filterFor);
         if (!tbody) return;
         input.addEventListener('input', () => {
-            const t = input.value.toLowerCase().trim();
+            const q = input.value.toLowerCase().trim();
             tbody.querySelectorAll(':scope > tr').forEach(tr => {
-                tr.style.display = (!t || tr.textContent.toLowerCase().includes(t)) ? '' : 'none';
+                tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none';
             });
         });
     });
@@ -159,9 +159,9 @@ function driverChips(drivers) {
 function updateDimLabels() {
     const [x, y, z] = _anDims.map(k => AN_DIM_BY_KEY[k]?.label || k);
     const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
-    set('anScatterTitle', `Bubble: ${x} × ${y} · Blasengröße = ${z} · rot = Anomalie`);
-    set('an3dTitle', `3-D-Ansicht — ${x} × ${y} × ${z} (rot = Anomalie)`);
-    set('anDimsText', `${x}, ${y} und ${z}`);
+    set('anScatterTitle', t('fwAnomalies.scatter_title', { x, y, z }));
+    set('an3dTitle', t('fwAnomalies.scatter3d_title', { x, y, z }));
+    set('anDimsText', t('fwAnomalies.dims_text', { x, y, z }));
 }
 
 // Apply the API's contextual dimension labels (e.g. Ziel-IPs ↔ Quell-IPs depending
@@ -188,7 +188,7 @@ async function anomalyRefresh() {
     const ip = (document.getElementById('anIp').value || '').trim();
     const role = document.getElementById('anRole').value || 'src';
     const tbody = document.getElementById('anTable');
-    tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">Analysiere…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">${t('fwAnomalies.analyzing')}</td></tr>`;
     updateDimLabels();
     try {
         const params = new URLSearchParams({ hours, min_flows: minFlows, limit: '80', dims: _anDims.join(','), role });
@@ -204,15 +204,15 @@ async function anomalyRefresh() {
         applyDimMeta(d.available_dimensions);
         updateDimLabels();
         const fi = document.getElementById('anFocusInfo');
-        if (fi) fi.textContent = d.focus?.description ? `Analyse: ${d.focus.description} · ${(d.analyzed || 0).toLocaleString('de-DE')} IPs` : '';
+        if (fi) fi.textContent = d.focus?.description ? t('fwAnomalies.focus_info', { desc: d.focus.description, n: (d.analyzed || 0).toLocaleString('de-DE') }) : '';
         const ipHdr = document.getElementById('anIpHdr');
-        if (ipHdr) ipHdr.textContent = d.focus?.entity === 'dst_ip' ? 'Ziel-IP' : 'Quell-IP';
+        if (ipHdr) ipHdr.textContent = d.focus?.entity === 'dst_ip' ? t('common.dest_ip') : t('fwAnomalies.source_ip');
         const peerHdr = document.getElementById('anPeerHdr');
-        if (peerHdr) peerHdr.textContent = d.focus?.entity === 'dst_ip' ? 'Quell-IP' : 'Ziel-IP';
+        if (peerHdr) peerHdr.textContent = d.focus?.entity === 'dst_ip' ? t('fwAnomalies.source_ip') : t('common.dest_ip');
 
         document.getElementById('anAnalyzed').textContent = (d.analyzed || 0).toLocaleString('de-DE');
         document.getElementById('anAnomalies').textContent = (d.anomaly_count || 0).toLocaleString('de-DE');
-        document.getElementById('anWindow').textContent = `letzte ${d.window_hours} h · NetFlow`;
+        document.getElementById('anWindow').textContent = t('fwAnomalies.window_label', { h: d.window_hours });
         document.getElementById('anThreshold').textContent = (d.params?.threshold ?? '—').toString();
         const top = (d.anomalies || [])[0];
         document.getElementById('anTopScore').textContent = top ? top.score.toFixed(3) : '—';
@@ -222,7 +222,7 @@ async function anomalyRefresh() {
         render3d(d.scatter || []);
         renderTable(d.anomalies || []);
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">Analyse fehlgeschlagen: ${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
     }
 }
 
@@ -259,7 +259,7 @@ function _anRenderRows() {
     if (!tbody) return;
     _anUpdateSortIndicators();
     if (!_anItems.length) {
-        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">Keine NetFlow-Daten im Zeitfenster.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="text-center text-secondary py-3">${t('fwAnomalies.no_netflow_data')}</td></tr>`;
         return;
     }
     const mul = _anSort.dir === 'asc' ? 1 : -1;
@@ -276,15 +276,15 @@ function _anRenderRows() {
         const baseBg = it.is_anomaly ? 'background:rgba(220,53,69,.08);' : '';
         const night = Math.round((it.night_ratio || 0) * 100);
         const country = it.country
-            ? `${escapeHtml(it.country)} <span class="text-secondary" style="font-size:.7rem" title="Seltenheit (höher = ungewöhnlicher)">r${(it.country_rarity ?? 0).toFixed(1)}</span>`
-            : '<span class="text-secondary">intern</span>';
+            ? `${escapeHtml(it.country)} <span class="text-secondary" style="font-size:.7rem" title="${escapeAttr(t('fwAnomalies.rarity_title'))}">r${(it.country_rarity ?? 0).toFixed(1)}</span>`
+            : `<span class="text-secondary">${t('fwAnomalies.internal')}</span>`;
         // Top counterpart + how many more distinct peers there are.
         const more = Math.max(0, (it.distinct_dst_ips || 0) - 1);
         const peer = it.top_peer
             ? `<code style="font-size:.82rem">${escapeHtml(it.top_peer)}</code>` +
-              (more > 0 ? ` <span class="text-secondary" style="font-size:.7rem" title="weitere Gegenstellen">+${more}</span>` : '')
+              (more > 0 ? ` <span class="text-secondary" style="font-size:.7rem" title="${escapeAttr(t('fwAnomalies.more_peers'))}">+${more}</span>` : '')
             : '<span class="text-secondary">—</span>';
-        return `<tr data-ip="${escapeAttr(it.ip)}" style="${baseBg}cursor:pointer" title="Klick: alle Verbindungen anzeigen">
+        return `<tr data-ip="${escapeAttr(it.ip)}" style="${baseBg}cursor:pointer" title="${escapeAttr(t('fwAnomalies.row_click_title'))}">
             <td>${scoreBadge(it.score)}${driverChips(it.drivers)}</td>
             <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${osint}</td>
             <td>${peer}</td>
@@ -295,15 +295,15 @@ function _anRenderRows() {
             <td>${(it.distinct_dst_ips || 0).toLocaleString('de-DE')}</td>
             <td>${night}%</td>
             <td style="white-space:nowrap">${fmtTs(it.last_seen)}</td>
-            <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">blocken</button></td>
+            <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">${t('fwAnomalies.block')}</button></td>
         </tr>`;
     }).join('');
     // Re-apply the active text filter (rows were rebuilt by the sort).
     const f = document.querySelector('input[data-filter-for="anTable"]');
     if (f && f.value.trim()) {
-        const t = f.value.toLowerCase().trim();
+        const q = f.value.toLowerCase().trim();
         tbody.querySelectorAll(':scope > tr').forEach(tr => {
-            tr.style.display = tr.textContent.toLowerCase().includes(t) ? '' : 'none';
+            tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
         });
     }
 }
@@ -331,8 +331,8 @@ function renderScatter(points) {
     for (const p of points) (p.anom ? anom : normal).push(mk(p));
     const data = {
         datasets: [
-            { label: 'normal', data: normal, backgroundColor: 'rgba(120,144,170,.40)' },
-            { label: 'Anomalie', data: anom, backgroundColor: 'rgba(220,53,69,.75)' },
+            { label: t('fwAnomalies.legend_normal'), data: normal, backgroundColor: 'rgba(120,144,170,.40)' },
+            { label: t('fwAnomalies.legend_anomaly'), data: anom, backgroundColor: 'rgba(220,53,69,.75)' },
         ],
     };
     const axisType = d => (d.axis === 'log' ? 'logarithmic' : 'linear');
@@ -373,26 +373,26 @@ function render3d(points) {
     const dx = AN_DIM_BY_KEY[kx], dy = AN_DIM_BY_KEY[ky], dz = AN_DIM_BY_KEY[kz];
     const valOf = (p, k) => (p.vals ? p.vals[k] : 0) || 0;
 
-    const hover = p => `<b>${p.ip}</b><br>Score ${p.score.toFixed(3)}`
+    const hover = p => `<b>${p.ip}</b><br>${t('common.score')} ${p.score.toFixed(3)}`
         + `<br>${dx.label} ${fmtDimVal(kx, valOf(p, kx))}`
         + `<br>${dy.label} ${fmtDimVal(ky, valOf(p, ky))}`
         + `<br>${dz.label} ${fmtDimVal(kz, valOf(p, kz))}`
-        + (p.country ? `<br>Land ${p.country}` : '');
-    const trace = (pts, name, color, size) => ({
+        + (p.country ? `<br>${t('common.country')} ${p.country}` : '');
+    const trace = (pts, name, color, size, isAnom) => ({
         type: 'scatter3d', mode: 'markers', name,
         x: pts.map(p => dimPlotVal(kx, valOf(p, kx))),
         y: pts.map(p => dimPlotVal(ky, valOf(p, ky))),
         z: pts.map(p => dimPlotVal(kz, valOf(p, kz))),
         text: pts.map(hover),
         hoverinfo: 'text',
-        marker: { size, color, opacity: name === 'Anomalie' ? 0.95 : 0.5,
+        marker: { size, color, opacity: isAnom ? 0.95 : 0.5,
                   line: { width: 0 } },
     });
     const norm = points.filter(p => !p.anom);
     const anom = points.filter(p => p.anom);
     const data = [
-        trace(norm, 'normal', 'rgba(120,144,170,.55)', 3),
-        trace(anom, 'Anomalie', 'rgba(220,53,69,.95)', 5),
+        trace(norm, t('fwAnomalies.legend_normal'), 'rgba(120,144,170,.55)', 3, false),
+        trace(anom, t('fwAnomalies.legend_anomaly'), 'rgba(220,53,69,.95)', 5, true),
     ];
     const ax = (dim) => {
         const a = { title: { text: dim.label }, gridcolor: 'rgba(148,163,184,.25)',
@@ -423,20 +423,20 @@ function render3d(points) {
 }
 
 async function anomBlockIp(ip, btn) {
-    if (!ip || !confirm(`IP ${ip} auf die Blocklist setzen?`)) return;
+    if (!ip || !confirm(t('fwAnomalies.block_confirm', { ip }))) return;
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
         const r = await fetch('/api/firewall/block-ip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip, comment: 'FW-Anomalie-Dashboard (Isolation Forest / NetFlow)' }),
+            body: JSON.stringify({ ip, comment: t('fwAnomalies.block_comment') }),
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
-        if (btn) { btn.textContent = '✓ geblockt'; btn.classList.add('text-success'); }
+        if (btn) { btn.textContent = t('fwAnomalies.block_done'); btn.classList.add('text-success'); }
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
-        if (btn) { btn.disabled = false; btn.textContent = 'blocken'; }
+        alert(t('fwAnomalies.block_failed') + ': ' + err.message);
+        if (btn) { btn.disabled = false; btn.textContent = t('fwAnomalies.block'); }
     }
 }
 
@@ -451,9 +451,9 @@ function closeConn() {
 // Time-window buttons. Busy IPs (many peers) can time out on large windows, so we
 // default to 7 days and let the user widen/narrow it.
 function connDayBar(days) {
-    const opts = [[1, '24 h'], [7, '7 Tage'], [30, '30 Tage']];
+    const opts = [[1, t('fwAnomalies.win_24h')], [7, t('fwAnomalies.win_7d')], [30, t('fwAnomalies.win_30d')]];
     return '<div style="margin:0 0 .75rem;display:flex;gap:.4rem;align-items:center">'
-        + '<span class="text-secondary" style="font-size:.78rem">Zeitfenster:</span>'
+        + `<span class="text-secondary" style="font-size:.78rem">${t('fwAnomalies.timeframe')}:</span>`
         + opts.map(([v, l]) => `<button class="btn btn-sm ${v === days ? 'btn-primary' : 'btn-outline-secondary'}" onclick="anShowConnections(_connIp, ${v})">${l}</button>`).join('')
         + '</div>';
 }
@@ -463,8 +463,8 @@ async function anShowConnections(ip, days = 7) {
     _connIp = ip;
     const modal = document.getElementById('connModal');
     const body = document.getElementById('connModalBody');
-    document.getElementById('connModalTitle').textContent = `Verbindungen · ${ip}`;
-    body.innerHTML = connDayBar(days) + '<div class="text-secondary py-3">Wird geladen…</div>';
+    document.getElementById('connModalTitle').textContent = `${t('fwAnomalies.conn_title')} · ${ip}`;
+    body.innerHTML = connDayBar(days) + `<div class="text-secondary py-3">${t('common.loading')}</div>`;
     modal.classList.add('active');
     try {
         const r = await fetch(`/api/ip/${encodeURIComponent(ip)}/connections?days=${days}`);
@@ -474,14 +474,14 @@ async function anShowConnections(ip, days = 7) {
         }
         body.innerHTML = connDayBar(days) + renderConnBody(await r.json());
     } catch (err) {
-        body.innerHTML = connDayBar(days) + `<div class="detail-error">Konnte Verbindungen nicht laden: ${escapeHtml(err.message)}</div>`;
+        body.innerHTML = connDayBar(days) + `<div class="detail-error">${t('fwAnomalies.conn_load_failed')}: ${escapeHtml(err.message)}</div>`;
     }
 }
 
 // One NetFlow direction → a table (peer, country, port, proto, volume, flows, packets, seen).
 function connNfTable(side, peerLabel) {
     const rows = (side && side.connections) || [];
-    if (!rows.length) return '<p class="text-secondary" style="margin:.25rem 0 1rem">Keine NetFlow-Verbindungen.</p>';
+    if (!rows.length) return `<p class="text-secondary" style="margin:.25rem 0 1rem">${t('fwAnomalies.no_netflow_conns')}</p>`;
     const trs = rows.map(c => `<tr>
         <td><code style="font-size:.8rem">${escapeHtml(c.peer || '')}</code></td>
         <td>${c.country ? escapeHtml(c.country) : '<span class="text-secondary">—</span>'}</td>
@@ -493,11 +493,11 @@ function connNfTable(side, peerLabel) {
         <td style="white-space:nowrap">${fmtTs(c.first_seen)}</td>
         <td style="white-space:nowrap">${fmtTs(c.last_seen)}</td>
     </tr>`).join('');
-    const trunc = side.truncated ? ' <span class="text-secondary" style="font-size:.72rem">(gekürzt — nur Top nach Volumen)</span>' : '';
+    const trunc = side.truncated ? ` <span class="text-secondary" style="font-size:.72rem">${t('fwAnomalies.truncated')}</span>` : '';
     return `<div class="table-scroll"><table class="table table-sm table-hover align-middle">
         <thead><tr>
-            <th>${peerLabel}</th><th>Land</th><th>Port</th><th>Proto</th>
-            <th>Volumen</th><th>Flows</th><th>Pakete</th><th>Erstmals</th><th>Zuletzt</th>
+            <th>${peerLabel}</th><th>${t('common.country')}</th><th>${t('fwAnomalies.port')}</th><th>${t('fwAnomalies.proto')}</th>
+            <th>${t('fwAnomalies.col_volume')}</th><th>Flows</th><th>${t('fwAnomalies.packets')}</th><th>${t('fwAnomalies.first_seen')}</th><th>${t('fwAnomalies.col_last_seen')}</th>
         </tr></thead><tbody>${trs}</tbody></table></div>${trunc ? `<div>${trunc}</div>` : ''}`;
 }
 
@@ -516,37 +516,37 @@ function connFwTable(side, peerLabel) {
     </tr>`).join('');
     return `<div class="table-scroll"><table class="table table-sm table-hover align-middle">
         <thead><tr>
-            <th>${peerLabel}</th><th>Land</th><th>Port</th><th>Proto</th><th>Aktion</th><th>Versuche</th><th>Zuletzt</th>
+            <th>${peerLabel}</th><th>${t('common.country')}</th><th>${t('fwAnomalies.port')}</th><th>${t('fwAnomalies.proto')}</th><th>${t('common.action')}</th><th>${t('fwAnomalies.attempts')}</th><th>${t('fwAnomalies.col_last_seen')}</th>
         </tr></thead><tbody>${trs}</tbody></table></div>`;
 }
 
 function connSummary(side) {
     if (!side) return '';
     return `<span class="text-secondary" style="font-size:.78rem">`
-        + `${(side.peers || 0).toLocaleString('de-DE')} Gegenstellen · ${fmtBytes(side.bytes || 0)} · ${(side.flows || 0).toLocaleString('de-DE')} Flows</span>`;
+        + `${(side.peers || 0).toLocaleString('de-DE')} ${t('fwAnomalies.peers')} · ${fmtBytes(side.bytes || 0)} · ${(side.flows || 0).toLocaleString('de-DE')} Flows</span>`;
 }
 
 function renderConnBody(d) {
     const parts = [];
-    parts.push(`<p class="admin-hint" style="margin:0 0 .75rem">Alle bekannten Verbindungen der letzten <strong>${d.days} Tage</strong> für <code>${escapeHtml(d.ip)}</code> aus dem NetFlow-Ledger, plus geblockte Firewall-Versuche.</p>`);
+    parts.push(`<p class="admin-hint" style="margin:0 0 .75rem">${t('fwAnomalies.conn_intro', { days: d.days, ip: escapeHtml(d.ip) })}</p>`);
 
     // NetFlow outbound (IP as source → peers) and inbound (peers → IP).
     if (d.netflow_available === false) {
-        parts.push(`<div class="detail-error" style="margin-bottom:1rem">NetFlow nicht verfügbar: ${escapeHtml(d.netflow_reason || 'Zeitüberschreitung')}</div>`);
+        parts.push(`<div class="detail-error" style="margin-bottom:1rem">${t('fwAnomalies.netflow_unavailable')}: ${escapeHtml(d.netflow_reason || t('fwAnomalies.timeout'))}</div>`);
     }
-    parts.push(`<h4 style="margin:.25rem 0">Ausgehend <small class="text-secondary">(${escapeHtml(d.ip)} → Ziel)</small> ${connSummary(d.outbound)}</h4>`);
-    parts.push(connNfTable(d.outbound, 'Ziel-IP'));
-    parts.push(`<h4 style="margin:1rem 0 .25rem">Eingehend <small class="text-secondary">(Quelle → ${escapeHtml(d.ip)})</small> ${connSummary(d.inbound)}</h4>`);
-    parts.push(connNfTable(d.inbound, 'Quell-IP'));
+    parts.push(`<h4 style="margin:.25rem 0">${t('fwAnomalies.outbound')} <small class="text-secondary">(${escapeHtml(d.ip)} → ${t('fwAnomalies.dest')})</small> ${connSummary(d.outbound)}</h4>`);
+    parts.push(connNfTable(d.outbound, t('common.dest_ip')));
+    parts.push(`<h4 style="margin:1rem 0 .25rem">${t('fwAnomalies.inbound')} <small class="text-secondary">(${t('fwAnomalies.source')} → ${escapeHtml(d.ip)})</small> ${connSummary(d.inbound)}</h4>`);
+    parts.push(connNfTable(d.inbound, t('fwAnomalies.source_ip')));
 
     // Blocked firewall attempts (only shown when present).
     const fb = d.firewall_blocked || {};
-    const fbOut = connFwTable(fb.outbound, 'Ziel-IP');
-    const fbIn = connFwTable(fb.inbound, 'Quell-IP');
+    const fbOut = connFwTable(fb.outbound, t('common.dest_ip'));
+    const fbIn = connFwTable(fb.inbound, t('fwAnomalies.source_ip'));
     if (fbOut || fbIn) {
-        parts.push('<h4 style="margin:1.25rem 0 .25rem">Geblockte Firewall-Versuche</h4>');
-        if (fbOut) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.25rem 0">Ausgehend (${escapeHtml(d.ip)} → Ziel)</div>`); parts.push(fbOut); }
-        if (fbIn) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.5rem 0 .25rem">Eingehend (Quelle → ${escapeHtml(d.ip)})</div>`); parts.push(fbIn); }
+        parts.push(`<h4 style="margin:1.25rem 0 .25rem">${t('fwAnomalies.blocked_fw_attempts')}</h4>`);
+        if (fbOut) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.25rem 0">${t('fwAnomalies.outbound')} (${escapeHtml(d.ip)} → ${t('fwAnomalies.dest')})</div>`); parts.push(fbOut); }
+        if (fbIn) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.5rem 0 .25rem">${t('fwAnomalies.inbound')} (${t('fwAnomalies.source')} → ${escapeHtml(d.ip)})</div>`); parts.push(fbIn); }
     }
     return parts.join('');
 }

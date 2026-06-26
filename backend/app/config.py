@@ -117,6 +117,10 @@ class Settings(BaseSettings):
     # for servers/models that don't support response_format (then the tolerant
     # parser handles plain JSON / reasoning output).
     agent_structured_output: bool = True
+    # Language for the agent's own output: LLM system prompts (de/en defaults),
+    # the analyst chat persona, and Telegram notifications. Admin-overridden
+    # prompts always win regardless of this. "en" or "de".
+    agent_language: str = "en"
     # Master switch: if true, non-destructive recommendations (acknowledge)
     # execute automatically; otherwise they stay pending. Block actions ALWAYS
     # require human approval regardless of this switch. Actions are chosen purely

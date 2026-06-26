@@ -53,7 +53,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">Admin</h3>
+                <h3 class="mb-0" data-i18n="admin.pageTitle">Admin</h3>
             </div>
         </div>
 
@@ -65,21 +65,21 @@
                 <!-- Sophos Central -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Sophos Central API</h3>
-                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('sophos')"><i class="bi bi-plug"></i> Verbindung testen</button>
+                        <h3 class="card-title mb-0" data-i18n="admin.sophosTitle">Sophos Central API</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('sophos')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">OAuth2-Credentials aus dem Sophos Central API Token Management. Tenant-ID wird nach Login automatisch erkannt, falls leer.</p>
+                        <p class="admin-hint" data-i18n="admin.sophosHint">OAuth2-Credentials aus dem Sophos Central API Token Management. Tenant-ID wird nach Login automatisch erkannt, falls leer.</p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Client ID</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientId">Client ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_client_id" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Client Secret</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="sophos_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Tenant ID (optional)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientSecret">Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="sophos_client_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.tenantIdOptional">Tenant ID (optional)</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_tenant_id" autocomplete="off"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('sophos')">Sophos-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('sophos')" data-i18n="admin.saveSophos">Sophos-Settings speichern</button>
                         </div>
                     </div>
                 </div>
@@ -87,11 +87,11 @@
                 <!-- Microsoft 365 -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Microsoft 365 Audit-Log</h3>
-                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('o365')"><i class="bi bi-plug"></i> Verbindung testen</button>
+                        <h3 class="card-title mb-0" data-i18n="admin.o365Title">Microsoft 365 Audit-Log</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('o365')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.o365Hint">
                             Entra-ID-App-Registrierung mit Application-Berechtigung <code>ActivityFeed.Read</code>
                             auf den <em>Office 365 Management APIs</em> (Admin-Consent erforderlich).
                             Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche
@@ -99,15 +99,15 @@
                             <a href="/o365.html" class="osint-link">Microsoft 365</a>.
                         </p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Tenant ID</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.tenantId">Tenant ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_tenant_id" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Client ID</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientId">Client ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_client_id" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Client Secret</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="o365_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientSecret">Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="o365_client_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('o365')">M365-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('o365')" data-i18n="admin.saveO365">M365-Settings speichern</button>
                         </div>
                     </div>
                 </div>
@@ -115,14 +115,14 @@
                 <!-- Entra ID conditional-access blocking -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Entra ID — Login-Blocking (Conditional Access)</h3>
+                        <h3 class="card-title mb-0" data-i18n="admin.entraTitle">Entra ID — Login-Blocking (Conditional Access)</h3>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('entra')"><i class="bi bi-plug"></i> Verbindung testen</button>
-                            <button class="btn btn-outline-warning btn-sm" onclick="entraSyncNow()"><i class="bi bi-arrow-repeat"></i> Jetzt syncen</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('entra')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="entraSyncNow()"><i class="bi bi-arrow-repeat"></i> <span data-i18n="admin.syncNow">Jetzt syncen</span></button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.entraHint">
                             Schiebt geblockte IPs in eine Entra <em>Named Location</em>, die an eine
                             Conditional-Access-Policy gebunden ist — M365-Logins von diesen IPs werden
                             dann direkt bei Microsoft abgewiesen. Nutzt dieselbe App-Registrierung wie
@@ -133,25 +133,25 @@
                             angelegt — Erzwingung musst du bewusst im Entra-Portal aktivieren.
                         </p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Named-Location-Sync aktiv</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.namedLocationSyncActive">Named-Location-Sync aktiv</label></div>
                             <div class="col-md-8"><input type="checkbox" data-key="entra_block_enabled" data-bool="1"></div>
-                            <div class="col-md-4"><label class="form-label">Sync-Intervall (Minuten)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.syncIntervalMinutes">Sync-Intervall (Minuten)</label></div>
                             <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="entra_block_sync_interval_minutes"></div>
-                            <div class="col-md-4"><label class="form-label">Ausgeschlossene Benutzer (Break-Glass)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.excludedUsers">Ausgeschlossene Benutzer (Break-Glass)</label></div>
                             <div class="col-md-8">
-                                <input type="text" class="form-control form-control-sm" data-key="entra_ca_exclude_users" placeholder="notfall@deinedomain.at, weitere-objektid, …" autocomplete="off">
-                                <small class="admin-hint">Pflicht für die <em>automatische</em> Policy-Anlage — UPN(s) oder Objekt-ID(s), kommagetrennt. Diese Konten werden nie geblockt (Schutz gegen Selbst-Aussperrung).</small>
+                                <input type="text" class="form-control form-control-sm" data-key="entra_ca_exclude_users" data-i18n-placeholder="admin.excludedUsersPlaceholder" placeholder="notfall@deinedomain.at, weitere-objektid, …" autocomplete="off">
+                                <small class="admin-hint" data-i18n-html="admin.excludedUsersHint">Pflicht für die <em>automatische</em> Policy-Anlage — UPN(s) oder Objekt-ID(s), kommagetrennt. Diese Konten werden nie geblockt (Schutz gegen Selbst-Aussperrung).</small>
                             </div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('entra')">Entra-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('entra')" data-i18n="admin.saveEntra">Entra-Settings speichern</button>
                         </div>
 
                         <hr>
                         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
                             <div>
-                                <div class="form-label mb-1">Conditional-Access-Policy (Erzwingung)</div>
-                                <div class="admin-hint mb-0" id="caPolicyStatus">Status wird geladen…</div>
+                                <div class="form-label mb-1" data-i18n="admin.caPolicyEnforcement">Conditional-Access-Policy (Erzwingung)</div>
+                                <div class="admin-hint mb-0" id="caPolicyStatus" data-i18n="admin.statusLoading">Status wird geladen…</div>
                             </div>
                             <div class="form-check form-switch fs-5">
                                 <input class="form-check-input" type="checkbox" role="switch" id="caPolicyToggle" onchange="toggleCaPolicy(this)" disabled>
@@ -164,11 +164,11 @@
                 <!-- Telegram approvals -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Telegram — Benachrichtigungen & Approvals</h3>
-                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('telegram')"><i class="bi bi-plug"></i> Testnachricht senden</button>
+                        <h3 class="card-title mb-0" data-i18n="admin.telegramTitle">Telegram — Benachrichtigungen & Approvals</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('telegram')"><i class="bi bi-plug"></i> <span data-i18n="admin.sendTestMessage">Testnachricht senden</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.telegramHint">
                             Schickt jede offene Agent-Entscheidung als Nachricht mit
                             <strong>✅ Approve / ❌ Reject</strong>-Buttons an einen Telegram-Chat;
                             die Entscheidung wird direkt aus Telegram ausgeführt (Long-Polling, kein
@@ -177,26 +177,26 @@
                             Bot zuerst einmal anschreiben/zur Gruppe hinzufügen.
                         </p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Aktiviert</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.enabled">Aktiviert</label></div>
                             <div class="col-md-8"><input type="checkbox" data-key="telegram_enabled" data-bool="1"></div>
-                            <div class="col-md-4"><label class="form-label">Bot Token</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="telegram_bot_token" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Chat ID</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.botToken">Bot Token</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="telegram_bot_token" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.chatId">Chat ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="telegram_chat_id" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Poll-Intervall (Sek.)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.pollIntervalSeconds">Poll-Intervall (Sek.)</label></div>
                             <div class="col-md-8"><input type="number" min="2" class="form-control form-control-sm" data-key="telegram_poll_interval_seconds"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('telegram')">Telegram-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('telegram')" data-i18n="admin.saveTelegram">Telegram-Settings speichern</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Microsoft Teams command channel -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Microsoft Teams — Befehlskanal</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.teamsTitle">Microsoft Teams — Befehlskanal</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.teamsHint">
                             Erlaubt Befehle aus Teams (blocken, isolieren, Quarantäne, OSINT, Statistik) —
                             dieselbe KI wie im <a href="/chat.html" class="osint-link">KI-Chat</a>.
                             In Teams einen <strong>Outgoing Webhook</strong> anlegen (Team → … → Verwalten →
@@ -205,13 +205,13 @@
                             Der Bot antwortet dann auf <code>@Botname &lt;befehl&gt;</code>.
                         </p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Outgoing-Webhook HMAC-Secret</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="teams_outgoing_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Incoming-Webhook URL (Benachrichtigungen, optional)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.outgoingWebhookSecret">Outgoing-Webhook HMAC-Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="teams_outgoing_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.incomingWebhookUrl">Incoming-Webhook URL (Benachrichtigungen, optional)</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="teams_incoming_webhook" placeholder="https://outlook.office.com/webhook/…" autocomplete="off"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('teams')">Teams-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('teams')" data-i18n="admin.saveTeams">Teams-Settings speichern</button>
                         </div>
                     </div>
                 </div>
@@ -219,28 +219,28 @@
                 <!-- Analyst persona (free chat) -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">KI-Analyst — Persona (System-Prompt)</h3>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="resetAnalystPersona()"><i class="bi bi-arrow-counterclockwise"></i> Standard laden</button>
+                        <h3 class="card-title mb-0" data-i18n="admin.analystTitle">KI-Analyst — Persona (System-Prompt)</h3>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="resetAnalystPersona()"><i class="bi bi-arrow-counterclockwise"></i> <span data-i18n="admin.loadDefault">Standard laden</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.analystHint">
                             System-Prompt für den <strong>freien Chat</strong> mit dem LLM (über
                             <a href="/chat.html" class="osint-link">KI-Chat</a>, Teams und Telegram).
                             Nicht erkannte Befehle werden als Gespräch mit dieser Analysten-Persona
                             beantwortet. Leer = mitgelieferter Standard-Prompt. Benötigt einen
                             aktivierten Agenten (LLM-Endpoint).
                         </p>
-                        <textarea class="form-control form-control-sm" rows="8" data-key="analyst_system_prompt" placeholder="Leer lassen für die Standard-Analyst-Persona…" style="font-family:monospace;font-size:.8rem"></textarea>
+                        <textarea class="form-control form-control-sm" rows="8" data-key="analyst_system_prompt" data-i18n-placeholder="admin.analystPlaceholder" placeholder="Leer lassen für die Standard-Analyst-Persona…" style="font-family:monospace;font-size:.8rem"></textarea>
                         <div class="form-check form-switch mt-3">
                             <input class="form-check-input" type="checkbox" role="switch" id="chat_sql_enabled" data-key="chat_sql_enabled">
-                            <label class="form-check-label" for="chat_sql_enabled">
+                            <label class="form-check-label" for="chat_sql_enabled" data-i18n-html="admin.chatSqlLabel">
                                 <strong>Datenbank-Lesezugriff</strong> — der Chat darf read-only SQL (nur SELECT)
                                 gegen Postgres ausführen, um Datenfragen mit echten Werten zu beantworten.
                                 <span class="text-secondary">app_settings (Secrets) bleibt gesperrt.</span>
                             </label>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('analyst')">Persona speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('analyst')" data-i18n="admin.savePersona">Persona speichern</button>
                         </div>
                     </div>
                 </div>
@@ -248,60 +248,60 @@
                 <!-- IOC-Auslieferung an die Firewall -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">IOC-Auslieferung an die Firewall</h3>
+                        <h3 class="card-title mb-0" data-i18n="admin.iocTitle">IOC-Auslieferung an die Firewall</h3>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-outline-info btn-sm" onclick="syncMdrFeed()"><i class="bi bi-arrow-repeat"></i> MDR-Feed jetzt pushen/testen</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="verifyMdrFeed()"><i class="bi bi-check2-circle"></i> Letzten Push verifizieren</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="syncMdrFeed()"><i class="bi bi-arrow-repeat"></i> <span data-i18n="admin.mdrPushTest">MDR-Feed jetzt pushen/testen</span></button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="verifyMdrFeed()"><i class="bi bi-check2-circle"></i> <span data-i18n="admin.verifyLastPush">Letzten Push verifizieren</span></button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.iocHint">
                             Zwei voneinander unabhängige Wege, die Blocklisten an die Firewall zu bringen — beide können gleichzeitig aktiv sein.
                             Pflege der Listen siehe <a href="/blocked.html" class="osint-link">Blocklist-Seite</a>.
                         </p>
 
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">1) Threat Feeds (Pull, TXT)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.threatFeedsPull">1) Threat Feeds (Pull, TXT)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="firewall_threat_feed_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.threatFeedsPullHint">
                                     Die Firewall holt die Blocklisten als TXT-Feeds (ein Eintrag pro Zeile) selbst ab — als Third-Party-Threat-Feed konfiguriert, mit <code>X-API-Key</code>-Header.
                                     Aus ⇒ die Feeds liefern einen leeren Body (eine pollende Firewall leert damit ihre Liste).
                                 </small>
                                 <div class="admin-readonly mt-2">
-                                    <div><span class="ro-label">IP-Feed:</span> <code id="iocFeedUrl">/ioc_IP</code></div>
-                                    <div><span class="ro-label">Domain-Feed:</span> <code id="iocFeedDomainUrl">/ioc_domain</code></div>
-                                    <div><span class="ro-label">URL-Feed:</span> <code id="iocFeedUrlUrl">/ioc_url</code></div>
+                                    <div><span class="ro-label" data-i18n="admin.ipFeed">IP-Feed:</span> <code id="iocFeedUrl">/ioc_IP</code></div>
+                                    <div><span class="ro-label" data-i18n="admin.domainFeed">Domain-Feed:</span> <code id="iocFeedDomainUrl">/ioc_domain</code></div>
+                                    <div><span class="ro-label" data-i18n="admin.urlFeed">URL-Feed:</span> <code id="iocFeedUrlUrl">/ioc_url</code></div>
                                 </div>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">2) MDR Threat Feed (Push, API)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrThreatFeedPush">2) MDR Threat Feed (Push, API)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="firewall_mdr_feed_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.mdrThreatFeedPushHint">
                                     Warroom pusht die Blocklisten aktiv über die Sophos-Central-Firewall-API in den MDR-Threat-Feed der Firewall
                                     (<code>POST /firewall/v1/firewalls/{id}/mdr-threat-feed/indicators</code>). Nutzt die oben konfigurierten Sophos-Central-Zugangsdaten.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">MDR: Firewall-IDs (optional)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrFirewallIds">MDR: Firewall-IDs (optional)</label></div>
                             <div class="col-md-8">
-                                <input type="text" class="form-control form-control-sm" data-key="firewall_mdr_feed_firewall_ids" placeholder="leer = alle Central-verwalteten Firewalls; sonst kommagetrennte IDs" autocomplete="off">
-                                <small class="admin-hint">Leer lassen, um an alle von Sophos Central gemeldeten Firewalls zu pushen.</small>
+                                <input type="text" class="form-control form-control-sm" data-key="firewall_mdr_feed_firewall_ids" data-i18n-placeholder="admin.mdrFirewallIdsPlaceholder" placeholder="leer = alle Central-verwalteten Firewalls; sonst kommagetrennte IDs" autocomplete="off">
+                                <small class="admin-hint" data-i18n="admin.mdrFirewallIdsHint">Leer lassen, um an alle von Sophos Central gemeldeten Firewalls zu pushen.</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">MDR: Sync-Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrSyncIntervalSeconds">MDR: Sync-Intervall (Sekunden)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="firewall_mdr_feed_sync_interval_seconds" min="30" max="86400" placeholder="300">
                             </div>
                         </div>
 
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallFeed')">IOC-Auslieferung speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallFeed')" data-i18n="admin.saveIoc">IOC-Auslieferung speichern</button>
                         </div>
                     </div>
                 </div>
@@ -309,39 +309,39 @@
                 <!-- GeoIP / OSINT -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">GeoIP &amp; OSINT-Quellen</h3>
-                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('abuseipdb')"><i class="bi bi-plug"></i> AbuseIPDB testen</button>
+                        <h3 class="card-title mb-0" data-i18n="admin.geoipTitle">GeoIP &amp; OSINT-Quellen</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('abuseipdb')"><i class="bi bi-plug"></i> <span data-i18n="admin.testAbuseipdb">AbuseIPDB testen</span></button>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">API-Keys für GeoIP-Anreicherung und OSINT-Lookups. GreyNoise Community + ipinfo brauchen keinen Key.</p>
+                        <p class="admin-hint" data-i18n="admin.geoipHint">API-Keys für GeoIP-Anreicherung und OSINT-Lookups. GreyNoise Community + ipinfo brauchen keinen Key.</p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">MaxMind License Key</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="maxmind_license_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">AbuseIPDB API Key</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="abuseipdb_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">VirusTotal API Key</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="virustotal_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Shodan API Key</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="shodan_api_key" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Shodan: Auto-Abfrage bei JEDEM OSINT-Lauf</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.maxmindLicenseKey">MaxMind License Key</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="maxmind_license_key" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.abuseipdbApiKey">AbuseIPDB API Key</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="abuseipdb_api_key" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.virustotalApiKey">VirusTotal API Key</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="virustotal_api_key" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.shodanApiKey">Shodan API Key</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="shodan_api_key" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.shodanAutoEvery">Shodan: Auto-Abfrage bei JEDEM OSINT-Lauf</label></div>
                             <div class="col-md-8">
                                 <input type="checkbox" data-key="shodan_auto_every_lookup" data-bool="1">
-                                <small class="admin-hint">Aktiviert → jede OSINT-IP-Abfrage fragt zusätzlich Shodan ab (verbraucht jedes Mal ein Credit). Aus → Shodan bleibt credit-sparend (nur manuell + die Ausnahme unten).</small>
+                                <small class="admin-hint" data-i18n="admin.shodanAutoEveryHint">Aktiviert → jede OSINT-IP-Abfrage fragt zusätzlich Shodan ab (verbraucht jedes Mal ein Credit). Aus → Shodan bleibt credit-sparend (nur manuell + die Ausnahme unten).</small>
                             </div>
-                            <div class="col-md-4"><label class="form-label">Shodan: Auto-Abfrage bei schädlicher IP</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.shodanAutoMalicious">Shodan: Auto-Abfrage bei schädlicher IP</label></div>
                             <div class="col-md-8">
                                 <input type="checkbox" data-key="shodan_auto_on_malicious" data-bool="1">
-                                <small class="admin-hint">Shodan-Credits sind knapp: Abfragen nur manuell (OSINT-Button/Triage). Aktiviert → automatische Agent-Loops dürfen Shodan zusätzlich bei klar schädlichen IPs abfragen.</small>
+                                <small class="admin-hint" data-i18n="admin.shodanAutoMaliciousHint">Shodan-Credits sind knapp: Abfragen nur manuell (OSINT-Button/Triage). Aktiviert → automatische Agent-Loops dürfen Shodan zusätzlich bei klar schädlichen IPs abfragen.</small>
                             </div>
-                            <div class="col-md-4"><label class="form-label">Schwelle „schädlich" (AbuseIPDB %)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.maliciousThreshold">Schwelle „schädlich" (AbuseIPDB %)</label></div>
                             <div class="col-md-8"><input type="number" min="0" max="100" class="form-control form-control-sm" data-key="shodan_auto_abuse_threshold"></div>
-                            <div class="col-md-4"><label class="form-label">Sophos Intelix Client ID</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.intelixClientId">Sophos Intelix Client ID</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_intelix_client_id" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Sophos Intelix Client Secret</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="sophos_intelix_client_secret" data-secret="1" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.intelixClientSecret">Sophos Intelix Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="sophos_intelix_client_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('geoip')">OSINT-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('geoip')" data-i18n="admin.saveOsint">OSINT-Settings speichern</button>
                         </div>
                     </div>
                 </div>
@@ -349,44 +349,44 @@
                 <!-- OSINT-Provider Quota Limits -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">OSINT-Provider — Quota-Limits</h3>
-                        <a href="/stats.html" class="btn btn-outline-info btn-sm"><i class="bi bi-bar-chart"></i> Statistik anzeigen</a>
+                        <h3 class="card-title mb-0" data-i18n="admin.quotaTitle">OSINT-Provider — Quota-Limits</h3>
+                        <a href="/stats.html" class="btn btn-outline-info btn-sm"><i class="bi bi-bar-chart"></i> <span data-i18n="admin.showStatistics">Statistik anzeigen</span></a>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">Hinterlege hier dein vertragliches Tageslimit und Monatslimit pro Provider. <code>/stats.html</code> nutzt diese Werte für die Auslastungs-Balken und Warn-Badges. <strong>0</strong> = keine Begrenzung (Provider ignoriert dieses Fenster). Defaults entsprechen den Free-Tiers.</p>
+                        <p class="admin-hint" data-i18n-html="admin.quotaHint">Hinterlege hier dein vertragliches Tageslimit und Monatslimit pro Provider. <code>/stats.html</code> nutzt diese Werte für die Auslastungs-Balken und Warn-Badges. <strong>0</strong> = keine Begrenzung (Provider ignoriert dieses Fenster). Defaults entsprechen den Free-Tiers.</p>
                         <div class="row g-2">
-                            <div class="col-md-3"><label class="form-label">AbuseIPDB · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.abuseipdbDay">AbuseIPDB · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_abuseipdb_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">AbuseIPDB · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.abuseipdbMonth">AbuseIPDB · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_abuseipdb_monthly_limit"></div>
 
-                            <div class="col-md-3"><label class="form-label">VirusTotal · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.virustotalDay">VirusTotal · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_virustotal_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">VirusTotal · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.virustotalMonth">VirusTotal · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_virustotal_monthly_limit"></div>
 
-                            <div class="col-md-3"><label class="form-label">Shodan · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.shodanDay">Shodan · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_shodan_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">Shodan · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.shodanMonth">Shodan · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_shodan_monthly_limit"></div>
 
-                            <div class="col-md-3"><label class="form-label">GreyNoise · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.greynoiseDay">GreyNoise · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_greynoise_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">GreyNoise · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.greynoiseMonth">GreyNoise · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_greynoise_monthly_limit"></div>
 
-                            <div class="col-md-3"><label class="form-label">Sophos Intelix · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.intelixDay">Sophos Intelix · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_intelix_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">Sophos Intelix · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.intelixMonth">Sophos Intelix · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_intelix_monthly_limit"></div>
 
-                            <div class="col-md-3"><label class="form-label">ip-api.com · Tag</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.ipapiDay">ip-api.com · Tag</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_ipinfo_daily_limit"></div>
-                            <div class="col-md-3"><label class="form-label">ip-api.com · Monat</label></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="admin.ipapiMonth">ip-api.com · Monat</label></div>
                             <div class="col-md-3"><input type="number" min="0" class="form-control form-control-sm" data-key="osint_ipinfo_monthly_limit"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('osintQuota')">Quota-Limits speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('osintQuota')" data-i18n="admin.saveQuota">Quota-Limits speichern</button>
                         </div>
                     </div>
                 </div>
@@ -394,233 +394,242 @@
                 <!-- KI-Agent -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">🤖 KI-Agent (Alert-Analyse)</h3>
+                        <h3 class="card-title mb-0" data-i18n="admin.agentTitle">🤖 KI-Agent (Alert-Analyse)</h3>
                         <div class="d-flex gap-2">
-                            <button class="btn btn-outline-info btn-sm" onclick="loadAgentModels()"><i class="bi bi-arrow-clockwise"></i> Modelle laden</button>
-                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('agent')"><i class="bi bi-plug"></i> Verbindung testen</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNow()"><i class="bi bi-play"></i> Jetzt analysieren</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="loadAgentModels()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="admin.loadModels">Modelle laden</span></button>
+                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('agent')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="agentRunNow()"><i class="bi bi-play"></i> <span data-i18n="admin.analyzeNow">Jetzt analysieren</span></button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <p class="admin-hint">
+                        <p class="admin-hint" data-i18n-html="admin.agentHint">
                             Der Agent zieht periodisch neue Alarme heran, ruft ein LLM (OpenAI-kompatibel — LMStudio, Ollama, vLLM, OpenAI) und schlägt eine Aktion vor.
                             Empfehlungen landen als <em>pending</em> in der Dashboard-Liste, bis sie ein Mensch freigibt — sofern Auto-Execute aus ist.
                         </p>
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Agent aktiv</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.agentActive">Agent aktiv</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_enabled" data-bool="1">
                                 </div>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Provider</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.provider">Provider</label></div>
                             <div class="col-md-8">
                                 <select class="form-select form-select-sm" data-key="agent_provider">
-                                    <option value="lmstudio">LMStudio (lokal)</option>
-                                    <option value="ollama">Ollama (lokal)</option>
-                                    <option value="openai">OpenAI / kompatibel</option>
+                                    <option value="lmstudio" data-i18n="admin.providerLmstudio">LMStudio (lokal)</option>
+                                    <option value="ollama" data-i18n="admin.providerOllama">Ollama (lokal)</option>
+                                    <option value="openai" data-i18n="admin.providerOpenai">OpenAI / kompatibel</option>
                                 </select>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Base URL</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.baseUrl">Base URL</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="agent_base_url" placeholder="http://host.docker.internal:1234/v1" autocomplete="off"></div>
 
-                            <div class="col-md-4"><label class="form-label">API-Key</label></div>
-                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="agent_api_key" data-secret="1" placeholder="(LMStudio: leer lassen)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.apiKey">API-Key</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="agent_api_key" data-secret="1" data-i18n-placeholder="admin.apiKeyPlaceholder" placeholder="(LMStudio: leer lassen)" autocomplete="off"></div>
 
-                            <div class="col-md-4"><label class="form-label">Modell</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.model">Modell</label></div>
                             <div class="col-md-8">
                                 <div class="input-group input-group-sm">
-                                    <input type="text" class="form-control" data-key="agent_model" id="agentModelInput" placeholder="z.B. llama-3.1-8b-instruct" autocomplete="off">
+                                    <input type="text" class="form-control" data-key="agent_model" id="agentModelInput" data-i18n-placeholder="admin.modelPlaceholder" placeholder="z.B. llama-3.1-8b-instruct" autocomplete="off">
                                     <select class="form-select" id="agentModelSelect" style="max-width: 40%" onchange="if(this.value) document.getElementById('agentModelInput').value = this.value">
-                                        <option value="">— verfügbare Modelle —</option>
+                                        <option value="" data-i18n="admin.availableModels">— verfügbare Modelle —</option>
                                     </select>
                                 </div>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Analyse-Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.analysisIntervalSeconds">Analyse-Intervall (Sekunden)</label></div>
                             <div class="col-md-8"><input type="number" class="form-control form-control-sm" data-key="agent_interval_seconds" min="30" max="86400" autocomplete="off"></div>
 
-                            <div class="col-md-4"><label class="form-label">LLM Temperatur</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.llmTemperature">LLM Temperatur</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_temperature" data-float="1" min="0" max="2" step="0.1" placeholder="0.2" autocomplete="off">
-                                <small class="admin-hint">0 = deterministisch/konsistent, höher = kreativer. Für Security-Entscheidungen niedrig halten (0–0.3).</small>
+                                <small class="admin-hint" data-i18n="admin.llmTemperatureHint">0 = deterministisch/konsistent, höher = kreativer. Für Security-Entscheidungen niedrig halten (0–0.3).</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">LLM max. Response-Tokens</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.llmMaxTokens">LLM max. Response-Tokens</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_max_tokens" min="1" max="32000" placeholder="3000" autocomplete="off">
-                                <small class="admin-hint">Obergrenze der Antwortlänge. Reasoning-Modelle brauchen Reserve für ihren internen „Think"-Block — großzügig lassen (≈3000).</small>
+                                <small class="admin-hint" data-i18n="admin.llmMaxTokensHint">Obergrenze der Antwortlänge. Reasoning-Modelle brauchen Reserve für ihren internen „Think"-Block — großzügig lassen (≈3000).</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Auto-Execute (nur acknowledge)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.agentLanguage">Agent-Sprache (Prompts/Chat/Telegram)</label></div>
+                            <div class="col-md-8">
+                                <select class="form-select form-select-sm" data-key="agent_language">
+                                    <option value="en">English</option>
+                                    <option value="de">Deutsch</option>
+                                </select>
+                                <small class="admin-hint" data-i18n="admin.agentLanguageHint">Sprache der LLM-Default-Prompts, der Analyst-Chat-Antworten und der Telegram-Meldungen. Eigene (überschriebene) Prompts bleiben unberührt.</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.autoExecute">Auto-Execute (nur acknowledge)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_auto_execute" data-bool="1">
                                 </div>
-                                <small class="admin-hint">Wenn aktiv, führt der Agent nur nicht-destruktive Aktionen (acknowledge) ohne Freigabe aus. Block-Aktionen und Isolate bleiben <strong>immer</strong> manuell. Die Aktion ergibt sich allein aus den Schwellenwerten pro Quelle — es gibt keine Konfidenz-Berechnung mehr.</small>
+                                <small class="admin-hint" data-i18n-html="admin.autoExecuteHint">Wenn aktiv, führt der Agent nur nicht-destruktive Aktionen (acknowledge) ohne Freigabe aus. Block-Aktionen und Isolate bleiben <strong>immer</strong> manuell. Die Aktion ergibt sich allein aus den Schwellenwerten pro Quelle — es gibt keine Konfidenz-Berechnung mehr.</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Central-Event-Agent (Regel-basiert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.centralEventAgent">Central-Event-Agent (Regel-basiert)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_event_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.centralEventAgentHint">
                                     Wertet den Sophos-Central-<strong>Event-Stream</strong> (getrennt von Alerts) aus — Endpoint-Threat/C2/Exploit-Events.
                                     Pro neuem Event der konfigurierten Typen entscheidet das LLM <code>block_ip</code> / <code>isolate</code> / <code>acknowledge</code>.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Event-Typen (Filter, kommagetrennt)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.eventTypes">Event-Typen (Filter, kommagetrennt)</label></div>
                             <div class="col-md-8">
                                 <textarea class="form-control form-control-sm" data-key="agent_event_types" rows="3" placeholder="Event::Endpoint::Threat::CommandAndControlDetected,Event::Endpoint::Threat::Detected,…"></textarea>
-                                <small class="admin-hint">Nur Events dieser <code>event_type</code>-Werte gehen ans LLM. Firewall-ATP-Events bewusst ausgenommen (über WAF/IPS abgedeckt).</small>
+                                <small class="admin-hint" data-i18n-html="admin.eventTypesHint">Nur Events dieser <code>event_type</code>-Werte gehen ans LLM. Firewall-ATP-Events bewusst ausgenommen (über WAF/IPS abgedeckt).</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Event Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.eventIntervalSeconds">Event Intervall (Sekunden)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_event_interval_seconds" min="30" max="86400" placeholder="120">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">WAF-Agent (Regel-basiert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.wafAgent">WAF-Agent (Regel-basiert)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_waf_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.wafAgentHint">
                                     Wenn aktiv, prüft eine separate Schleife jede neue WAF-Zeile mit 4xx/5xx-Status pro Source-IP.
                                     Regel: <strong>≥ Schwelle Fail-Hits in 24 h</strong> ODER <strong>schlechte OSINT-Reputation</strong> ⇒ <code>block_ip</code>.
                                     Decisions landen im Audit-Trail; whitelistete IPs werden ohnehin verworfen.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">WAF Fail-Schwelle (24 h)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.wafFailThreshold">WAF Fail-Schwelle (24 h)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_waf_threshold" min="1" max="10000" placeholder="4">
-                                <small class="admin-hint">Anzahl an 4xx/5xx-Hits derselben IP in 24 h, ab der geblockt wird (Default 4).</small>
+                                <small class="admin-hint" data-i18n="admin.wafFailThresholdHint">Anzahl an 4xx/5xx-Hits derselben IP in 24 h, ab der geblockt wird (Default 4).</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">WAF Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.wafIntervalSeconds">WAF Intervall (Sekunden)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_waf_interval_seconds" min="30" max="86400" placeholder="60">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">IPS-Agent (Regel-basiert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.ipsAgent">IPS-Agent (Regel-basiert)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_ips_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.ipsAgentHint">
                                     Prüft jeden neuen IDP/IPS-Event pro Source-IP. Regel: <strong>Schwere = high/critical</strong> ⇒ sofort <code>block_ip</code>;
                                     sonst <strong>≥ Schwelle Hits in 24 h</strong> ODER <strong>schlechte OSINT-Reputation</strong> ⇒ <code>block_ip</code>.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">IPS Hit-Schwelle (24 h)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.ipsHitThreshold">IPS Hit-Schwelle (24 h)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_ips_threshold" min="1" max="10000" placeholder="3">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">IPS Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.ipsIntervalSeconds">IPS Intervall (Sekunden)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_ips_interval_seconds" min="30" max="86400" placeholder="60">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Failed-Login-Agent (Regel-basiert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.failedLoginAgent">Failed-Login-Agent (Regel-basiert)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="agent_failed_login_enabled" data-bool="1">
                                 </div>
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.failedLoginAgentHint">
                                     Erkennt Brute-Force-Versuche. Regel: <strong>≥ Schwelle Failed-Logins in 24 h pro IP</strong>
                                     ODER <strong>schlechte OSINT-Reputation</strong> ⇒ <code>block_ip</code>.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Failed-Login-Schwelle (24 h)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.failedLoginThreshold">Failed-Login-Schwelle (24 h)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_threshold" min="1" max="10000" placeholder="5">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Failed-Login Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.failedLoginIntervalSeconds">Failed-Login Intervall (Sekunden)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_interval_seconds" min="30" max="86400" placeholder="60">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Subnet-Brute-Force / Versuche</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.subnetBfAttempts">Subnet-Brute-Force / Versuche</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_subnet_attempts" min="1" max="10000" placeholder="10">
-                                <small class="admin-hint">
+                                <small class="admin-hint" data-i18n-html="admin.subnetBfAttemptsHint">
                                     Wenn ein /24-Netz in Summe ≥ N Failed-Login-Versuche in 24 h sendet UND
                                     die Versuche von ≥ M unterschiedlichen IPs kommen, werden <strong>alle</strong> aktiven IPs
                                     dieses Subnetzes geblockt. Verteidigung gegen koordinierte Botnets.
                                 </small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Subnet-Brute-Force / mind. Distinct-IPs</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.subnetBfMinIps">Subnet-Brute-Force / mind. Distinct-IPs</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_subnet_min_ips" min="2" max="1000" placeholder="3">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Verteilter Brute-Force aktiv</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.distributedBfActive">Verteilter Brute-Force aktiv</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" data-key="agent_failed_login_distributed_enabled" data-bool="1">
-                                    <label class="form-check-label admin-hint">Übergibt <strong>alle</strong> fehlgeschlagenen Login-Versuche des Zeitfensters als JSON an den KI-Agenten. Dieser gruppiert sie selbst nach /24-Netz, zählt pro /24 und entscheidet, ob ein verteilter Brute-Force vorliegt (→ /24 oder die auffälligen IPs blocken). Bezieht sich ausschließlich auf Login-Logs.</label>
+                                    <label class="form-check-label admin-hint" data-i18n-html="admin.distributedBfActiveHint">Übergibt <strong>alle</strong> fehlgeschlagenen Login-Versuche des Zeitfensters als JSON an den KI-Agenten. Dieser gruppiert sie selbst nach /24-Netz, zählt pro /24 und entscheidet, ob ein verteilter Brute-Force vorliegt (→ /24 oder die auffälligen IPs blocken). Bezieht sich ausschließlich auf Login-Logs.</label>
                                 </div>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Verteilter BF / Zeitfenster (Minuten)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.distributedBfWindow">Verteilter BF / Zeitfenster (Minuten)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_window_minutes" min="5" max="10080" placeholder="60">
-                                <small class="admin-hint">Welche Login-Versuche der Agent sieht (Default 60 Minuten).</small>
+                                <small class="admin-hint" data-i18n="admin.distributedBfWindowHint">Welche Login-Versuche der Agent sieht (Default 60 Minuten).</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Verteilter BF / Versuche pro /24 (Richtwert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.distributedBfAttempts">Verteilter BF / Versuche pro /24 (Richtwert)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_attempts" min="1" max="100000" placeholder="20">
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Verteilter BF / Distinct-IPs pro /24 (Richtwert)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.distributedBfMinIps">Verteilter BF / Distinct-IPs pro /24 (Richtwert)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="agent_failed_login_distributed_min_ips" min="2" max="10000" placeholder="4">
-                                <small class="admin-hint">Richtwerte, ab wann ein Netz als koordiniert gilt — werden dem Agenten als Hinweis übergeben; er darf bei klarem Muster begründet abweichen.</small>
+                                <small class="admin-hint" data-i18n="admin.distributedBfMinIpsHint">Richtwerte, ab wann ein Netz als koordiniert gilt — werden dem Agenten als Hinweis übergeben; er darf bei klarem Muster begründet abweichen.</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Ganzes Netz blocken (OSINT/ipinfo)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.networkBlock">Ganzes Netz blocken (OSINT/ipinfo)</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch">
                                     <input class="form-check-input" type="checkbox" data-key="agent_failed_login_network_block_enabled" data-bool="1">
-                                    <label class="form-check-label admin-hint">Statt naivem /24 wird pro auffälligem Netz das <strong>tatsächliche Netz (CIDR)</strong> per OSINT/ipinfo-RDAP ermittelt. Greifen mehrere unterschiedliche IPs aus demselben Netz an, wird das <strong>ganze Netz</strong> vorgeschlagen (Block braucht Freigabe; zu große Netze werden auf einen Einzel-IP-Block heruntergestuft). Aus ⇒ klassische /24-Gruppierung.</label>
+                                    <label class="form-check-label admin-hint" data-i18n-html="admin.networkBlockHint">Statt naivem /24 wird pro auffälligem Netz das <strong>tatsächliche Netz (CIDR)</strong> per OSINT/ipinfo-RDAP ermittelt. Greifen mehrere unterschiedliche IPs aus demselben Netz an, wird das <strong>ganze Netz</strong> vorgeschlagen (Block braucht Freigabe; zu große Netze werden auf einen Einzel-IP-Block heruntergestuft). Aus ⇒ klassische /24-Gruppierung.</label>
                                 </div>
                             </div>
 
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('agent')">Agent-Settings speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('agent')" data-i18n="admin.saveAgent">Agent-Settings speichern</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- KI-Agent System-Prompts → jetzt auf der Agent-Workflow-Seite -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">🤖 KI-Agent — System-Prompts</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.systemPromptsTitle">🤖 KI-Agent — System-Prompts</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint mb-2">Die System-Prompts pro Stufe (Alerts, WAF, IPS, Failed-Login, Verteilter Brute-Force, Triage) werden jetzt im Kontext der jeweiligen Workflow-Stufe bearbeitet — zusammen mit Trigger, Schwellen, erlaubten Aktionen und Auto-Execute.</p>
-                        <a class="btn btn-outline-primary btn-sm" href="/agent-workflow.html"><i class="bi bi-diagram-3"></i> Zur Agent-Workflow-Seite</a>
+                        <p class="admin-hint mb-2" data-i18n="admin.systemPromptsHint">Die System-Prompts pro Stufe (Alerts, WAF, IPS, Failed-Login, Verteilter Brute-Force, Triage) werden jetzt im Kontext der jeweiligen Workflow-Stufe bearbeitet — zusammen mit Trigger, Schwellen, erlaubten Aktionen und Auto-Execute.</p>
+                        <a class="btn btn-outline-primary btn-sm" href="/agent-workflow.html"><i class="bi bi-diagram-3"></i> <span data-i18n="admin.toWorkflowPage">Zur Agent-Workflow-Seite</span></a>
                     </div>
                 </div>
 
                 <!-- Allgemein -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Allgemein</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.generalTitle">Allgemein</h3></div>
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-md-4"><label class="form-label">Collector-Intervall (Sekunden)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.collectorIntervalSeconds">Collector-Intervall (Sekunden)</label></div>
                             <div class="col-md-8"><input type="number" class="form-control form-control-sm" data-key="collector_interval" min="30" max="86400" autocomplete="off"></div>
-                            <div class="col-md-4"><label class="form-label">Log-Level</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.logLevel">Log-Level</label></div>
                             <div class="col-md-8">
                                 <select class="form-select form-select-sm" data-key="log_level">
                                     <option value="DEBUG">DEBUG</option>
@@ -630,59 +639,59 @@
                                     <option value="CRITICAL">CRITICAL</option>
                                 </select>
                             </div>
-                            <div class="col-md-4"><label class="form-label">Dashboard-Titel</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.dashboardTitle">Dashboard-Titel</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="dashboard_title" autocomplete="off"></div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('general')">Allgemeines speichern</button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('general')" data-i18n="admin.saveGeneral">Allgemeines speichern</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Firewall-Log-Retention -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">🧹 Firewall-Log-Retention</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.retentionTitle">🧹 Firewall-Log-Retention</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint">Die Tabelle <code>firewall_logs</code> wächst schnell — die hochvolumigen <code>Firewall</code>-Verbindungslogs werden früher gelöscht als sicherheitsrelevante Typen (WAF/IPS/Auth/ATP). Löschung läuft batchweise im Hintergrund (alle 6 h) ohne Schreib-Locks.</p>
+                        <p class="admin-hint" data-i18n-html="admin.retentionHint">Die Tabelle <code>firewall_logs</code> wächst schnell — die hochvolumigen <code>Firewall</code>-Verbindungslogs werden früher gelöscht als sicherheitsrelevante Typen (WAF/IPS/Auth/ATP). Löschung läuft batchweise im Hintergrund (alle 6 h) ohne Schreib-Locks.</p>
                         <div class="row g-2 align-items-center">
-                            <div class="col-md-4"><label class="form-label">Retention aktiv</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.retentionActive">Retention aktiv</label></div>
                             <div class="col-md-8">
                                 <div class="form-check form-switch mt-1">
                                     <input class="form-check-input" type="checkbox" data-key="firewall_log_retention_enabled" data-bool="1">
                                 </div>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Verbindungslogs aufbewahren (Tage)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.connectionLogsRetentionDays">Verbindungslogs aufbewahren (Tage)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="firewall_log_connection_retention_days" min="1" max="3650" placeholder="14">
-                                <small class="admin-hint">Gilt für <code>log_type='Firewall'</code> (Verbindungstracking — i. d. R. ~94 % des Volumens). NetFlow deckt Traffic-Analyse separat ab.</small>
+                                <small class="admin-hint" data-i18n-html="admin.connectionLogsRetentionHint">Gilt für <code>log_type='Firewall'</code> (Verbindungstracking — i. d. R. ~94 % des Volumens). NetFlow deckt Traffic-Analyse separat ab.</small>
                             </div>
 
-                            <div class="col-md-4"><label class="form-label">Sicherheitslogs aufbewahren (Tage)</label></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.securityLogsRetentionDays">Sicherheitslogs aufbewahren (Tage)</label></div>
                             <div class="col-md-8">
                                 <input type="number" class="form-control form-control-sm" data-key="firewall_log_retention_days" min="1" max="3650" placeholder="90">
-                                <small class="admin-hint">Gilt für alle übrigen Typen (WAF, IPS/IDP, Authentication, ATP, …).</small>
+                                <small class="admin-hint" data-i18n="admin.securityLogsRetentionHint">Gilt für alle übrigen Typen (WAF, IPS/IDP, Authentication, ATP, …).</small>
                             </div>
                         </div>
                         <div class="text-end mt-3">
-                            <button class="btn btn-outline-warning btn-sm" onclick="runFirewallRetention()"><i class="bi bi-trash"></i> Jetzt aufräumen</button>
-                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallRetention')">Retention speichern</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="runFirewallRetention()"><i class="bi bi-trash"></i> <span data-i18n="admin.cleanupNow">Jetzt aufräumen</span></button>
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallRetention')" data-i18n="admin.saveRetention">Retention speichern</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- System (read-only) -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">System (Read-only)</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.systemTitle">System (Read-only)</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint">Diese Werte sind container-gebunden und werden über <code>.env</code> + Container-Restart geändert.</p>
+                        <p class="admin-hint" data-i18n-html="admin.systemHint">Diese Werte sind container-gebunden und werden über <code>.env</code> + Container-Restart geändert.</p>
                         <div class="admin-readonly">
-                            <div><span class="ro-label">Database URL:</span> <code id="roDbUrl">-</code></div>
-                            <div><span class="ro-label">Redis URL:</span> <code id="roRedisUrl">-</code></div>
+                            <div><span class="ro-label" data-i18n="admin.databaseUrl">Database URL:</span> <code id="roDbUrl">-</code></div>
+                            <div><span class="ro-label" data-i18n="admin.redisUrl">Redis URL:</span> <code id="roRedisUrl">-</code></div>
                             <div>
-                                <span class="ro-label">Warroom API Key:</span>
+                                <span class="ro-label" data-i18n="admin.warroomApiKey">Warroom API Key:</span>
                                 <span id="roApiKey">-</span>
-                                <span class="admin-hint inline">(in <code>.env</code> setzen, Frontend-Container neu starten — nginx injiziert den Header beim Boot)</span>
+                                <span class="admin-hint inline" data-i18n-html="admin.warroomApiKeyHint">(in <code>.env</code> setzen, Frontend-Container neu starten — nginx injiziert den Header beim Boot)</span>
                             </div>
                         </div>
                     </div>
@@ -694,6 +703,11 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/admin.de.js"></script>
+    <script src="/i18n/admin.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/admin.js"></script>
 </body>

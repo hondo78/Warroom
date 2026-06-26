@@ -15,9 +15,9 @@ async function updateWorkflowBadges() {
         if (!r.ok) return;
         const s = await r.json();
         const intervalEl = document.getElementById('wfInterval');
-        if (intervalEl) intervalEl.textContent = `alle ${s.agent_interval_seconds || '?'} Sek` + (s.agent_enabled ? '' : '  ·  AUS');
+        if (intervalEl) intervalEl.textContent = t('agent.wf_interval', {n: s.agent_interval_seconds || '?'}) + (s.agent_enabled ? '' : '  ·  ' + t('agent.wf_off'));
         const modelEl = document.getElementById('wfModel');
-        if (modelEl) modelEl.textContent = `(${s.agent_provider || 'lmstudio'} · ${s.agent_model || 'kein Modell gewählt'})`;
+        if (modelEl) modelEl.textContent = `(${s.agent_provider || 'lmstudio'} · ${s.agent_model || t('agent.no_model')})`;
     } catch (e) { /* still ok if it fails */ }
 }
 
@@ -32,7 +32,7 @@ async function updateAgentStats() {
         document.getElementById('aRejected').textContent = ((by.rejected || 0) + (by.superseded || 0)).toLocaleString('de-DE');
         document.getElementById('aFailed').textContent = (by.failed || 0).toLocaleString('de-DE');
         const actorMix = d.by_actor || {};
-        document.getElementById('aActorMix').textContent = `${actorMix.agent || 0} Agent · ${actorMix.human || 0} Mensch`;
+        document.getElementById('aActorMix').textContent = `${actorMix.agent || 0} ${t('agent.actor_agent')} · ${actorMix.human || 0} ${t('agent.actor_human')}`;
     } catch (err) { console.error(err); }
 }
 
@@ -51,8 +51,8 @@ async function updateAgentTimeline() {
         const data = {
             labels: labels.map(formatTime),
             datasets: [
-                { label: 'Agent', data: labels.map(t => agentByTs[t] || 0), backgroundColor: 'rgba(59,130,246,0.6)', borderColor: '#3b82f6' },
-                { label: 'Mensch', data: labels.map(t => humanByTs[t] || 0), backgroundColor: 'rgba(34,197,94,0.6)', borderColor: '#22c55e' },
+                { label: t('agent.actor_agent'), data: labels.map(ts => agentByTs[ts] || 0), backgroundColor: 'rgba(59,130,246,0.6)', borderColor: '#3b82f6' },
+                { label: t('agent.actor_human'), data: labels.map(ts => humanByTs[ts] || 0), backgroundColor: 'rgba(34,197,94,0.6)', borderColor: '#22c55e' },
             ]
         };
         const ctx = document.getElementById('aTimelineChart').getContext('2d');
@@ -83,7 +83,7 @@ async function updateAgentList() {
         const items = d.items || [];
         const tbody = document.getElementById('aDecisionsTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Decisions im aktuellen Filter.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('agent.no_decisions')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(d => {
@@ -95,8 +95,8 @@ async function updateAgentList() {
                 event:         '<span class="severity-badge severity-critical" title="Sophos Central Event">Event</span>',
             })[d.source_type] || '<span class="severity-badge severity-medium" title="Sophos Alert">Alert</span>';
             const actor = d.decided_by === 'human'
-                ? '<span class="severity-badge severity-low">Mensch</span>'
-                : `<span class="severity-badge severity-medium">Agent</span> ${sourceBadge}`;
+                ? `<span class="severity-badge severity-low">${t('agent.actor_human')}</span>`
+                : `<span class="severity-badge severity-medium">${t('agent.actor_agent')}</span> ${sourceBadge}`;
             const actionBadge = `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`;
             // Inline OSINT button: stop propagation so clicking 🔍 doesn't
             // also fire the row-level showAgentDetail(d.id).
@@ -110,7 +110,7 @@ async function updateAgentList() {
                 const ctx = (d.action_args || {}).context || {};
                 const val = ctx.value || d.source_ip || '?';
                 const isIp = (ctx.value_type || 'ip') === 'ip';
-                alertCell = `<code style="font-size:.78rem">${escapeHtml(truncate(val, 32))}</code>${isIp ? osintBtn(val) : ''}<br><span class="ip-country" style="font-size:.72rem">Triage · ${escapeHtml(ctx.value_type || 'ip')}</span>`;
+                alertCell = `<code style="font-size:.78rem">${escapeHtml(truncate(val, 32))}</code>${isIp ? osintBtn(val) : ''}<br><span class="ip-country" style="font-size:.72rem">${t('agent.triage')} · ${escapeHtml(ctx.value_type || 'ip')}</span>`;
             } else if (d.source_type === 'failed_login' && (d.action_args || {}).context && d.action_args.context.distributed_brute_force_indicator) {
                 const ctx = d.action_args.context;
                 // New decisions carry network_summary (real CIDRs via OSINT);
@@ -119,8 +119,8 @@ async function updateAgentList() {
                 const top = summ[0];
                 const topNet = top ? (top.network || top.subnet24) : null;
                 const topTxt = top ? `${topNet} (${top.attempts}× / ${top.distinct_ips} IPs)` : '—';
-                const unit = ctx.network_summary ? 'Netz(e)' : '/24';
-                alertCell = `<span class="ip-country" style="font-size:.78rem">👥 verteilter Brute-Force</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} Logins · ${summ.length} ${unit} · Top: ${escapeHtml(topTxt)}</span>`;
+                const unit = ctx.network_summary ? t('agent.unit_networks') : '/24';
+                alertCell = `<span class="ip-country" style="font-size:.78rem">👥 ${t('agent.distributed_bf')}</span><br><span class="ip-country" style="font-size:.72rem">${ctx.total_login_attempts || 0} ${t('agent.logins')} · ${summ.length} ${unit} · ${t('agent.top')}: ${escapeHtml(topTxt)}</span>`;
             } else if (d.source_type === 'event') {
                 const ctx = (d.action_args || {}).context || {};
                 const ip = ctx.destination_ip || ctx.source_ip || d.source_ip;
@@ -133,9 +133,9 @@ async function updateAgentList() {
                 if (d.source_type === 'waf') {
                     sub = `${ctx.count_4xx_24h || 0}× 4xx · ${ctx.count_5xx_24h || 0}× 5xx (24h)`;
                 } else if (d.source_type === 'ips') {
-                    sub = `${ctx.count_24h || 0} IPS-Hits (24h)${(ctx.severities||[]).length ? ' · ' + ctx.severities.join('/') : ''}`;
+                    sub = `${ctx.count_24h || 0} ${t('agent.ips_hits')} (24h)${(ctx.severities||[]).length ? ' · ' + ctx.severities.join('/') : ''}`;
                 } else {
-                    sub = `${ctx.count_24h || 0} Failed-Logins (24h)`;
+                    sub = `${ctx.count_24h || 0} ${t('agent.failed_logins')} (24h)`;
                 }
                 alertCell = `<code style="font-size:.78rem">${escapeHtml(d.source_ip)}</code>${osintBtn(d.source_ip)}<br><span class="ip-country" style="font-size:.72rem">${escapeHtml(sub)}</span>`;
             } else {
@@ -152,7 +152,7 @@ async function updateAgentList() {
                     <td><span class="health-badge ${statusCls}">${escapeHtml(d.status)}</span></td>
                     <td onclick="event.stopPropagation()">${
                         d.status === 'pending'
-                            ? `<button class="ack-btn" onclick="showAgentDetail(${d.id})">Bearbeiten</button>`
+                            ? `<button class="ack-btn" onclick="showAgentDetail(${d.id})">${t('common.edit')}</button>`
                             : ''
                     }</td>
                 </tr>`;
@@ -163,7 +163,7 @@ async function updateAgentList() {
 async function showAgentDetail(id) {
     const modal = document.getElementById('agentDetailModal');
     const body = document.getElementById('agentDetailBody');
-    body.textContent = 'Wird geladen…';
+    body.textContent = t('common.loading');
     modal.classList.add('active');
     try {
         const r = await fetch(`/api/agent/decisions/${id}`);
@@ -171,7 +171,7 @@ async function showAgentDetail(id) {
         const d = await r.json();
         body.innerHTML = renderAgentDetail(d);
     } catch (err) {
-        body.innerHTML = `<div class="detail-error">Fehler: ${escapeHtml(err.message)}</div>`;
+        body.innerHTML = `<div class="detail-error">${t('agent.error')}: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -186,26 +186,26 @@ function renderAgentDetail(d) {
     const isPublicIp = /^(?!10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|0\.)\d+\.\d+\.\d+\.\d+$/.test(candidateIp);
 
     const fields = [
-        ['Decision-ID', d.id],
-        ['Entschieden von', d.decided_by === 'human' ? 'Mensch' : `Agent (${escapeHtml(d.model || '?')})`],
-        ['Aktion', `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`, true],
-        ['Aktion-Args', '<code>' + escapeHtml(JSON.stringify(d.action_args || {})) + '</code>', true],
-        ['Status', d.status],
-        ['Erstellt', formatTime(d.created_at)],
-        ['Entschieden', d.decided_at ? formatTime(d.decided_at) : '—'],
-        ['Supersedes', d.supersedes ? `<a href="#" onclick="event.preventDefault();showAgentDetail(${d.supersedes})">#${d.supersedes}</a>` : '—', true],
-        ['Fehler', d.error ? `<span style="color:var(--accent-red)">${escapeHtml(d.error)}</span>` : '—', true],
+        [t('agent.f_decision_id'), d.id],
+        [t('agent.f_decided_by'), d.decided_by === 'human' ? t('agent.actor_human') : `${t('agent.actor_agent')} (${escapeHtml(d.model || '?')})`],
+        [t('agent.f_action'), `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`, true],
+        [t('agent.f_action_args'), '<code>' + escapeHtml(JSON.stringify(d.action_args || {})) + '</code>', true],
+        [t('common.status'), d.status],
+        [t('agent.f_created'), formatTime(d.created_at)],
+        [t('agent.f_decided'), d.decided_at ? formatTime(d.decided_at) : '—'],
+        [t('agent.f_supersedes'), d.supersedes ? `<a href="#" onclick="event.preventDefault();showAgentDetail(${d.supersedes})">#${d.supersedes}</a>` : '—', true],
+        [t('agent.error'), d.error ? `<span style="color:var(--accent-red)">${escapeHtml(d.error)}</span>` : '—', true],
     ];
     const fieldsHtml = fields.map(([label, val, raw]) =>
         `<dt>${escapeHtml(label)}</dt><dd>${raw ? val : escapeHtml(String(val))}</dd>`
     ).join('');
 
     const reasoningBlock = d.reasoning
-        ? `<div class="detail-section"><h4>Agent-Begründung</h4><div class="detail-description">${escapeHtml(d.reasoning)}</div></div>`
+        ? `<div class="detail-section"><h4>${t('agent.agent_reasoning')}</h4><div class="detail-description">${escapeHtml(d.reasoning)}</div></div>`
         : '';
 
     const humanCommentBlock = d.human_comment
-        ? `<div class="detail-section"><h4>Mensch-Kommentar</h4><div class="detail-description">${escapeHtml(d.human_comment)}</div></div>`
+        ? `<div class="detail-section"><h4>${t('agent.human_comment')}</h4><div class="detail-description">${escapeHtml(d.human_comment)}</div></div>`
         : '';
 
     // Rule-context block: WAF / IPS / failed-login decisions don't have an
@@ -216,37 +216,37 @@ function renderAgentDetail(d) {
         const isDistributed = d.source_type === 'failed_login' && ctx.distributed_brute_force_indicator;
         const isSubnet = d.source_type === 'failed_login' && ctx.subnet_brute_force_indicator;
         const head = ({
-            waf:          'WAF-Kontext',
-            ips:          'IPS-Kontext',
-            failed_login: isDistributed ? 'Verteilter-Brute-Force-Kontext'
-                        : isSubnet ? 'Subnet-Brute-Force-Kontext'
-                        : 'Failed-Login-Kontext',
-            triage:       'Triage-Kontext',
+            waf:          t('agent.ctx_waf'),
+            ips:          t('agent.ctx_ips'),
+            failed_login: isDistributed ? t('agent.ctx_distributed_bf')
+                        : isSubnet ? t('agent.ctx_subnet_bf')
+                        : t('agent.ctx_failed_login'),
+            triage:       t('agent.ctx_triage'),
         })[d.source_type];
         const rows = [
-            ['Regel', escapeHtml(ctx.rule || '-')],
-            ['Schwelle', ctx.threshold ?? '-'],
-            ['Land/Stadt', escapeHtml([ctx.country, ctx.city].filter(Boolean).join(', ') || '-')],
+            [t('agent.r_rule'), escapeHtml(ctx.rule || '-')],
+            [t('agent.r_threshold'), ctx.threshold ?? '-'],
+            [t('agent.r_country_city'), escapeHtml([ctx.country, ctx.city].filter(Boolean).join(', ') || '-')],
         ];
         if (d.source_type === 'waf') {
             rows.push(
-                ['4xx in 24h', ctx.count_4xx_24h ?? '-'],
-                ['5xx in 24h', ctx.count_5xx_24h ?? '-'],
-                ['HTTP-Statuses', (ctx.statuses || []).map(s => escapeHtml(String(s))).join(', ') || '-'],
-                ['Hosts', (ctx.hosts || []).map(h => '<code style="font-size:.78rem">' + escapeHtml(h) + '</code>').join(', ') || '-'],
+                [t('agent.r_4xx_24h'), ctx.count_4xx_24h ?? '-'],
+                [t('agent.r_5xx_24h'), ctx.count_5xx_24h ?? '-'],
+                [t('agent.r_http_statuses'), (ctx.statuses || []).map(s => escapeHtml(String(s))).join(', ') || '-'],
+                [t('agent.r_hosts'), (ctx.hosts || []).map(h => '<code style="font-size:.78rem">' + escapeHtml(h) + '</code>').join(', ') || '-'],
             );
         } else if (d.source_type === 'ips') {
             rows.push(
-                ['Hits in 24h', ctx.count_24h ?? '-'],
-                ['Severities', (ctx.severities || []).map(escapeHtml).join(', ') || '-'],
-                ['Signaturen', (ctx.signatures || []).map(s => '<code style="font-size:.78rem">' + escapeHtml(s) + '</code>').join(', ') || '-'],
-                ['Kategorien', (ctx.categories || []).map(escapeHtml).join(', ') || '-'],
+                [t('agent.r_hits_24h'), ctx.count_24h ?? '-'],
+                [t('agent.r_severities'), (ctx.severities || []).map(escapeHtml).join(', ') || '-'],
+                [t('agent.r_signatures'), (ctx.signatures || []).map(s => '<code style="font-size:.78rem">' + escapeHtml(s) + '</code>').join(', ') || '-'],
+                [t('agent.r_categories'), (ctx.categories || []).map(escapeHtml).join(', ') || '-'],
             );
         } else if (d.source_type === 'triage') {
             rows.push(
-                ['Wert', '<code style="font-size:.8rem">' + escapeHtml(ctx.value || '-') + '</code>'],
-                ['Typ', escapeHtml(ctx.value_type || '-')],
-                ['Operator-Hinweis', ctx.note ? escapeHtml(ctx.note) : '—'],
+                [t('agent.r_value'), '<code style="font-size:.8rem">' + escapeHtml(ctx.value || '-') + '</code>'],
+                [t('agent.r_type'), escapeHtml(ctx.value_type || '-')],
+                [t('agent.r_operator_note'), ctx.note ? escapeHtml(ctx.note) : '—'],
             );
         } else if (isDistributed) {
             // New decisions: network_summary (real CIDRs); older: subnet_summary (/24).
@@ -254,44 +254,44 @@ function renderAgentDetail(d) {
             const summ = ctx.network_summary || ctx.subnet_summary || [];
             const aa = d.action_args || {};
             const targetTxt = aa.target_subnet
-                ? '<code style="font-size:.8rem">' + escapeHtml(aa.target_subnet) + '</code> (ganzes Netz)'
+                ? '<code style="font-size:.8rem">' + escapeHtml(aa.target_subnet) + '</code> (' + t('agent.whole_network') + ')'
                 : (Array.isArray(aa.target_ips) ? '<strong>' + aa.target_ips.length + ' IP(s)</strong>: ' + aa.target_ips.slice(0, 15).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') : '—');
             rows.push(
-                ['Login-Versuche im Fenster', ctx.total_login_attempts ?? '-'],
-                ['Zeitfenster', (ctx.window_minutes ?? '-') + ' min'],
-                [isNet ? 'Betroffene Netze' : 'Betroffene /24-Netze', summ.length],
-                ['Block-Ziel', targetTxt],
-                [isNet ? 'Top-Netze (Versuche / IPs)' : 'Top /24 (Versuche / IPs)',
+                [t('agent.r_login_attempts_window'), ctx.total_login_attempts ?? '-'],
+                [t('agent.r_time_window'), (ctx.window_minutes ?? '-') + ' min'],
+                [isNet ? t('agent.r_affected_networks') : t('agent.r_affected_24'), summ.length],
+                [t('agent.r_block_target'), targetTxt],
+                [isNet ? t('agent.r_top_networks') : t('agent.r_top_24'),
                     summ.slice(0, 10).map(s => '<code style="font-size:.78rem">' + escapeHtml(s.network || s.subnet24) + '</code>'
                         + (s.network_name ? ' <span class="ip-country" style="font-size:.72rem">' + escapeHtml(s.network_name) + '</span>' : '')
                         + ' (' + s.attempts + '× / ' + s.distinct_ips + ' IPs)'
-                        + (s.too_large ? ' <span class="ip-country" style="font-size:.7rem">⚠ zu groß</span>' : '')).join('<br>') || '-'],
+                        + (s.too_large ? ' <span class="ip-country" style="font-size:.7rem">⚠ ' + t('agent.too_large') + '</span>' : '')).join('<br>') || '-'],
             );
         } else if (isSubnet) {
             rows.push(
-                ['Subnet', '<code style="font-size:.8rem">' + escapeHtml(ctx.subnet || '?') + '</code>'],
-                ['Versuche im Subnet (24h)', ctx.subnet_attempts ?? '-'],
-                ['Distinct IPs im Subnet', ctx.subnet_distinct_ips ?? '-'],
-                ['Block-Umfang', '<strong>alle 254 Hosts im /24</strong> (Network/Broadcast ausgenommen)'],
-                ['Gesehene Angreifer-IPs', (ctx.observed_ips || []).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
-                ['Weitere Subnet-IPs (Sample)', (ctx.subnet_ip_sample || []).slice(0, 10).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
+                [t('agent.r_subnet'), '<code style="font-size:.8rem">' + escapeHtml(ctx.subnet || '?') + '</code>'],
+                [t('agent.r_subnet_attempts_24h'), ctx.subnet_attempts ?? '-'],
+                [t('agent.r_subnet_distinct_ips'), ctx.subnet_distinct_ips ?? '-'],
+                [t('agent.r_block_scope'), '<strong>' + t('agent.all_254_hosts') + '</strong> (' + t('agent.net_broadcast_excl') + ')'],
+                [t('agent.r_observed_ips'), (ctx.observed_ips || []).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
+                [t('agent.r_more_subnet_ips'), (ctx.subnet_ip_sample || []).slice(0, 10).map(i => '<code style="font-size:.78rem">' + escapeHtml(i) + '</code>').join(', ') || '-'],
             );
         } else {
             rows.push(
-                ['Failed-Logins in 24h', ctx.count_24h ?? '-'],
-                ['Versuchte User', (ctx.users || []).map(u => '<code style="font-size:.78rem">' + escapeHtml(u) + '</code>').join(', ') || '-'],
-                ['Komponenten', (ctx.components || []).map(escapeHtml).join(', ') || '-'],
+                [t('agent.r_failed_logins_24h'), ctx.count_24h ?? '-'],
+                [t('agent.r_attempted_users'), (ctx.users || []).map(u => '<code style="font-size:.78rem">' + escapeHtml(u) + '</code>').join(', ') || '-'],
+                [t('agent.r_components'), (ctx.components || []).map(escapeHtml).join(', ') || '-'],
             );
         }
         const osintSum = ctx.osint_summary || {};
-        if (ctx.osint_reasons) rows.push(['OSINT-Treffer', (ctx.osint_reasons || []).map(escapeHtml).join(', ')]);
+        if (ctx.osint_reasons) rows.push([t('agent.r_osint_hits'), (ctx.osint_reasons || []).map(escapeHtml).join(', ')]);
         if (osintSum.intelix_category || osintSum.abuseipdb_score != null || osintSum.virustotal_malicious != null) {
             const bits = [];
             if (osintSum.intelix_category) bits.push('Intelix: ' + escapeHtml(String(osintSum.intelix_category)));
             if (osintSum.abuseipdb_score != null) bits.push('AbuseIPDB: ' + escapeHtml(String(osintSum.abuseipdb_score)));
             if (osintSum.virustotal_malicious != null) bits.push('VT mal.: ' + escapeHtml(String(osintSum.virustotal_malicious)));
             if (osintSum.greynoise_classification) bits.push('GreyNoise: ' + escapeHtml(String(osintSum.greynoise_classification)));
-            if (bits.length) rows.push(['OSINT-Summary', bits.join(' · ')]);
+            if (bits.length) rows.push([t('agent.r_osint_summary'), bits.join(' · ')]);
         }
         // Header label: rule sources without a single source_ip (distributed /
         // triage of a domain/URL) shouldn't show a dangling "· ?".
@@ -308,54 +308,54 @@ function renderAgentDetail(d) {
     const alertHtml = a.id
         ? `
         <div class="detail-section">
-            <h4>Alarm-Kontext</h4>
+            <h4>${t('agent.alarm_context')}</h4>
             <dl class="detail-grid">
-                <dt>Alert-ID</dt><dd class="detail-mono">${escapeHtml(a.id)}</dd>
-                <dt>Typ</dt><dd>${escapeHtml(a.type || '-')}</dd>
-                <dt>Severity</dt><dd>${severityBadge(a.severity)}</dd>
-                <dt>Kategorie</dt><dd>${escapeHtml(a.category || '-')}</dd>
-                <dt>Quell-IP</dt><dd>${a.source_ip ? '<code>' + escapeHtml(a.source_ip) + '</code>' + (typeof osintButton === 'function' ? osintButton(a.source_ip) : '') : '-'}</dd>
-                <dt>Ziel-IP</dt><dd>${a.destination_ip ? '<code>' + escapeHtml(a.destination_ip) + '</code>' : '-'}</dd>
-                <dt>Land/Stadt</dt><dd>${escapeHtml([a.country, a.city].filter(Boolean).join(', ') || '-')}</dd>
-                <dt>Agent</dt><dd>${escapeHtml(a.agent || '-')}</dd>
-                <dt>Erstellt</dt><dd>${formatTime(a.created_at)}</dd>
-                <dt>Acknowledged</dt><dd>${a.acknowledged_at ? formatTime(a.acknowledged_at) + ' (' + escapeHtml(a.acknowledged_action || '') + ')' : 'nein'}</dd>
+                <dt>${t('agent.f_alert_id')}</dt><dd class="detail-mono">${escapeHtml(a.id)}</dd>
+                <dt>${t('agent.r_type')}</dt><dd>${escapeHtml(a.type || '-')}</dd>
+                <dt>${t('common.severity')}</dt><dd>${severityBadge(a.severity)}</dd>
+                <dt>${t('agent.f_category')}</dt><dd>${escapeHtml(a.category || '-')}</dd>
+                <dt>${t('agent.f_source_ip')}</dt><dd>${a.source_ip ? '<code>' + escapeHtml(a.source_ip) + '</code>' + (typeof osintButton === 'function' ? osintButton(a.source_ip) : '') : '-'}</dd>
+                <dt>${t('agent.f_dest_ip')}</dt><dd>${a.destination_ip ? '<code>' + escapeHtml(a.destination_ip) + '</code>' : '-'}</dd>
+                <dt>${t('agent.r_country_city')}</dt><dd>${escapeHtml([a.country, a.city].filter(Boolean).join(', ') || '-')}</dd>
+                <dt>${t('agent.actor_agent')}</dt><dd>${escapeHtml(a.agent || '-')}</dd>
+                <dt>${t('agent.f_created')}</dt><dd>${formatTime(a.created_at)}</dd>
+                <dt>${t('agent.f_acknowledged')}</dt><dd>${a.acknowledged_at ? formatTime(a.acknowledged_at) + ' (' + escapeHtml(a.acknowledged_action || '') + ')' : t('agent.no')}</dd>
             </dl>
             ${a.description ? `<div class="detail-description">${escapeHtml(a.description)}</div>` : ''}
-            ${a.raw_data ? `<details><summary class="ack-label" style="cursor:pointer">Raw-Data anzeigen</summary><pre class="detail-raw">${escapeHtml(JSON.stringify(a.raw_data, null, 2))}</pre></details>` : ''}
+            ${a.raw_data ? `<details><summary class="ack-label" style="cursor:pointer">${t('agent.show_raw_data')}</summary><pre class="detail-raw">${escapeHtml(JSON.stringify(a.raw_data, null, 2))}</pre></details>` : ''}
         </div>`
-        : '<div class="detail-section"><h4>Alarm-Kontext</h4><div class="ack-label">Alarm nicht (mehr) in der DB</div></div>';
+        : `<div class="detail-section"><h4>${t('agent.alarm_context')}</h4><div class="ack-label">${t('agent.alarm_not_in_db')}</div></div>`;
 
     const actionPanel = isPending
         ? `
         <div class="detail-section">
-            <h4>Menschliche Entscheidung</h4>
-            <p class="admin-hint">Du kannst die Empfehlung des Agents ausführen, ablehnen oder eine andere Aktion wählen (Override).</p>
-            <label class="admin-hint" style="display:block;margin-bottom:.3rem">Kommentar (wird gespeichert)</label>
-            <textarea id="hcComment" class="form-control form-control-sm" rows="2" placeholder="Optionaler Begründungstext"></textarea>
+            <h4>${t('agent.human_decision')}</h4>
+            <p class="admin-hint">${t('agent.human_decision_hint')}</p>
+            <label class="admin-hint" style="display:block;margin-bottom:.3rem">${t('agent.comment_saved')}</label>
+            <textarea id="hcComment" class="form-control form-control-sm" rows="2" placeholder="${t('agent.comment_placeholder')}"></textarea>
 
             <div class="filter-row mt-2">
-                <button class="ack-btn" onclick="approveDecision(${d.id})">✓ Empfehlung ausführen</button>
-                <button class="block-link" onclick="rejectDecision(${d.id})">✗ Ablehnen</button>
+                <button class="ack-btn" onclick="approveDecision(${d.id})">✓ ${t('agent.execute_recommendation')}</button>
+                <button class="block-link" onclick="rejectDecision(${d.id})">✗ ${t('agent.reject')}</button>
             </div>
 
-            <h4 style="margin-top:1rem">Override mit anderer Aktion</h4>
+            <h4 style="margin-top:1rem">${t('agent.override_other_action')}</h4>
             <div class="filter-row">
                 <select id="hcAction" class="form-select form-select-sm" style="width:auto">
                     <option value="block_ip">block_ip</option>
                     <option value="acknowledge">acknowledge</option>
-                    <option value="isolate" disabled>isolate (manuell über Endpoints-API)</option>
+                    <option value="isolate" disabled>${t('agent.isolate_manual')}</option>
                     <option value="no_action">no_action</option>
                 </select>
-                <input type="text" id="hcTargetIp" class="form-control form-control-sm" placeholder="Ziel-IP (für block_ip)" value="${escapeHtml(candidateIp)}" style="max-width:220px">
-                <button class="ack-btn" onclick="overrideDecision(${d.id}, '${escapeHtml(a.id || '')}', '${escapeHtml(d.source_type || 'alert')}', '${escapeHtml(d.source_ip || '')}')">Override + ausführen</button>
+                <input type="text" id="hcTargetIp" class="form-control form-control-sm" placeholder="${t('agent.target_ip_placeholder')}" value="${escapeHtml(candidateIp)}" style="max-width:220px">
+                <button class="ack-btn" onclick="overrideDecision(${d.id}, '${escapeHtml(a.id || '')}', '${escapeHtml(d.source_type || 'alert')}', '${escapeHtml(d.source_ip || '')}')">${t('agent.override_execute')}</button>
             </div>
-            ${!isPublicIp && candidateIp ? '<small class="ack-label">⚠ Quell-IP ist privat / reserviert — block_ip wird abgelehnt</small>' : ''}
+            ${!isPublicIp && candidateIp ? `<small class="ack-label">⚠ ${t('agent.private_ip_warn')}</small>` : ''}
         </div>`
         : '';
 
     const chainBlock = (d.chain && d.chain.length)
-        ? `<div class="detail-section"><h4>Verlauf (Chain)</h4><ul style="padding-left:1.2rem">${d.chain.map(c => `<li><a href="#" onclick="event.preventDefault();showAgentDetail(${c.id})">#${c.id}</a> · ${escapeHtml(c.action)} · ${escapeHtml(c.status)} · ${escapeHtml(c.decided_by)}</li>`).join('')}</ul></div>`
+        ? `<div class="detail-section"><h4>${t('agent.chain_history')}</h4><ul style="padding-left:1.2rem">${d.chain.map(c => `<li><a href="#" onclick="event.preventDefault();showAgentDetail(${c.id})">#${c.id}</a> · ${escapeHtml(c.action)} · ${escapeHtml(c.status)} · ${escapeHtml(c.decided_by)}</li>`).join('')}</ul></div>`
         : '';
 
     return `
@@ -383,7 +383,7 @@ async function approveDecision(id) {
         }
         closeAgentDetail();
         await refreshAgentPage();
-    } catch (err) { alert('Fehler: ' + err.message); }
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
 }
 
 async function rejectDecision(id) {
@@ -397,7 +397,7 @@ async function rejectDecision(id) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         closeAgentDetail();
         await refreshAgentPage();
-    } catch (err) { alert('Fehler: ' + err.message); }
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
 }
 
 async function overrideDecision(decisionId, alertId, sourceType, sourceIp) {
@@ -406,10 +406,10 @@ async function overrideDecision(decisionId, alertId, sourceType, sourceIp) {
     const comment = document.getElementById('hcComment')?.value || null;
     const args = {};
     if (action === 'block_ip') {
-        if (!targetIp) { alert('Ziel-IP fehlt'); return; }
+        if (!targetIp) { alert(t('agent.target_ip_missing')); return; }
         args.target_ip = targetIp;
     }
-    if (!confirm(`Override: ${action}${action === 'block_ip' ? ' ' + targetIp : ''} jetzt ausführen?`)) return;
+    if (!confirm(t('agent.override_confirm', {action: action + (action === 'block_ip' ? ' ' + targetIp : '')}))) return;
     const payload = {
         action, action_args: args, comment,
         supersedes: decisionId, execute: true,
@@ -429,7 +429,7 @@ async function overrideDecision(decisionId, alertId, sourceType, sourceIp) {
         }
         closeAgentDetail();
         await refreshAgentPage();
-    } catch (err) { alert('Fehler: ' + err.message); }
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
 }
 
 async function approveAllPending() {
@@ -457,23 +457,22 @@ async function approveAllPending() {
     }
 
     if (!probeError && pendingCount === 0) {
-        alert('Keine pending Decisions im aktuellen Filter.');
+        alert(t('agent.no_pending_filter'));
         return;
     }
 
     const filterLabel = action ? `Action=${action}` : '';
     const countText = probeError
-        ? '(Anzahl konnte nicht ermittelt werden — Bulk-Approve trotzdem versuchen?)'
-        : `${pendingCount} pending Decision(s)${filterLabel ? ' (' + filterLabel + ')' : ''}`;
-    const msg = `${countText} ausführen?\n\n`
-        + 'Whitelist- und Sicherheits-Checks greifen weiterhin pro Decision.';
+        ? t('agent.bulk_count_unknown')
+        : t('agent.bulk_pending_count', {n: pendingCount, filter: filterLabel ? ' (' + filterLabel + ')' : ''});
+    const msg = t('agent.bulk_confirm', {count: countText});
     if (!confirm(msg)) return;
 
     const body = {};
     if (action) body.action = action;
 
     const btn = document.querySelector('button[onclick="approveAllPending()"]');
-    if (btn) { btn.disabled = true; btn.textContent = '… läuft'; }
+    if (btn) { btn.disabled = true; btn.textContent = t('agent.running'); }
     try {
         const r = await fetch('/api/agent/decisions/approve-all-pending', {
             method: 'POST',
@@ -482,15 +481,15 @@ async function approveAllPending() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        let msgOut = `${d.approved} ausgeführt`;
-        if (d.failed) msgOut += `, ${d.failed} fehlgeschlagen (siehe Konsole)`;
+        let msgOut = t('agent.bulk_executed', {n: d.approved});
+        if (d.failed) msgOut += t('agent.bulk_failed', {n: d.failed});
         if (d.errors?.length) console.warn('bulk-approve errors:', d.errors);
         alert(msgOut);
         await refreshAgentPage();
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('agent.error') + ': ' + err.message);
     } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2-all"></i> Alle Pending genehmigen'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2-all"></i> ' + t('agent.approve_all'); }
     }
 }
 
@@ -499,7 +498,7 @@ async function agentRunNow() {
         const r = await fetch('/api/agent/run-now', {method: 'POST'});
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         setTimeout(refreshAgentPage, 2000);
-    } catch (err) { alert('Fehler: ' + err.message); }
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
 }
 
 async function agentRunNowRule(kind) {
@@ -508,7 +507,7 @@ async function agentRunNowRule(kind) {
         const r = await fetch(`/api/agent/${kind}-run-now?window_minutes=60`, {method: 'POST'});
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         setTimeout(refreshAgentPage, 3000);
-    } catch (err) { alert('Fehler: ' + err.message); }
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
 }
 // Backwards-compat alias used by older inline handlers
 async function agentWafRunNow() { return agentRunNowRule('waf'); }

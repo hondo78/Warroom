@@ -68,6 +68,7 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_temperature": float,
     "agent_max_tokens": int,
     "agent_structured_output": bool,
+    "agent_language": str,
     "agent_auto_execute": bool,
     "agent_system_prompt": str,
     "agent_waf_system_prompt": str,

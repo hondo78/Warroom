@@ -21,14 +21,14 @@ async function refreshFirewalls() {
 
         const tbody = document.getElementById('fwListTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine bekannten Firewalls. Sophos-Syslog konfigurieren (Port 5514) oder einen Standort über /index.html hinzufügen.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('firewalls.emptyFirewalls')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(fw => {
             const ipBlocks = (fw.ips || []).map(ipObj => {
                 const wlIcon = ipObj.whitelisted
-                    ? '<span title="whitelisted" style="color:var(--accent-green)">🛡</span>'
-                    : '<span title="nicht whitelisted" style="color:var(--accent-red);opacity:.5">⚠</span>';
+                    ? `<span title="${escapeAttr(t('firewalls.tipWhitelisted'))}" style="color:var(--accent-green)">🛡</span>`
+                    : `<span title="${escapeAttr(t('firewalls.tipNotWhitelisted'))}" style="color:var(--accent-red);opacity:.5">⚠</span>`;
                 const sources = (ipObj.sources || []).map(s => {
                     const lbl = ({location: 'loc', syslog: 'log', netflow: 'flow'})[s] || s;
                     return `<span class="ip-country" style="font-size:.7rem;margin-left:.2rem">${lbl}</span>`;
@@ -38,7 +38,7 @@ async function refreshFirewalls() {
                 if (ipObj.iface_count) stats.push(`${ipObj.iface_count} ifaces`);
                 const statsTxt = stats.length ? ` <span class="ip-country" style="font-size:.7rem">· ${stats.join(' · ')}</span>` : '';
                 const wlBtn = !ipObj.whitelisted
-                    ? ` <button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="diese IP whitelisten">+wl</button>`
+                    ? ` <button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="${escapeAttr(t('firewalls.tipWhitelistThisIp'))}">+wl</button>`
                     : '';
                 return `<div style="line-height:1.6">${wlIcon} <code style="font-size:.82rem">${escapeHtml(ipObj.ip)}</code>${sources}${statsTxt}${wlBtn}</div>`;
             }).join('');
@@ -54,22 +54,22 @@ async function refreshFirewalls() {
                 : '0';
 
             const wlSummary = fw.whitelisted_count === fw.ip_count
-                ? '<span class="severity-badge severity-low">✓ alle</span>'
+                ? `<span class="severity-badge severity-low">✓ ${t('firewalls.wlAll')}</span>`
                 : fw.whitelisted_count === 0
-                    ? '<span class="severity-badge severity-critical">✗ keine</span>'
+                    ? `<span class="severity-badge severity-critical">✗ ${t('firewalls.wlNone')}</span>`
                     : `<span class="severity-badge severity-high">${fw.whitelisted_count}/${fw.ip_count}</span>`;
 
             const actions = [];
             if (fw.whitelisted_count < fw.ip_count) {
-                actions.push(`<button class="ack-btn" onclick="whitelistAllIps('${escapeAttr(ipsCsv)}', '${escapeAttr(fw.name || '')}', this)">Alle whitelisten</button>`);
+                actions.push(`<button class="ack-btn" onclick="whitelistAllIps('${escapeAttr(ipsCsv)}', '${escapeAttr(fw.name || '')}', this)">${t('firewalls.whitelistAll')}</button>`);
             }
             if (fw.location_id) {
-                actions.push(`<button class="block-link" onclick="deleteFw(${fw.location_id}, '${escapeAttr(fw.name || '')}', this)">Standort entfernen</button>`);
+                actions.push(`<button class="block-link" onclick="deleteFw(${fw.location_id}, '${escapeAttr(fw.name || '')}', this)">${t('firewalls.removeLocation')}</button>`);
             }
 
             const fwLabel = fw.name
                 ? `<strong>${escapeHtml(fw.name)}</strong>`
-                : `<em>(ohne Namen)</em>`;
+                : `<em>${t('firewalls.unnamed')}</em>`;
             return `
                 <tr>
                     <td>${fwLabel}<div class="ip-country" style="font-size:.72rem">${fw.ip_count} IP${fw.ip_count === 1 ? '' : 's'}</div></td>
@@ -94,7 +94,7 @@ async function showIfacesForFw(ipsCsv, name) {
     document.getElementById('fwIfaceTitle').textContent = `${name} (${ips.length} IP${ips.length === 1 ? '' : 's'})`;
     document.getElementById('fwIfaceCard').style.display = '';
     const tbody = document.getElementById('fwIfaceTable');
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1rem">Lade…</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1rem">${t('common.loading')}</td></tr>`;
     try {
         // Fetch interfaces for every IP in parallel, then merge
         const results = await Promise.all(ips.map(ip =>
@@ -105,7 +105,7 @@ async function showIfacesForFw(ipsCsv, name) {
             for (const it of items) merged.push({...it, _ip: ip});
         }
         if (!merged.length) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine NetFlow-Interface-Daten in den letzten 24h.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('firewalls.emptyInterfaces')}</td></tr>`;
             return;
         }
         merged.sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out));
@@ -136,14 +136,14 @@ async function whitelistIp(ip, name, btn) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         await refreshFirewalls();
     } catch (err) {
-        alert('Whitelist fehlgeschlagen: ' + err.message);
+        alert(t('firewalls.whitelistFailed', {error: err.message}));
         btn.disabled = false; btn.textContent = '+wl';
     }
 }
 
 async function whitelistAllIps(ipsCsv, name, btn) {
     const ips = ipsCsv.split(',').filter(Boolean);
-    if (!confirm(`Alle ${ips.length} IP(s) von "${name}" whitelisten?`)) return;
+    if (!confirm(t('firewalls.confirmWhitelistAll', {count: ips.length, name: name}))) return;
     btn.disabled = true; btn.textContent = '...';
     try {
         for (const ip of ips) {
@@ -155,8 +155,8 @@ async function whitelistAllIps(ipsCsv, name, btn) {
         }
         await refreshFirewalls();
     } catch (err) {
-        alert('Whitelist fehlgeschlagen: ' + err.message);
-        btn.disabled = false; btn.textContent = 'Alle whitelisten';
+        alert(t('firewalls.whitelistFailed', {error: err.message}));
+        btn.disabled = false; btn.textContent = t('firewalls.whitelistAll');
     }
 }
 
@@ -169,7 +169,7 @@ async function showIfaces(ip, name) {
         document.getElementById('fwIfaceCard').style.display = '';
         const tbody = document.getElementById('fwIfaceTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine NetFlow-Interface-Daten in den letzten 24h.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('firewalls.emptyInterfaces')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(it => `
@@ -184,7 +184,7 @@ async function showIfaces(ip, name) {
             </tr>`).join('');
         document.getElementById('fwIfaceCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
     } catch (err) {
-        alert('Interface-Liste fehlgeschlagen: ' + err.message);
+        alert(t('firewalls.interfaceListFailed', {error: err.message}));
     }
 }
 
@@ -203,21 +203,21 @@ async function whitelistFw(ip, name, btn) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         await refreshFirewalls();
     } catch (err) {
-        alert('Whitelist fehlgeschlagen: ' + err.message);
-        btn.disabled = false; btn.textContent = 'Whitelist';
+        alert(t('firewalls.whitelistFailed', {error: err.message}));
+        btn.disabled = false; btn.textContent = t('firewalls.whitelist');
     }
 }
 
 async function deleteFw(locId, label, btn) {
-    if (!confirm(`Firewall-Standort "${label}" entfernen?\nHinweis: Wenn die Firewall weiter Syslog/NetFlow sendet, taucht sie über die Quellen erneut auf.`)) return;
+    if (!confirm(t('firewalls.confirmDeleteLocation', {label: label}))) return;
     btn.disabled = true; btn.textContent = '...';
     try {
         const r = await fetch(`/api/firewalls/${locId}`, {method: 'DELETE'});
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         await refreshFirewalls();
     } catch (err) {
-        alert('Entfernen fehlgeschlagen: ' + err.message);
-        btn.disabled = false; btn.textContent = 'Entfernen';
+        alert(t('firewalls.removeFailed', {error: err.message}));
+        btn.disabled = false; btn.textContent = t('common.delete');
     }
 }
 
@@ -226,9 +226,14 @@ async function refreshWhitelistFromHere() {
         const r = await fetch('/api/firewall/whitelist/refresh', {method: 'POST'});
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        alert(`Whitelist aktualisiert:\n+ ${d.added.length} neu\n· ${d.refreshed.length} aktualisiert\n− ${d.removed_stale_auto.length} alte Auto-Einträge entfernt\n${d.removed_from_blocklist.length ? '⚠ ' + d.removed_from_blocklist.length + ' IPs aus Blocklist gerettet' : ''}`);
+        const rescued = d.removed_from_blocklist.length ? '\n' + t('firewalls.whitelistRescued', {count: d.removed_from_blocklist.length}) : '';
+        alert(t('firewalls.whitelistUpdated', {
+            added: d.added.length,
+            refreshed: d.refreshed.length,
+            removed: d.removed_stale_auto.length,
+        }) + rescued);
         await refreshFirewalls();
-    } catch (err) { alert('Refresh fehlgeschlagen: ' + err.message); }
+    } catch (err) { alert(t('firewalls.refreshFailed', {error: err.message})); }
 }
 
 // --- helpers ---

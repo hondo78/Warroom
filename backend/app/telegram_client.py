@@ -33,6 +33,35 @@ def _enabled() -> bool:
     return bool(settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id)
 
 
+# Language-aware notification strings (follows settings.agent_language).
+_TG_STRINGS = {
+    "approval_required": {"de": "🛡 <b>Warroom — Freigabe erforderlich</b>",
+                          "en": "🛡 <b>Warroom — Approval required</b>"},
+    "action":   {"de": "Aktion", "en": "Action"},
+    "source":   {"de": "Quelle", "en": "Source"},
+    "decision": {"de": "Decision", "en": "Decision"},
+    "not_authorized": {"de": "Nicht autorisiert.", "en": "Not authorized."},
+    "unknown_action": {"de": "Unbekannte Aktion.", "en": "Unknown action."},
+    "invalid_id": {"de": "Ungültige Decision-ID.", "en": "Invalid decision ID."},
+    "not_found": {"de": "Decision nicht gefunden.", "en": "Decision not found."},
+    "already": {"de": "Bereits {s}.", "en": "Already {s}."},
+    "already_tag": {"de": "— bereits <b>{s}</b>", "en": "— already <b>{s}</b>"},
+    "approved_executed": {"de": "✅ <b>FREIGEGEBEN & ausgeführt</b>", "en": "✅ <b>APPROVED & executed</b>"},
+    "approve_failed": {"de": "⚠️ Freigabe fehlgeschlagen: {e}", "en": "⚠️ Approve failed: {e}"},
+    "approved": {"de": "Freigegeben.", "en": "Approved."},
+    "exec_error": {"de": "Fehler beim Ausführen.", "en": "Execution error."},
+    "rejected_tag": {"de": "❌ <b>ABGELEHNT</b>", "en": "❌ <b>REJECTED</b>"},
+    "rejected": {"de": "Abgelehnt.", "en": "Rejected."},
+    "by": {"de": "von", "en": "by"},
+}
+
+
+def _tg(key: str, **vars) -> str:
+    lang = "de" if getattr(settings, "agent_language", "en") == "de" else "en"
+    s = _TG_STRINGS.get(key, {}).get(lang, key)
+    return s.format(**vars) if vars else s
+
+
 async def _call(method: str, payload: dict, timeout: float = 15.0) -> dict | None:
     url = _API.format(token=settings.telegram_bot_token, method=method)
     try:
@@ -54,14 +83,14 @@ def _decision_caption(rec: AgentDecision, ip: str | None) -> str:
     if len(reason) > 600:
         reason = reason[:600] + "…"
     lines = [
-        "🛡 <b>Warroom — Approval erforderlich</b>",
-        f"<b>Aktion:</b> {rec.action}",
+        _tg("approval_required"),
+        f"<b>{_tg('action')}:</b> {rec.action}",
     ]
     if ip:
         lines.append(f"<b>IP:</b> <code>{ip}</code>")
     lines += [
-        f"<b>Quelle:</b> {src}",
-        f"<b>Decision:</b> #{rec.id}",
+        f"<b>{_tg('source')}:</b> {src}",
+        f"<b>{_tg('decision')}:</b> #{rec.id}",
     ]
     if reason:
         lines.append(f"\n{reason}")
@@ -159,17 +188,17 @@ async def _handle_callback(cb: dict) -> None:
 
     # Only the configured chat may act on approvals.
     if from_chat != str(settings.telegram_chat_id):
-        await _answer_callback(cb_id, "Nicht autorisiert.")
+        await _answer_callback(cb_id, _tg("not_authorized"))
         return
     if ":" not in data:
-        await _answer_callback(cb_id, "Unbekannte Aktion.")
+        await _answer_callback(cb_id, _tg("unknown_action"))
         return
 
     action, _, sid = data.partition(":")
     try:
         decision_id = int(sid)
     except ValueError:
-        await _answer_callback(cb_id, "Ungültige Decision-ID.")
+        await _answer_callback(cb_id, _tg("invalid_id"))
         return
 
     actor = _actor_name(cb.get("from"))
@@ -177,23 +206,23 @@ async def _handle_callback(cb: dict) -> None:
     async with async_session() as db:
         rec = await db.get(AgentDecision, decision_id)
         if rec is None:
-            await _answer_callback(cb_id, "Decision nicht gefunden.")
+            await _answer_callback(cb_id, _tg("not_found"))
             return
         if rec.status not in ("pending", "approved"):
-            await _answer_callback(cb_id, f"Bereits {rec.status}.")
+            await _answer_callback(cb_id, _tg("already", s=rec.status))
             if message_id:
-                await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + f"\n\n— bereits <b>{rec.status}</b>")
+                await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + "\n\n" + _tg("already_tag", s=rec.status))
             return
 
     if action == "approve":
         from app.agent import execute_decision
         try:
             await execute_decision(decision_id)
-            verdict = "✅ <b>APPROVED & ausgeführt</b>"
-            await _answer_callback(cb_id, "Approved.")
+            verdict = _tg("approved_executed")
+            await _answer_callback(cb_id, _tg("approved"))
         except Exception as e:
-            verdict = f"⚠️ Approve fehlgeschlagen: {e}"
-            await _answer_callback(cb_id, "Fehler beim Ausführen.")
+            verdict = _tg("approve_failed", e=e)
+            await _answer_callback(cb_id, _tg("exec_error"))
         async with async_session() as db:
             rec = await db.get(AgentDecision, decision_id)
             if rec and rec.human_comment is None:
@@ -207,16 +236,16 @@ async def _handle_callback(cb: dict) -> None:
                 rec.decided_at = datetime.now(timezone.utc)
                 rec.human_comment = f"rejected via Telegram by {actor}"
                 await db.commit()
-        verdict = "❌ <b>REJECTED</b>"
-        await _answer_callback(cb_id, "Rejected.")
+        verdict = _tg("rejected_tag")
+        await _answer_callback(cb_id, _tg("rejected"))
     else:
-        await _answer_callback(cb_id, "Unbekannte Aktion.")
+        await _answer_callback(cb_id, _tg("unknown_action"))
         return
 
     if message_id:
         async with async_session() as db:
             rec = await db.get(AgentDecision, decision_id)
-        await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + f"\n\n{verdict} — by @{actor}")
+        await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + f"\n\n{verdict} — {_tg('by')} @{actor}")
 
 
 async def _handle_message(msg: dict) -> None:

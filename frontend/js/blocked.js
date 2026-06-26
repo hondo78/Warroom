@@ -68,7 +68,7 @@ async function updateWhitelistTable() {
         const tbody = document.getElementById('whitelistTable');
         if (!tbody) return;
         if (!items.length) {
-            tbody.innerHTML = emptyRow(5, 'Keine Whitelist-Einträge — auf "Auto-Refresh" klicken um Firewall-IPs zu importieren');
+            tbody.innerHTML = emptyRow(5, t('blocked.empty_whitelist'));
             return;
         }
         tbody.innerHTML = items.map(w => {
@@ -82,7 +82,7 @@ async function updateWhitelistTable() {
                     <td>${sourceBadge}</td>
                     <td>${escapeHtml(w.comment || '-')}</td>
                     <td>${formatTime(w.created_at)}</td>
-                    <td><button class="restore-btn" onclick="whitelistRemove('${escapeAttr(w.ip)}', this)">Entfernen</button></td>
+                    <td><button class="restore-btn" onclick="whitelistRemove('${escapeAttr(w.ip)}', this)">${t('blocked.btn_remove')}</button></td>
                 </tr>`;
         }).join('');
     } catch (err) {
@@ -93,7 +93,7 @@ async function updateWhitelistTable() {
 async function whitelistAdd() {
     const ip = document.getElementById('whitelistIpInput').value.trim();
     const comment = document.getElementById('whitelistCommentInput').value.trim();
-    if (!ip) { alert('IP angeben'); return; }
+    if (!ip) { alert(t('blocked.alert_enter_ip')); return; }
     try {
         const r = await fetch('/api/firewall/whitelist', {
             method: 'POST',
@@ -108,19 +108,19 @@ async function whitelistAdd() {
         // If the IP was on the block list, that just got dropped too
         await updateBlockedIpsTable();
         switchBlockedTab('whitelist');
-    } catch (err) { alert('Whitelist fehlgeschlagen: ' + err.message); }
+    } catch (err) { alert(t('blocked.err_whitelist_failed') + err.message); }
 }
 
 async function whitelistRemove(ip, btn) {
-    if (!confirm(`IP ${ip} von der Whitelist entfernen? Sie kann danach wieder geblockt werden.`)) return;
+    if (!confirm(t('blocked.confirm_whitelist_remove', { ip }))) return;
     btn.disabled = true; btn.textContent = '...';
     try {
         const r = await fetch(`/api/firewall/whitelist/${encodeURIComponent(ip)}`, {method: 'DELETE'});
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         await updateWhitelistTable();
     } catch (err) {
-        alert('Fehler: ' + err.message);
-        btn.disabled = false; btn.textContent = 'Entfernen';
+        alert(t('blocked.err_generic') + err.message);
+        btn.disabled = false; btn.textContent = t('blocked.btn_remove');
     }
 }
 
@@ -131,8 +131,15 @@ async function whitelistRefresh() {
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
         await updateWhitelistTable();
         await updateBlockedIpsTable();
-        alert(`Auto-Refresh fertig:\n+ ${d.added.length} neu\n· ${d.refreshed.length} aktualisiert\n− ${d.removed_stale_auto.length} verstaut\n${d.removed_from_blocklist.length ? '⚠ ' + d.removed_from_blocklist.length + ' IPs aus Blocklist entfernt' : ''}`);
-    } catch (err) { alert('Refresh fehlgeschlagen: ' + err.message); }
+        const extra = d.removed_from_blocklist.length
+            ? '\n' + t('blocked.refresh_removed_from_blocklist', { n: d.removed_from_blocklist.length })
+            : '';
+        alert(t('blocked.refresh_done', {
+            added: d.added.length,
+            refreshed: d.refreshed.length,
+            stale: d.removed_stale_auto.length,
+        }) + extra);
+    } catch (err) { alert(t('blocked.err_refresh_failed') + err.message); }
 }
 
 async function updateBlockedIpsTable() {
@@ -147,7 +154,7 @@ async function updateBlockedIpsTable() {
 
         const tbody = document.getElementById('blockedIpsTable');
         if (!items.length) {
-            tbody.innerHTML = emptyRow(4, 'Keine geblockten IPs');
+            tbody.innerHTML = emptyRow(4, t('blocked.empty_ips'));
             return;
         }
         tbody.innerHTML = items.map(b => `
@@ -155,7 +162,7 @@ async function updateBlockedIpsTable() {
                 <td><code>${escapeHtml(b.ip)}</code>${typeof osintButton === 'function' ? osintButton(b.ip, 'osint-btn', 'ip') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
-                <td><button class="restore-btn" onclick="unblockIp('${escapeAttr(b.ip)}', this)">Unblock</button></td>
+                <td><button class="restore-btn" onclick="unblockIp('${escapeAttr(b.ip)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');
     } catch (err) {
         console.error('Blocked IPs update failed:', err);
@@ -174,7 +181,7 @@ async function updateBlockedDomainsTable() {
 
         const tbody = document.getElementById('blockedDomainsTable');
         if (!items.length) {
-            tbody.innerHTML = emptyRow(4, 'Keine geblockten Domains');
+            tbody.innerHTML = emptyRow(4, t('blocked.empty_domains'));
             return;
         }
         tbody.innerHTML = items.map(b => `
@@ -182,7 +189,7 @@ async function updateBlockedDomainsTable() {
                 <td><code>${escapeHtml(b.domain)}</code>${typeof osintButton === 'function' ? osintButton(b.domain, 'osint-btn', 'domain') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
-                <td><button class="restore-btn" onclick="unblockDomain('${escapeAttr(b.domain)}', this)">Unblock</button></td>
+                <td><button class="restore-btn" onclick="unblockDomain('${escapeAttr(b.domain)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');
     } catch (err) {
         console.error('Blocked domains update failed:', err);
@@ -201,7 +208,7 @@ async function updateBlockedUrlsTable() {
 
         const tbody = document.getElementById('blockedUrlsTable');
         if (!items.length) {
-            tbody.innerHTML = emptyRow(4, 'Keine geblockten URLs');
+            tbody.innerHTML = emptyRow(4, t('blocked.empty_urls'));
             return;
         }
         tbody.innerHTML = items.map(b => `
@@ -209,7 +216,7 @@ async function updateBlockedUrlsTable() {
                 <td><code class="waf-url" title="${escapeHtml(b.url)}" onclick="this.classList.toggle('expanded')">${escapeHtml(b.url)}</code>${typeof osintButton === 'function' ? osintButton(b.url, 'osint-btn', 'url') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
-                <td><button class="restore-btn" onclick="unblockUrl('${escapeAttr(b.url)}', this)">Unblock</button></td>
+                <td><button class="restore-btn" onclick="unblockUrl('${escapeAttr(b.url)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');
     } catch (err) {
         console.error('Blocked URLs update failed:', err);
@@ -241,7 +248,7 @@ async function blockIpManual() {
     const ip = document.getElementById('blockIpInput').value.trim();
     const comment = document.getElementById('blockIpCommentInput').value.trim();
     if (!ip) {
-        alert('Bitte IP angeben');
+        alert(t('blocked.alert_enter_ip'));
         return;
     }
     try {
@@ -256,12 +263,12 @@ async function blockIpManual() {
         document.getElementById('blockIpCommentInput').value = '';
         await updateBlockedIpsTable();
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_block_failed') + err.message);
     }
 }
 
 async function unblockIp(ip, btn) {
-    if (!confirm(`IP ${ip} aus Blocklist entfernen?`)) return;
+    if (!confirm(t('blocked.confirm_unblock_ip', { ip }))) return;
     btn.disabled = true;
     btn.textContent = '...';
     try {
@@ -274,9 +281,9 @@ async function unblockIp(ip, btn) {
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         await updateBlockedIpsTable();
     } catch (err) {
-        alert('Unblock fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_unblock_failed') + err.message);
         btn.disabled = false;
-        btn.textContent = 'Unblock';
+        btn.textContent = t('blocked.btn_unblock');
     }
 }
 
@@ -284,7 +291,7 @@ async function blockDomainManual() {
     const domain = document.getElementById('blockDomainInput').value.trim();
     const comment = document.getElementById('blockDomainCommentInput').value.trim();
     if (!domain) {
-        alert('Bitte Domain oder URL angeben');
+        alert(t('blocked.alert_enter_domain'));
         return;
     }
     try {
@@ -300,12 +307,12 @@ async function blockDomainManual() {
         await updateBlockedDomainsTable();
         switchBlockedTab('domains');
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_block_failed') + err.message);
     }
 }
 
 async function unblockDomain(domain, btn) {
-    if (!confirm(`Domain ${domain} aus Blocklist entfernen?`)) return;
+    if (!confirm(t('blocked.confirm_unblock_domain', { domain }))) return;
     btn.disabled = true;
     btn.textContent = '...';
     try {
@@ -318,9 +325,9 @@ async function unblockDomain(domain, btn) {
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         await updateBlockedDomainsTable();
     } catch (err) {
-        alert('Unblock fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_unblock_failed') + err.message);
         btn.disabled = false;
-        btn.textContent = 'Unblock';
+        btn.textContent = t('blocked.btn_unblock');
     }
 }
 
@@ -328,7 +335,7 @@ async function blockUrlManual() {
     const url = document.getElementById('blockUrlInput').value.trim();
     const comment = document.getElementById('blockUrlCommentInput').value.trim();
     if (!url) {
-        alert('Bitte URL angeben');
+        alert(t('blocked.alert_enter_url'));
         return;
     }
     try {
@@ -344,12 +351,12 @@ async function blockUrlManual() {
         await updateBlockedUrlsTable();
         switchBlockedTab('urls');
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_block_failed') + err.message);
     }
 }
 
 async function unblockUrl(url, btn) {
-    if (!confirm(`URL ${url} aus Blocklist entfernen?`)) return;
+    if (!confirm(t('blocked.confirm_unblock_url', { url }))) return;
     btn.disabled = true;
     btn.textContent = '...';
     try {
@@ -362,9 +369,9 @@ async function unblockUrl(url, btn) {
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         await updateBlockedUrlsTable();
     } catch (err) {
-        alert('Unblock fehlgeschlagen: ' + err.message);
+        alert(t('blocked.err_unblock_failed') + err.message);
         btn.disabled = false;
-        btn.textContent = 'Unblock';
+        btn.textContent = t('blocked.btn_unblock');
     }
 }
 

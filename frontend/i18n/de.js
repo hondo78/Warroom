@@ -1,0 +1,57 @@
+// German dictionary for Warroom i18n. Loaded as a global before js/i18n.js.
+// Merge-safe: never overwrites window.I18N.de, so per-page namespace files may
+// load in any order relative to this file.
+window.I18N = window.I18N || {};
+window.I18N.de = window.I18N.de || {};
+Object.assign(window.I18N.de, {
+    nav: {
+        dashboard: "Dashboard",
+        chat: "KI-Chat",
+        netflow: "NetFlow",
+        blocklist: "Blocklist",
+        firewalls: "Firewalls",
+        fw_anomalies: "FW-Anomalien",
+        endpoints: "Endpoints",
+        agent: "Agent",
+        agent_workflow: "Agent-Workflow",
+        email: "Email",
+        m365: "Microsoft 365",
+        osint: "OSINT",
+        statistics: "Statistik",
+        admin: "Admin",
+    },
+    common: {
+        refresh: "Aktualisieren",
+        collect_data: "Daten sammeln",
+        save: "Speichern",
+        delete: "Löschen",
+        cancel: "Abbrechen",
+        close: "Schließen",
+        edit: "Bearbeiten",
+        add: "Hinzufügen",
+        send: "Senden",
+        test_connection: "Verbindung testen",
+        time: "Zeit",
+        severity: "Schwere",
+        action: "Aktion",
+        source_ip: "Quell-IP",
+        dest_ip: "Ziel-IP",
+        country: "Land",
+        city: "Stadt",
+        status: "Status",
+        reason: "Grund",
+        subject: "Betreff",
+        sender: "Absender",
+        firewall: "Firewall",
+        score: "Score",
+        loading: "Lädt…",
+        none: "—",
+    },
+    dashboard: {
+        add_firewall: "Firewall",
+        range_24h: "24 Stunden",
+        range_7d: "7 Tage",
+        range_30d: "30 Tage",
+        range_90d: "90 Tage",
+    },
+});

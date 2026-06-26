@@ -3520,10 +3520,12 @@ async def chat_command(body: ChatCommandIn):
 
 
 @app.get("/api/chat/default-persona")
-async def chat_default_persona():
-    """The bundled analyst-persona prompt, for the admin 'reset to default'."""
-    from app.command_service import DEFAULT_ANALYST_PROMPT
-    return {"prompt": DEFAULT_ANALYST_PROMPT}
+async def chat_default_persona(lang: str | None = Query(default=None, pattern="^(en|de)$")):
+    """The bundled analyst-persona prompt, for the admin 'reset to default'.
+    Language follows ``lang`` if given, else the configured agent_language."""
+    from app.command_service import DEFAULT_ANALYST_PROMPT, DEFAULT_ANALYST_PROMPT_EN
+    use = lang if lang in ("en", "de") else ("de" if getattr(settings, "agent_language", "en") == "de" else "en")
+    return {"prompt": DEFAULT_ANALYST_PROMPT_EN if use == "en" else DEFAULT_ANALYST_PROMPT}
 
 
 def _verify_teams_hmac(raw: bytes, auth_header: str | None) -> bool:
@@ -4154,6 +4156,7 @@ class AdminSettingsIn(BaseModel):
     agent_max_tokens: int | None = Field(default=None, ge=1, le=32000)
     agent_structured_output: bool | None = None
     agent_auto_execute: bool | None = None
+    agent_language: str | None = Field(default=None, pattern="^(en|de)$")
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_event_enabled: bool | None = None
@@ -4829,20 +4832,22 @@ async def list_agent_models():
 
 
 @app.get("/api/admin/agent/default-prompt")
-async def get_agent_default_prompt(source: str = Query(default="alert")):
+async def get_agent_default_prompt(
+    source: str = Query(default="alert"),
+    lang: str | None = Query(default=None, pattern="^(en|de)$"),
+):
     """Return the bundled fallback system prompt so the admin UI can offer
-    'reset to default'. ``source`` is "alert" (the original Sophos-alert prompt)
-    or any key in agent._RULE_PROMPTS (waf, ips, event, failed_login,
-    failed_login_distributed, failed_login_user, triage)."""
-    from app.agent import DEFAULT_SYSTEM_PROMPT, _RULE_PROMPTS
-    # Single source of truth: derive from _RULE_PROMPTS so new stages can't drift.
-    mapping = {"alert": DEFAULT_SYSTEM_PROMPT}
-    mapping.update({src: default for src, (_attr, default) in _RULE_PROMPTS.items()})
-    prompt = mapping.get(source)
+    'reset to default'. ``source`` is "alert" or any key in agent._RULE_PROMPTS
+    (waf, ips, event, failed_login, failed_login_distributed, failed_login_user,
+    triage). Language follows ``lang`` if given, else the configured
+    agent_language (so the default matches the agent's active language)."""
+    from app.agent import default_prompt, _RULE_PROMPTS
+    prompt = default_prompt(source, lang)
     if prompt is None:
+        valid = ["alert", *sorted(_RULE_PROMPTS)]
         raise HTTPException(
             status_code=400,
-            detail=f"unknown source {source!r}; must be one of {sorted(mapping)}",
+            detail=f"unknown source {source!r}; must be one of {valid}",
         )
     return {"default": prompt, "source": source}
 

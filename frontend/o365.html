@@ -20,17 +20,17 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 <select id="o365Days" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
-                    <option value="1">24 Stunden</option>
-                    <option value="7" selected>7 Tage</option>
-                    <option value="30">30 Tage</option>
-                    <option value="90">90 Tage</option>
+                    <option value="1" data-i18n="o365.range_24h">24 Stunden</option>
+                    <option value="7" selected data-i18n="o365.range_7d">7 Tage</option>
+                    <option value="30" data-i18n="o365.range_30d">30 Tage</option>
+                    <option value="90" data-i18n="o365.range_90d">90 Tage</option>
                 </select>
                 <select id="o365Status" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
-                    <option value="all" selected>Alle Logins</option>
-                    <option value="failed">Nur fehlgeschlagen</option>
-                    <option value="success">Nur erfolgreich</option>
+                    <option value="all" selected data-i18n="o365.status_all">Alle Logins</option>
+                    <option value="failed" data-i18n="o365.status_failed">Nur fehlgeschlagen</option>
+                    <option value="success" data-i18n="o365.status_success">Nur erfolgreich</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="refreshO365()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshO365()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
     </nav>
@@ -67,7 +67,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">☁️ Microsoft 365 — Login-Audit</h3>
+                <h3 class="mb-0" data-i18n="o365.page_title">☁️ Microsoft 365 — Login-Audit</h3>
             </div>
         </div>
 
@@ -76,50 +76,50 @@
 
                 <div class="alert alert-warning" id="o365NotConfigured" style="display:none">
                     <i class="bi bi-exclamation-triangle"></i>
-                    <strong>Nicht konfiguriert.</strong> Hinterlege Tenant-ID, Client-ID und Client-Secret der
+                    <span data-i18n-html="o365.not_configured"><strong>Nicht konfiguriert.</strong> Hinterlege Tenant-ID, Client-ID und Client-Secret der
                     Entra-ID-App-Registrierung (Berechtigung <code>ActivityFeed.Read</code> auf den Office 365
                     Management APIs, Application + Admin-Consent) unter <a href="/admin.html">Admin</a>.
-                    Der Collector startet danach automatisch.
+                    Der Collector startet danach automatisch.</span>
                 </div>
 
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="o365Total">-</h3><p>Logins gesamt</p></div><div class="small-box-footer">im gewählten Zeitraum</div><span class="icon"><i class="bi bi-box-arrow-in-right"></i></span></div>
-                    <div class="small-box bg-danger"><div class="inner"><h3 id="o365Failed">-</h3><p>Fehlgeschlagen</p></div><div class="small-box-footer">UserLoginFailed</div><span class="icon"><i class="bi bi-x-octagon"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="o365Users">-</h3><p>Benutzer</p></div><div class="small-box-footer">eindeutige UPNs</div><span class="icon"><i class="bi bi-people"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="o365Ips">-</h3><p>Quell-IPs</p></div><div class="small-box-footer">eindeutige Adressen</div><span class="icon"><i class="bi bi-globe"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="o365Total">-</h3><p data-i18n="o365.stat_total">Logins gesamt</p></div><div class="small-box-footer" data-i18n="o365.stat_total_sub">im gewählten Zeitraum</div><span class="icon"><i class="bi bi-box-arrow-in-right"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="o365Failed">-</h3><p data-i18n="o365.stat_failed">Fehlgeschlagen</p></div><div class="small-box-footer">UserLoginFailed</div><span class="icon"><i class="bi bi-x-octagon"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="o365Users">-</h3><p data-i18n="o365.stat_users">Benutzer</p></div><div class="small-box-footer" data-i18n="o365.stat_users_sub">eindeutige UPNs</div><span class="icon"><i class="bi bi-people"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="o365Ips">-</h3><p data-i18n="o365.stat_ips">Quell-IPs</p></div><div class="small-box-footer" data-i18n="o365.stat_ips_sub">eindeutige Adressen</div><span class="icon"><i class="bi bi-globe"></i></span></div>
                 </div>
 
                 <div class="row">
                     <div class="col-lg-8">
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Login-Ereignisse</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="o365.login_events">Login-Ereignisse</h3></div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="o365GlobalFilter" class="form-control form-control-sm" placeholder="Schnellfilter über alle Spalten…">
+                                    <input type="text" id="o365GlobalFilter" class="form-control form-control-sm" data-i18n-placeholder="o365.quick_filter" placeholder="Schnellfilter über alle Spalten…">
                                 </div>
                                 <div class="table-scroll">
                                     <table class="table table-sm table-hover align-middle">
                                         <thead>
                                             <tr id="o365SortRow">
-                                                <th data-sort="created_at" style="cursor:pointer" title="Sortieren">Zeit <span class="sort-ind"></span></th>
-                                                <th data-sort="user_id" style="cursor:pointer" title="Sortieren">Benutzer <span class="sort-ind"></span></th>
-                                                <th data-sort="result" style="cursor:pointer" title="Sortieren">Ergebnis <span class="sort-ind"></span></th>
-                                                <th data-sort="app" style="cursor:pointer" title="Sortieren">App <span class="sort-ind"></span></th>
-                                                <th data-sort="device" style="cursor:pointer" title="Sortieren">Gerät <span class="sort-ind"></span></th>
-                                                <th data-sort="client_ip" style="cursor:pointer" title="Sortieren">IP <span class="sort-ind"></span></th>
-                                                <th data-sort="location" style="cursor:pointer" title="Sortieren">Standort <span class="sort-ind"></span></th>
-                                                <th data-sort="logon_error" style="cursor:pointer" title="Sortieren">Fehler <span class="sort-ind"></span></th>
-                                                <th>Aktionen</th>
+                                                <th data-sort="created_at" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="common.time">Zeit</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="user_id" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_user">Benutzer</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="result" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_result">Ergebnis</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="app" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_app">App</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="device" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_device">Gerät</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="client_ip" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_ip">IP</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="location" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_location">Standort</span> <span class="sort-ind"></span></th>
+                                                <th data-sort="logon_error" style="cursor:pointer" data-i18n-title="o365.sort" title="Sortieren"><span data-i18n="o365.col_error">Fehler</span> <span class="sort-ind"></span></th>
+                                                <th data-i18n="common.action">Aktionen</th>
                                             </tr>
                                             <tr>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="created_at" placeholder="filtern…"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="user_id" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="created_at" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="user_id" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
                                                 <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="result" placeholder="ok/failed"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="app" placeholder="filtern…"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="device" placeholder="filtern…"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="client_ip" placeholder="filtern…"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="location" placeholder="filtern…"></th>
-                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="logon_error" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="app" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="device" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="client_ip" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="location" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
+                                                <th><input type="text" class="form-control form-control-sm o365-col-filter" data-col="logon_error" data-i18n-placeholder="o365.filter" placeholder="filtern…"></th>
                                                 <th></th>
                                             </tr>
                                         </thead>
@@ -131,7 +131,7 @@
                     </div>
                     <div class="col-lg-4">
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Top fehlgeschlagene Benutzer</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="o365.top_failed_users">Top fehlgeschlagene Benutzer</h3></div>
                             <div class="card-body p-2">
                                 <table class="table table-sm mb-0">
                                     <tbody id="o365TopUsers"></tbody>
@@ -139,7 +139,7 @@
                             </div>
                         </div>
                         <div class="card mb-3">
-                            <div class="card-header"><h3 class="card-title mb-0">Top Herkunftsländer</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="o365.top_countries">Top Herkunftsländer</h3></div>
                             <div class="card-body p-2">
                                 <table class="table table-sm mb-0">
                                     <tbody id="o365TopCountries"></tbody>
@@ -158,18 +158,25 @@
 <div class="modal-overlay" id="osintModal">
     <div class="modal alert-detail-modal">
         <div class="alert-detail-header">
-            <h3 id="osintModalTitle">OSINT-Check</h3>
-            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            <h3 id="osintModalTitle" data-i18n="o365.osint_check">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" data-i18n-title="common.close" title="Schliessen">×</button>
         </div>
-        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="osintModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
-            <button onclick="closeOsint()">Schliessen</button>
+            <button onclick="reloadOsint()" data-i18n="o365.recheck">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/osint.de.js"></script>
+    <script src="/i18n/osint.en.js"></script>
+    <script src="/i18n/o365.de.js"></script>
+    <script src="/i18n/o365.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
 <script src="/js/osint.js"></script>

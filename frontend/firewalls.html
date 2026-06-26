@@ -19,8 +19,8 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <button class="btn btn-outline-secondary btn-sm" onclick="refreshFirewalls()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
-                <button class="btn btn-success btn-sm" onclick="refreshWhitelistFromHere()"><i class="bi bi-shield-check"></i> Whitelist auto-fill</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshFirewalls()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+                <button class="btn btn-success btn-sm" onclick="refreshWhitelistFromHere()"><i class="bi bi-shield-check"></i> <span data-i18n="firewalls.whitelistAutoFill">Whitelist auto-fill</span></button>
             </div>
         </div>
     </nav>
@@ -57,7 +57,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">🔥 Firewalls — Übersicht</h3>
+                <h3 class="mb-0" data-i18n-html="firewalls.pageTitle">🔥 Firewalls — Übersicht</h3>
             </div>
         </div>
 
@@ -65,23 +65,23 @@
             <div class="container-fluid">
 
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="fwCount">-</h3><p>Bekannte Firewalls</p></div><div class="small-box-footer">nach Name gruppiert</div><span class="icon"><i class="bi bi-fire"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="fwWhitelisted">-</h3><p>IPs auf Whitelist</p></div><div class="small-box-footer">vor Self-Block geschützt</div><span class="icon"><i class="bi bi-shield-check"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="fwIfaces">-</h3><p>Interfaces (∑)</p></div><div class="small-box-footer">NetFlow Exporter-Indizes</div><span class="icon"><i class="bi bi-diagram-3"></i></span></div>
-                    <div class="small-box bg-danger"><div class="inner"><h3 id="fwLogs">-</h3><p>Logs (∑)</p></div><div class="small-box-footer">aus firewall_logs</div><span class="icon"><i class="bi bi-journal-text"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="fwCount">-</h3><p data-i18n="firewalls.statKnownFirewalls">Bekannte Firewalls</p></div><div class="small-box-footer" data-i18n="firewalls.statKnownFirewallsHint">nach Name gruppiert</div><span class="icon"><i class="bi bi-fire"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="fwWhitelisted">-</h3><p data-i18n="firewalls.statWhitelistedIps">IPs auf Whitelist</p></div><div class="small-box-footer" data-i18n="firewalls.statWhitelistedIpsHint">vor Self-Block geschützt</div><span class="icon"><i class="bi bi-shield-check"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="fwIfaces">-</h3><p data-i18n="firewalls.statInterfaces">Interfaces (∑)</p></div><div class="small-box-footer" data-i18n="firewalls.statInterfacesHint">NetFlow Exporter-Indizes</div><span class="icon"><i class="bi bi-diagram-3"></i></span></div>
+                    <div class="small-box bg-danger"><div class="inner"><h3 id="fwLogs">-</h3><p data-i18n="firewalls.statLogs">Logs (∑)</p></div><div class="small-box-footer" data-i18n="firewalls.statLogsHint">aus firewall_logs</div><span class="icon"><i class="bi bi-journal-text"></i></span></div>
                 </div>
 
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Firewall-Liste</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="firewalls.firewallList">Firewall-Liste</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
-                            <input type="text" data-filter-for="fwListTable" class="form-control form-control-sm" placeholder="Filter (Name, IP, Land, Stadt…)">
+                            <input type="text" data-filter-for="fwListTable" class="form-control form-control-sm" data-i18n-placeholder="firewalls.filterPlaceholder" placeholder="Filter (Name, IP, Land, Stadt…)">
                         </div>
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Firewall</th><th>IPs (bekannt)</th><th>Standort</th><th>Interfaces</th>
-                                    <th>Logs ∑</th><th>Letzter Log</th><th>Letzter Flow</th><th>Whitelist</th><th>Aktionen</th>
+                                    <th data-i18n="common.firewall">Firewall</th><th data-i18n="firewalls.colIpsKnown">IPs (bekannt)</th><th data-i18n="firewalls.colLocation">Standort</th><th data-i18n="firewalls.colInterfaces">Interfaces</th>
+                                    <th data-i18n="firewalls.colLogs">Logs ∑</th><th data-i18n="firewalls.colLastLog">Letzter Log</th><th data-i18n="firewalls.colLastFlow">Letzter Flow</th><th data-i18n="firewalls.colWhitelist">Whitelist</th><th data-i18n="firewalls.colActions">Aktionen</th>
                                 </tr></thead>
                                 <tbody id="fwListTable"></tbody>
                             </table>
@@ -91,15 +91,15 @@
 
                 <div class="card mb-3" id="fwIfaceCard" style="display:none">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h3 class="card-title mb-0">Interfaces · <span id="fwIfaceTitle">—</span></h3>
+                        <h3 class="card-title mb-0"><span data-i18n="firewalls.interfaces">Interfaces</span> · <span id="fwIfaceTitle">—</span></h3>
                         <button class="btn btn-outline-secondary btn-sm" onclick="hideIfaces()"><i class="bi bi-x"></i></button>
                     </div>
                     <div class="card-body">
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Index</th><th>Name</th><th>Bytes In</th><th>Bytes Out</th>
-                                    <th>Flows In</th><th>Flows Out</th><th>Zuletzt aktiv</th>
+                                    <th data-i18n="firewalls.colIndex">Index</th><th data-i18n="firewalls.colName">Name</th><th data-i18n="firewalls.colBytesIn">Bytes In</th><th data-i18n="firewalls.colBytesOut">Bytes Out</th>
+                                    <th data-i18n="firewalls.colFlowsIn">Flows In</th><th data-i18n="firewalls.colFlowsOut">Flows Out</th><th data-i18n="firewalls.colLastActive">Zuletzt aktiv</th>
                                 </tr></thead>
                                 <tbody id="fwIfaceTable"></tbody>
                             </table>
@@ -113,6 +113,11 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/firewalls.de.js"></script>
+    <script src="/i18n/firewalls.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
 <script src="/js/firewalls.js"></script>

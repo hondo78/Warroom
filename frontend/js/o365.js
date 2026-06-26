@@ -59,8 +59,8 @@ async function refreshO365() {
         _o365Items = d.items || [];
         renderO365Table();
 
-        renderTopList('o365TopUsers', s.top_failed_users || [], x => x.user, 'Keine Fehlversuche');
-        renderTopList('o365TopCountries', s.top_countries || [], x => x.country, 'Keine Geo-Daten');
+        renderTopList('o365TopUsers', s.top_failed_users || [], x => x.user, t('o365.no_failures'));
+        renderTopList('o365TopCountries', s.top_countries || [], x => x.country, t('o365.no_geo'));
     } catch (err) {
         console.error('O365 refresh failed:', err);
     }
@@ -121,7 +121,7 @@ function renderO365Table() {
     });
 
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Login-Ereignisse (Filter aktiv?).</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${escapeHtml(t('o365.no_events'))}</td></tr>`;
         return;
     }
 
@@ -134,9 +134,9 @@ function renderO365Table() {
         // Whitelisted IPs can never be blocked (backend refuses with 409)
         // — show a shield instead of a dead button.
         const blockBtn = x.whitelisted
-            ? '<span title="IP ist whitelisted — Block nicht möglich" style="color:var(--accent-green)">🛡</span>'
+            ? `<span title="${escapeAttr(t('o365.whitelisted_tip'))}" style="color:var(--accent-green)">🛡</span>`
             : (failed && x.client_ip)
-                ? `<button class="block-link" onclick="blockO365Ip('${escapeAttr(x.client_ip)}', this)" title="IP blockieren">block</button>`
+                ? `<button class="block-link" onclick="blockO365Ip('${escapeAttr(x.client_ip)}', this)" title="${escapeAttr(t('o365.block_tip'))}">block</button>`
                 : '';
         const osint = typeof osintButton === 'function' ? osintButton(x.client_ip, 'osint-btn', 'ip') : '';
         // Friendly name from the backend's well-known-app mapping;
@@ -173,7 +173,7 @@ function _deviceText(dev) {
 // Rich device cell: name (or OS) + OS/browser secondary + compliance dot.
 function _deviceCell(dev) {
     if (!dev || (!dev.name && !dev.os && !dev.browser)) return '—';
-    const primary = dev.name || dev.os || 'Unbekannt';
+    const primary = dev.name || dev.os || t('o365.unknown');
     const secondaryBits = [];
     if (dev.name && dev.os) secondaryBits.push(dev.os);
     if (dev.browser) secondaryBits.push(dev.browser);
@@ -182,9 +182,9 @@ function _deviceCell(dev) {
         : '';
     let badge = '';
     if (dev.compliant === true) {
-        badge = ' <span title="Compliant (verwaltet)" style="color:var(--accent-green)">●</span>';
+        badge = ` <span title="${escapeAttr(t('o365.compliant'))}" style="color:var(--accent-green)">●</span>`;
     } else if (dev.compliant === false) {
-        badge = ' <span title="Nicht compliant / nicht verwaltet" style="color:var(--accent-red)">○</span>';
+        badge = ` <span title="${escapeAttr(t('o365.noncompliant'))}" style="color:var(--accent-red)">○</span>`;
     }
     return `<div>${escapeHtml(primary)}${badge}</div>${secondary}`;
 }
@@ -201,7 +201,7 @@ function renderTopList(tbodyId, rows, labelFn, emptyText) {
 }
 
 async function blockO365Ip(ip, btn) {
-    if (!confirm(`IP ${ip} auf die Blockliste setzen?`)) return;
+    if (!confirm(t('o365.confirm_block', { ip }))) return;
     try {
         const resp = await fetch('/api/firewall/block-ip', {
             method: 'POST',
@@ -212,6 +212,6 @@ async function blockO365Ip(ip, btn) {
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         if (btn) { btn.textContent = 'blocked'; btn.disabled = true; }
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('o365.block_failed') + ' ' + err.message);
     }
 }

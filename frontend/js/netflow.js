@@ -58,7 +58,7 @@ async function loadFirewalls() {
         const r = await fetch('/api/netflow/firewalls');
         const fws = await r.json();
         const sel = document.getElementById('nfFirewall');
-        sel.innerHTML = '<option value="all">Alle Firewalls</option>' +
+        sel.innerHTML = `<option value="all">${t('netflow.all_firewalls')}</option>` +
             fws.map(f => {
                 const label = f.name && f.name !== f.ip ? `${f.name} (${f.ip})` : f.ip;
                 return `<option value="${f.ip}">${label}</option>`;
@@ -94,8 +94,8 @@ async function updateSummary() {
     const seconds = (Date.now() - new Date(d.since).getTime()) / 1000;
     const bytesRate = seconds > 0 ? d.bytes / seconds : 0;
     const flowsRate = seconds > 0 ? (d.flows / seconds * 60) : 0;
-    document.getElementById('nfBytesRate').textContent = `${fmtBytes(bytesRate)}/s im Schnitt`;
-    document.getElementById('nfFlowsRate').textContent = `${fmtNum(Math.round(flowsRate))} /min im Schnitt`;
+    document.getElementById('nfBytesRate').textContent = t('netflow.rate_bytes', {rate: fmtBytes(bytesRate)});
+    document.getElementById('nfFlowsRate').textContent = t('netflow.rate_flows', {rate: fmtNum(Math.round(flowsRate))});
 }
 
 function initNfCharts() {
@@ -233,7 +233,7 @@ async function updateGeo() {
         }).bindPopup(`
             <strong>${p.ip}</strong><br>
             ${p.city || ''} ${p.country ? '(' + p.country + ')' : ''}<br>
-            ${fmtBytes(p.bytes)} · ${fmtNum(p.flows)} flows
+            ${fmtBytes(p.bytes)} · ${fmtNum(p.flows)} ${t('netflow.tile_flows')}
         `).addTo(nfMap);
         nfMapMarkers.push(m);
     });
@@ -254,7 +254,7 @@ async function updateInterfaces() {
 
     const tbody = document.getElementById('nfIfaceTable');
     if (!d.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Interface-Daten. NetFlow-Export muss INPUT_SNMP / OUTPUT_SNMP enthalten (Standard bei v9).</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('netflow.no_iface_data')}</td></tr>`;
         return;
     }
     tbody.innerHTML = d.map(i => {
@@ -337,7 +337,7 @@ async function saveIfaceNames() {
         ]);
         if (!r1.ok || !r2.ok) throw new Error('save failed');
     } catch (e) {
-        alert('Speichern fehlgeschlagen: ' + e.message);
+        alert(t('netflow.save_failed', {error: e.message}));
         return;
     }
     closeIfaceNameEditor();
@@ -350,50 +350,50 @@ const _flowsSort = {key: 'bytes', dir: 'desc'};
 // Column definitions per grouping mode. Each entry: {key, label, type, render}
 const FLOW_COLUMNS = {
     none: [
-        {key: 'src_ip', label: 'Quell-IP', type: 'text', render: f => `<code>${f.src_ip}</code>${osintButton(f.src_ip)}`},
-        {key: 'dst_ip', label: 'Ziel-IP', type: 'text', render: f => `<code>${f.dst_ip}</code>${osintButton(f.dst_ip)}`},
-        {key: 'dst_port', label: 'Port', type: 'num', render: f => f.dst_port || '-'},
-        {key: 'service', label: 'Service', type: 'text', render: f => f.service || '-'},
-        {key: 'protocol', label: 'Protokoll', type: 'text', render: f => f.protocol || '-'},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'packets', label: 'Pakete', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'src_ip', labelKey: 'common.source_ip', type: 'text', render: f => `<code>${f.src_ip}</code>${osintButton(f.src_ip)}`},
+        {key: 'dst_ip', labelKey: 'common.dest_ip', type: 'text', render: f => `<code>${f.dst_ip}</code>${osintButton(f.dst_ip)}`},
+        {key: 'dst_port', labelKey: 'netflow.col_port', type: 'num', render: f => f.dst_port || '-'},
+        {key: 'service', labelKey: 'netflow.col_service', type: 'text', render: f => f.service || '-'},
+        {key: 'protocol', labelKey: 'netflow.col_protocol', type: 'text', render: f => f.protocol || '-'},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'packets', labelKey: 'netflow.col_packets', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
     src: [
-        {key: 'ip', label: 'Quell-IP', type: 'text', render: f => `<code>${f.ip}</code>${osintButton(f.ip)}`},
-        {key: 'country', label: 'Land', type: 'text', render: f => [f.country, f.city].filter(Boolean).join(', ') || '-'},
-        {key: 'org', label: 'Org', type: 'text', render: f => f.org || '-'},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'packets', label: 'Pakete', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'ip', labelKey: 'common.source_ip', type: 'text', render: f => `<code>${f.ip}</code>${osintButton(f.ip)}`},
+        {key: 'country', labelKey: 'common.country', type: 'text', render: f => [f.country, f.city].filter(Boolean).join(', ') || '-'},
+        {key: 'org', labelKey: 'netflow.col_org', type: 'text', render: f => f.org || '-'},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'packets', labelKey: 'netflow.col_packets', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
     dst: [
-        {key: 'ip', label: 'Ziel-IP', type: 'text', render: f => `<code>${f.ip}</code>${osintButton(f.ip)}`},
-        {key: 'country', label: 'Land', type: 'text', render: f => [f.country, f.city].filter(Boolean).join(', ') || '-'},
-        {key: 'org', label: 'Org', type: 'text', render: f => f.org || '-'},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'packets', label: 'Pakete', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'ip', labelKey: 'common.dest_ip', type: 'text', render: f => `<code>${f.ip}</code>${osintButton(f.ip)}`},
+        {key: 'country', labelKey: 'common.country', type: 'text', render: f => [f.country, f.city].filter(Boolean).join(', ') || '-'},
+        {key: 'org', labelKey: 'netflow.col_org', type: 'text', render: f => f.org || '-'},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'packets', labelKey: 'netflow.col_packets', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
     src_dst: [
-        {key: 'src_ip', label: 'Quell-IP', type: 'text', render: f => `<code>${f.src_ip}</code>${osintButton(f.src_ip)}`},
-        {key: 'dst_ip', label: 'Ziel-IP', type: 'text', render: f => `<code>${f.dst_ip}</code>${osintButton(f.dst_ip)}`},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'packets', label: 'Pakete', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'src_ip', labelKey: 'common.source_ip', type: 'text', render: f => `<code>${f.src_ip}</code>${osintButton(f.src_ip)}`},
+        {key: 'dst_ip', labelKey: 'common.dest_ip', type: 'text', render: f => `<code>${f.dst_ip}</code>${osintButton(f.dst_ip)}`},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'packets', labelKey: 'netflow.col_packets', type: 'num', render: f => fmtNum(f.packets), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
     port: [
-        {key: 'port', label: 'Port', type: 'num', render: f => f.port || '-'},
-        {key: 'service', label: 'Service', type: 'text', render: f => f.service || '-'},
-        {key: 'protocol', label: 'Protokoll', type: 'text', render: f => f.protocol || '-'},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'port', labelKey: 'netflow.col_port', type: 'num', render: f => f.port || '-'},
+        {key: 'service', labelKey: 'netflow.col_service', type: 'text', render: f => f.service || '-'},
+        {key: 'protocol', labelKey: 'netflow.col_protocol', type: 'text', render: f => f.protocol || '-'},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
     proto: [
-        {key: 'protocol', label: 'Protokoll', type: 'text', render: f => f.protocol || '-'},
-        {key: 'protocol_num', label: 'Proto-Nr', type: 'num', render: f => f.protocol_num != null ? f.protocol_num : '-'},
-        {key: 'bytes', label: 'Bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
-        {key: 'flows', label: 'Flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
+        {key: 'protocol', labelKey: 'netflow.col_protocol', type: 'text', render: f => f.protocol || '-'},
+        {key: 'protocol_num', labelKey: 'netflow.col_proto_num', type: 'num', render: f => f.protocol_num != null ? f.protocol_num : '-'},
+        {key: 'bytes', labelKey: 'netflow.col_bytes', type: 'num', render: f => fmtBytes(f.bytes), align: 'right'},
+        {key: 'flows', labelKey: 'netflow.col_flows', type: 'num', render: f => fmtNum(f.flows), align: 'right'},
     ],
 };
 
@@ -437,7 +437,7 @@ async function updateFlowsTable() {
         }
         let items = await r.json();
         if (!Array.isArray(items)) {
-            renderFlowsError(groupBy, 'Unerwartete Server-Antwort (keine Liste).');
+            renderFlowsError(groupBy, t('netflow.unexpected_response'));
             return;
         }
         if (groupBy === 'src_dst') items = aggregateSrcDst(items);
@@ -476,7 +476,7 @@ function renderFlowsHeader(groupBy) {
         const isSorted = _flowsSort.key === c.key;
         const arrow = isSorted ? (_flowsSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
         const align = c.align === 'right' ? ' style="text-align:right"' : '';
-        return `<th class="sortable${isSorted ? ' sorted' : ''}" onclick="toggleFlowSort('${c.key}')"${align}>${c.label}${arrow}</th>`;
+        return `<th class="sortable${isSorted ? ' sorted' : ''}" onclick="toggleFlowSort('${c.key}')"${align}>${t(c.labelKey)}${arrow}</th>`;
     }).join('');
     head.innerHTML = `<tr>${cells}</tr>`;
 }
@@ -485,7 +485,7 @@ function renderFlowsBody(items, groupBy) {
     const tbody = document.getElementById('nfFlowsTable');
     const cols = FLOW_COLUMNS[groupBy] || FLOW_COLUMNS.none;
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;color:var(--text-secondary);padding:2rem">Keine Daten für die aktuelle Auswahl.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;color:var(--text-secondary);padding:2rem">${t('netflow.no_data_selection')}</td></tr>`;
         return;
     }
     tbody.innerHTML = items.map(it => {

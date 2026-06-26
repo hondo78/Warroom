@@ -85,7 +85,7 @@ async function updateAgentDecisions() {
         if (!tbody) return;
         const items = data.items || [];
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine Agent-Empfehlungen für den aktuellen Filter. In der <a href="/admin.html">Admin-Seite</a> Agent aktivieren und Modell wählen.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('dash.agent_empty')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(d => {
@@ -99,8 +99,8 @@ async function updateAgentDecisions() {
             let actionCell = '';
             if (d.status === 'pending') {
                 actionCell = `
-                  <button class="ack-btn" onclick="approveAgentDecision(${d.id}, this)">✓ Ausführen</button>
-                  <button class="block-link" onclick="rejectAgentDecision(${d.id}, this)" style="margin-left:.3rem">✗ Ablehnen</button>`;
+                  <button class="ack-btn" onclick="approveAgentDecision(${d.id}, this)">${t('dash.execute')}</button>
+                  <button class="block-link" onclick="rejectAgentDecision(${d.id}, this)" style="margin-left:.3rem">${t('dash.reject')}</button>`;
             } else {
                 const cls = {executed: 'health-good', approved: 'health-good', rejected: 'health-unknown', failed: 'health-bad'}[d.status] || 'health-unknown';
                 actionCell = `<span class="health-badge ${cls}">${escapeHtml(d.status)}</span>`;
@@ -133,7 +133,7 @@ function actionToSev(action) {
 }
 
 async function approveAgentDecision(id, btn) {
-    if (!confirm('Empfehlung jetzt ausführen?')) return;
+    if (!confirm(t('dash.confirm_execute_decision'))) return;
     btn.disabled = true; btn.textContent = '...';
     try {
         const resp = await fetch(`/api/agent/decisions/${id}/approve`, {method: 'POST'});
@@ -143,20 +143,20 @@ async function approveAgentDecision(id, btn) {
         }
         await updateAgentDecisions();
     } catch (err) {
-        alert('Ausführen fehlgeschlagen: ' + err.message);
-        btn.disabled = false; btn.textContent = '✓ Ausführen';
+        alert(t('dash.execute_failed', {error: err.message}));
+        btn.disabled = false; btn.textContent = t('dash.execute');
     }
 }
 
 async function rejectAgentDecision(id, btn) {
-    if (!confirm('Empfehlung als abgelehnt markieren?')) return;
+    if (!confirm(t('dash.confirm_reject_decision'))) return;
     btn.disabled = true;
     try {
         const resp = await fetch(`/api/agent/decisions/${id}/reject`, {method: 'POST'});
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         await updateAgentDecisions();
     } catch (err) {
-        alert('Ablehnen fehlgeschlagen: ' + err.message);
+        alert(t('dash.reject_failed', {error: err.message}));
         btn.disabled = false;
     }
 }
@@ -178,8 +178,8 @@ async function updateIpsWidget() {
         if (subEl) {
             const dropped = stats.dropped || 0;
             const high = stats.high_severity || 0;
-            const parts = [`${(stats.last_24h || 0).toLocaleString('de-DE')} in 24h`];
-            parts.push(`${dropped.toLocaleString('de-DE')} blockiert`);
+            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')})];
+            parts.push(t('dash.n_blocked', {n: dropped.toLocaleString('de-DE')}));
             if (high > 0) parts.push(`${high.toLocaleString('de-DE')} high/critical`);
             subEl.textContent = parts.join(' · ');
         }
@@ -193,13 +193,13 @@ async function updateIpsWidget() {
                 return `<div class="waf-sum-block"><span class="waf-sum-title">${title}</span>${pills}</div>`;
             };
             sumEl.innerHTML = [
-                block('Top Quellen', stats.top_attackers, a =>
+                block(t('dash.top_sources'), stats.top_attackers, a =>
                     `<span class="waf-pill" title="${escapeHtml([a.country, a.city].filter(Boolean).join(', '))}">${escapeHtml(a.ip)} <em>${a.count}</em></span>`),
-                block('Top Signaturen', stats.top_signatures, s => {
+                block(t('dash.top_signatures'), stats.top_signatures, s => {
                     const label = s.signature_id ? `${s.signature_id} · ${s.signature}` : s.signature;
                     return `<span class="waf-pill waf-pill-attack" title="${escapeHtml(s.signature || '')}">${escapeHtml(truncate(label, 50))} <em>${s.count}</em></span>`;
                 }),
-                block('Top Kategorien', stats.top_categories, c =>
+                block(t('dash.top_categories'), stats.top_categories, c =>
                     `<span class="waf-pill">${escapeHtml(truncate(c.category, 40))} <em>${c.count}</em></span>`),
             ].join('');
         }
@@ -207,12 +207,12 @@ async function updateIpsWidget() {
         // Recent events table
         const tbody = document.getElementById('ipsTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine IPS-Detections. SFOS IPS/IDP-Logs an Syslog-Server (Port 5514) senden.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('dash.ips_empty')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(l => {
             const blockedBadge = l.source_blocked
-                ? ' <span class="blocked-badge" title="IP geblockt">BLOCKED</span>'
+                ? ` <span class="blocked-badge" title="${t('dash.ip_blocked')}">BLOCKED</span>`
                 : '';
             const blockLink = l.source_ip && !l.source_blocked && isPublicIpClient(l.source_ip)
                 ? ` <a class="block-link" href="#" onclick="event.preventDefault();blockFromCell('${l.source_ip}', 'IPS: ${(l.signature_msg || l.threat || 'attack').replace(/'/g, '').slice(0,80)}')">[block]</a>`
@@ -238,7 +238,7 @@ async function updateIpsWidget() {
                 const cls = isBlock ? 'waf-action-block' : (isAllow ? 'waf-action-allow' : 'waf-action-other');
                 actionCell = `<span class="waf-action ${cls}">${escapeHtml(action)}</span>`;
             } else {
-                actionCell = '<span class="muted-cell" title="Keine Action im Log">—</span>';
+                actionCell = `<span class="muted-cell" title="${t('dash.no_action_in_log')}">—</span>`;
             }
             return `
             <tr title="${escapeHtml([l.platform, l.rule_priority].filter(Boolean).join(' / '))}">
@@ -276,21 +276,21 @@ async function updateWafWidget() {
         if (subEl) {
             const blocked = stats.blocked || 0;
             const allowed = stats.allowed_all || 0;
-            const parts = [`${(stats.last_24h || 0).toLocaleString('de-DE')} in 24h`];
-            parts.push(`${blocked.toLocaleString('de-DE')} blockiert`);
-            if (allowed > 0) parts.push(`${allowed.toLocaleString('de-DE')} sauber`);
+            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')})];
+            parts.push(t('dash.n_blocked', {n: blocked.toLocaleString('de-DE')}));
+            if (allowed > 0) parts.push(t('dash.n_clean', {n: allowed.toLocaleString('de-DE')}));
             subEl.textContent = parts.join(' · ');
         }
 
         // Recent events table
         const tbody = document.getElementById('wafTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine WAF-Detections. SFOS Web Server Protection / WAF-Logs an Syslog-Server (Port 5514) senden.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('dash.waf_empty')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(l => {
             const blockedBadge = l.source_blocked
-                ? ' <span class="blocked-badge" title="IP geblockt">BLOCKED</span>'
+                ? ` <span class="blocked-badge" title="${t('dash.ip_blocked')}">BLOCKED</span>`
                 : '';
             const blockLink = l.source_ip && !l.source_blocked && isPublicIpClient(l.source_ip)
                 ? ` <a class="block-link" href="#" onclick="event.preventDefault();blockFromCell('${l.source_ip}', 'WAF: ${(l.reason || l.threat || 'attack').replace(/'/g, '').slice(0,80)}')">[block]</a>`
@@ -306,11 +306,11 @@ async function updateWafWidget() {
             let reason = l.reason || l.threat || l.message;
             const statusStr = l.http_status ? String(l.http_status) : '';
             if (!reason && (statusStr.startsWith('4') || statusStr.startsWith('5'))) {
-                reason = `WAF block · HTTP ${statusStr}`;
+                reason = t('dash.waf_block_http', {status: statusStr});
             }
             const reasonCell = reason
                 ? escapeHtml(reason)
-                : '<span class="muted-cell" title="Keine Attack-Begründung im Log — vermutlich erlaubter Request">—</span>';
+                : `<span class="muted-cell" title="${t('dash.waf_no_reason')}">—</span>`;
 
             const action = l.action;
             const actionLower = (action || '').toLowerCase();
@@ -321,7 +321,7 @@ async function updateWafWidget() {
                 const cls = isBlock ? 'waf-action-block' : (isAllow ? 'waf-action-allow' : 'waf-action-other');
                 actionCell = `<span class="waf-action ${cls}">${escapeHtml(action)}</span>`;
             } else {
-                actionCell = '<span class="muted-cell" title="Keine Action im Log gesetzt">—</span>';
+                actionCell = `<span class="muted-cell" title="${t('dash.no_action_set')}">—</span>`;
             }
 
             const status = l.http_status
@@ -339,7 +339,7 @@ async function updateWafWidget() {
             const src4 = l.src_4xx || 0;
             const src5 = l.src_5xx || 0;
             const errCell = (src4 || src5)
-                ? `<span class="waf-err-cell" title="Hits dieser IP im Zeitraum">${src4 ? `<span class="waf-err-4xx">${src4.toLocaleString('de-DE')}</span>` : ''}${src4 && src5 ? ' / ' : ''}${src5 ? `<span class="waf-err-5xx">${src5.toLocaleString('de-DE')}</span>` : ''}</span>`
+                ? `<span class="waf-err-cell" title="${t('dash.waf_hits_in_window')}">${src4 ? `<span class="waf-err-4xx">${src4.toLocaleString('de-DE')}</span>` : ''}${src4 && src5 ? ' / ' : ''}${src5 ? `<span class="waf-err-5xx">${src5.toLocaleString('de-DE')}</span>` : ''}</span>`
                 : '<span class="muted-cell">—</span>';
 
             return `
@@ -378,29 +378,29 @@ async function updateFailedLogins() {
         const items = await resp.json();
         const tbody = document.getElementById('failedLoginsTable');
         if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">Keine fehlgeschlagenen Logins. SFOS Authentication-/Admin-Logs an Syslog-Server (UDP/TCP 5514) aktivieren: System → Administration → Notification settings.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('dash.failed_logins_empty')}</td></tr>`;
             return;
         }
         tbody.innerHTML = items.map(l => {
             const isBlockable = isPublicIpClient(l.source_ip);
             const blockedTitle = l.blocked
-                ? `IP steht auf der Blocklist${l.blocked_at ? ' seit ' + formatTime(l.blocked_at) : ''}`
+                ? (l.blocked_at ? t('dash.fl_blocked_since', {time: formatTime(l.blocked_at)}) : t('dash.fl_on_blocklist'))
                 : '';
             const blockedBadge = l.blocked
                 ? ` <span class="blocked-badge" title="${escapeHtml(blockedTitle)}">BLOCKED</span>`
                 : '';
             const whitelistTitle = l.whitelisted
-                ? `IP steht auf der Whitelist${l.whitelist_source ? ' (Quelle: ' + l.whitelist_source + ')' : ''} — wird vom System niemals geblockt`
+                ? (l.whitelist_source ? t('dash.fl_whitelisted_src', {source: l.whitelist_source}) : t('dash.fl_whitelisted'))
                 : '';
             let actionCell;
             if (l.whitelisted) {
                 actionCell = `<span class="ack-label whitelist-pill" title="${escapeHtml(whitelistTitle)}">Whitelist</span>`;
             } else if (l.blocked) {
-                actionCell = `<span class="ack-label" title="${escapeHtml(blockedTitle)}">geblockt</span>`;
+                actionCell = `<span class="ack-label" title="${escapeHtml(blockedTitle)}">${t('dash.fl_blocked_label')}</span>`;
             } else if (isBlockable) {
-                actionCell = `<button class="ack-btn" onclick="blockFromCell('${l.source_ip}', 'failed-login: ${(l.last_message || '').replace(/'/g, '').slice(0,80)}')">Blocken</button>`;
+                actionCell = `<button class="ack-btn" onclick="blockFromCell('${l.source_ip}', 'failed-login: ${(l.last_message || '').replace(/'/g, '').slice(0,80)}')">${t('dash.block')}</button>`;
             } else {
-                actionCell = '<span class="ack-label">privat</span>';
+                actionCell = `<span class="ack-label">${t('dash.private')}</span>`;
             }
             const users = (l.recent_users || []).filter(Boolean).join(', ');
             const counter24h = l.attempts_24h > 0
@@ -439,14 +439,14 @@ async function blockAllFromTable({ tbodyId, buttonId, defaultComment, refresh })
         ips.push(ip);
     });
     if (!ips.length) {
-        alert('Keine blockbaren IPs in der aktuellen Ansicht.');
+        alert(t('dash.no_blockable_ips'));
         return;
     }
-    if (!confirm(`${ips.length} IP(s) auf die Blocklist setzen?`)) return;
+    if (!confirm(t('dash.confirm_block_n_ips', {count: ips.length}))) return;
 
     const btn = buttonId ? document.getElementById(buttonId) : null;
     const originalLabel = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = `Blocke ${ips.length}…`; }
+    if (btn) { btn.disabled = true; btn.textContent = t('dash.blocking_n', {count: ips.length}); }
 
     try {
         const resp = await fetch('/api/firewall/block-ips', {
@@ -458,7 +458,7 @@ async function blockAllFromTable({ tbodyId, buttonId, defaultComment, refresh })
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         window.dispatchEvent(new CustomEvent('warroom:blocklist-changed', { detail: { ips } }));
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('dash.block_failed', {error: err.message}));
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
         if (refresh) await refresh();
@@ -489,12 +489,12 @@ async function blockIpRequest(ip, comment) {
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         window.dispatchEvent(new CustomEvent('warroom:blocklist-changed', { detail: { ip } }));
     } catch (err) {
-        alert('Block fehlgeschlagen: ' + err.message);
+        alert(t('dash.block_failed', {error: err.message}));
     }
 }
 
 async function blockFromCell(ip, comment) {
-    if (!confirm(`IP ${ip} auf die Blocklist setzen?`)) return;
+    if (!confirm(t('dash.confirm_block_ip', {ip}))) return;
     await blockIpRequest(ip, comment);
 }
 
@@ -527,9 +527,9 @@ async function updateDevicesStats() {
         const isolated = (data.by_isolation && data.by_isolation.isolated) || 0;
         const bad = (data.by_health && data.by_health.bad) || 0;
         const sub = [];
-        sub.push(`${isolated} isoliert`);
+        sub.push(t('dash.n_isolated', {n: isolated}));
         if (bad > 0) sub.push(`${bad} bad`);
-        sub.push(`${data.online || 0} online`);
+        sub.push(t('dash.n_online', {n: data.online || 0}));
         document.getElementById('devicesSub').textContent = sub.join(' · ');
     } catch (err) {
         console.error('Devices stats failed:', err);
@@ -551,15 +551,15 @@ async function updateDevicesTable() {
         const tbody = document.getElementById('devicesTable');
 
         if (devices.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:2rem">Keine Endpoints. Sophos Central muss Geräte managen, dann auf "Daten sammeln" klicken.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:2rem">${t('dash.endpoints_empty')}</td></tr>`;
             return;
         }
 
         tbody.innerHTML = devices.map(d => {
             const isolated = d.isolation === 'isolated';
             const actionBtn = isolated
-                ? `<button class="restore-btn" onclick="setIsolation('${d.id}', false, this)">Restore</button>`
-                : `<button class="isolate-btn" onclick="setIsolation('${d.id}', true, this)">Isolate</button>`;
+                ? `<button class="restore-btn" onclick="setIsolation('${d.id}', false, this)">${t('dash.restore')}</button>`
+                : `<button class="isolate-btn" onclick="setIsolation('${d.id}', true, this)">${t('dash.isolate')}</button>`;
             return `
             <tr${isolated ? ' class="device-isolated"' : ''}>
                 <td>${d.hostname || '-'}</td>
@@ -588,8 +588,8 @@ function isolationBadge(status) {
 }
 
 async function setIsolation(endpointId, enabled, btn) {
-    const verb = enabled ? 'isolieren' : 'wiederherstellen';
-    const comment = prompt(`Endpoint ${verb}? Optionaler Kommentar:`, '');
+    const verb = enabled ? t('dash.isolate_verb') : t('dash.restore_verb');
+    const comment = prompt(t('dash.endpoint_action_prompt', {verb}), '');
     if (comment === null) return;  // user cancelled
 
     btn.disabled = true;
@@ -607,9 +607,9 @@ async function setIsolation(endpointId, enabled, btn) {
         }
         await Promise.all([updateDevicesTable(), updateDevicesStats()]);
     } catch (err) {
-        alert(`Aktion fehlgeschlagen: ${err.message}`);
+        alert(t('dash.action_failed', {error: err.message}));
         btn.disabled = false;
-        btn.textContent = enabled ? 'Isolate' : 'Restore';
+        btn.textContent = enabled ? t('dash.isolate') : t('dash.restore');
     }
 }
 
@@ -622,7 +622,7 @@ async function updateHealthTile() {
         const payload = await resp.json();
         if (!payload.available) {
             valueEl.textContent = 'n/a';
-            subEl.textContent = 'API nicht verfügbar';
+            subEl.textContent = t('dash.api_unavailable');
             return;
         }
         // Sophos returns a tree of {score: 0..100} leaves across endpoint
@@ -632,7 +632,7 @@ async function updateHealthTile() {
         const stats = collectHealthScores(data);
         if (!stats.count) {
             valueEl.textContent = 'n/a';
-            subEl.textContent = 'Keine Health-Scores im Payload';
+            subEl.textContent = t('dash.no_health_scores');
             return;
         }
         const avg = Math.round(stats.sum / stats.count);
@@ -640,14 +640,14 @@ async function updateHealthTile() {
         const label = scoreToLabel(avg);
         valueEl.textContent = `${avg}/100`;
         subEl.textContent = stats.issues > 0
-            ? `${label} · ${stats.issues} Bereich${stats.issues === 1 ? '' : 'e'} unter 100 (min ${stats.min})`
-            : `${label} · alles bei 100`;
+            ? `${label} · ${t('dash.health_areas_below', {count: stats.issues, min: stats.min})}`
+            : `${label} · ${t('dash.health_all_100')}`;
         cardEl.classList.remove('bg-critical', 'bg-warning', 'bg-info', 'bg-success', 'bg-danger');
         cardEl.classList.add(cls);
     } catch (err) {
         console.error('Health update failed:', err);
         valueEl.textContent = '-';
-        subEl.textContent = 'Fehler beim Laden';
+        subEl.textContent = t('dash.load_error');
     }
 }
 
@@ -761,7 +761,7 @@ async function updateAlertsTable() {
             if (acked) cls.push('alert-acked');
             const actionCell = acked
                 ? `<span class="ack-label">${escapeHtml(a.acknowledged_action || 'acknowledged')}</span>`
-                : `<button class="ack-btn" data-id="${a.id}" onclick="event.stopPropagation();acknowledgeAlert('${a.id}', this)">Ack</button>`;
+                : `<button class="ack-btn" data-id="${a.id}" onclick="event.stopPropagation();acknowledgeAlert('${a.id}', this)">${t('dash.ack')}</button>`;
             const desc = escapeHtml(a.description || '');
             return `
             <tr class="${cls.join(' ')}" onclick="showAlertDetail('${a.id}')" title="${desc}">
@@ -781,7 +781,7 @@ async function updateAlertsTable() {
 async function showAlertDetail(alertId) {
     const modal = document.getElementById('alertDetailModal');
     const body = document.getElementById('alertDetailBody');
-    body.textContent = 'Wird geladen…';
+    body.textContent = t('common.loading');
     modal.classList.add('active');
 
     try {
@@ -790,7 +790,7 @@ async function showAlertDetail(alertId) {
         const a = await resp.json();
         body.innerHTML = renderAlertDetail(a);
     } catch (err) {
-        body.innerHTML = `<div class="detail-error">Fehler: ${escapeHtml(err.message)}</div>`;
+        body.innerHTML = `<div class="detail-error">${t('dash.error_prefix', {error: escapeHtml(err.message)})}</div>`;
     }
 }
 
@@ -802,28 +802,28 @@ function ipFieldWithBlock(ip, comment) {
     if (!ip) return null;
     const safeIp = escapeHtml(ip);
     if (!isPublicIpClient(ip)) {
-        return `<span class="detail-mono">${safeIp}</span> <span class="ack-label">privat</span>`;
+        return `<span class="detail-mono">${safeIp}</span> <span class="ack-label">${t('dash.private')}</span>`;
     }
     const safeComment = (comment || '').replace(/'/g, '').slice(0, 80);
-    return `<span class="detail-mono">${safeIp}</span> <button class="ack-btn" onclick="blockFromDetail('${ip}', '${safeComment}', this)">IP blocken</button> <button class="osint-btn osint-btn-detail" onclick="showOsint('${ip}')">🔍 OSINT</button>`;
+    return `<span class="detail-mono">${safeIp}</span> <button class="ack-btn" onclick="blockFromDetail('${ip}', '${safeComment}', this)">${t('dash.block_ip')}</button> <button class="osint-btn osint-btn-detail" onclick="showOsint('${ip}')">🔍 OSINT</button>`;
 }
 
 function renderAlertDetail(a) {
     const ipComment = `${a.type || 'alert'} ${a.id}`.slice(0, 80);
     const fields = [
         ['ID', a.id, true],
-        ['Erstellt', a.created_at ? new Date(a.created_at).toLocaleString('de-DE') : '-'],
+        [t('dash.detail_created'), a.created_at ? new Date(a.created_at).toLocaleString('de-DE') : '-'],
         ['Ingested', a.ingested_at ? new Date(a.ingested_at).toLocaleString('de-DE') : '-'],
-        ['Schwere', a.severity, false, severityBadge(a.severity)],
-        ['Typ', a.type, true],
-        ['Kategorie', a.category],
-        ['Quell-IP', a.source_ip, false, ipFieldWithBlock(a.source_ip, ipComment)],
-        ['Ziel-IP', a.destination_ip, false, ipFieldWithBlock(a.destination_ip, ipComment)],
-        ['Land', [a.country, a.city].filter(Boolean).join(', ') || '-'],
+        [t('common.severity'), a.severity, false, severityBadge(a.severity)],
+        [t('dash.type'), a.type, true],
+        [t('dash.category'), a.category],
+        [t('common.source_ip'), a.source_ip, false, ipFieldWithBlock(a.source_ip, ipComment)],
+        [t('common.dest_ip'), a.destination_ip, false, ipFieldWithBlock(a.destination_ip, ipComment)],
+        [t('common.country'), [a.country, a.city].filter(Boolean).join(', ') || '-'],
         ['Lat/Lon', a.lat != null ? `${a.lat}, ${a.lon}` : '-'],
         ['Agent', a.agent],
         ['Tenant', a.tenant_id, true],
-        ['Acknowledged', a.acknowledged_at ? `${new Date(a.acknowledged_at).toLocaleString('de-DE')} (${a.acknowledged_action || ''})` : 'Nein'],
+        ['Acknowledged', a.acknowledged_at ? `${new Date(a.acknowledged_at).toLocaleString('de-DE')} (${a.acknowledged_action || ''})` : t('dash.no')],
     ];
 
     const fieldsHtml = fields.map(([label, value, mono, raw]) => {
@@ -834,7 +834,7 @@ function renderAlertDetail(a) {
     }).join('');
 
     const desc = a.description
-        ? `<div class="detail-section"><h4>Beschreibung</h4><div class="detail-description">${escapeHtml(a.description)}</div></div>`
+        ? `<div class="detail-section"><h4>${t('dash.description')}</h4><div class="detail-description">${escapeHtml(a.description)}</div></div>`
         : '';
 
     const raw = a.raw_data
@@ -842,7 +842,7 @@ function renderAlertDetail(a) {
         : '';
 
     const ackBtn = !a.acknowledged_at
-        ? `<button class="ack-btn" onclick="acknowledgeAlertFromDetail('${a.id}')">Bei Sophos acknowledgen</button>`
+        ? `<button class="ack-btn" onclick="acknowledgeAlertFromDetail('${a.id}')">${t('dash.ack_at_sophos')}</button>`
         : '';
 
     return `
@@ -854,21 +854,21 @@ function renderAlertDetail(a) {
 }
 
 async function blockFromDetail(ip, comment, btn) {
-    if (!confirm(`IP ${ip} auf die Blocklist setzen?`)) return;
+    if (!confirm(t('dash.confirm_block_ip', {ip}))) return;
     btn.disabled = true;
     btn.textContent = '...';
     try {
         await blockIpRequest(ip, comment);
-        btn.textContent = '✓ geblockt';
+        btn.textContent = t('dash.blocked_done');
     } catch (err) {
         btn.disabled = false;
-        btn.textContent = 'IP blocken';
-        alert('Block fehlgeschlagen: ' + err.message);
+        btn.textContent = t('dash.block_ip');
+        alert(t('dash.block_failed', {error: err.message}));
     }
 }
 
 async function acknowledgeAlertFromDetail(alertId) {
-    if (!confirm('Diesen Alarm bei Sophos Central als acknowledged markieren?')) return;
+    if (!confirm(t('dash.confirm_ack'))) return;
     try {
         const resp = await fetch(`/api/alerts/${encodeURIComponent(alertId)}/action`, {
             method: 'POST',
@@ -879,12 +879,12 @@ async function acknowledgeAlertFromDetail(alertId) {
         closeAlertDetail();
         await updateAlertsTable();
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('dash.error_prefix', {error: err.message}));
     }
 }
 
 async function acknowledgeAlert(alertId, btn) {
-    if (!confirm('Diesen Alarm bei Sophos Central als acknowledged markieren?')) return;
+    if (!confirm(t('dash.confirm_ack'))) return;
     btn.disabled = true;
     btn.textContent = '...';
     try {
@@ -899,9 +899,9 @@ async function acknowledgeAlert(alertId, btn) {
         }
         await updateAlertsTable();
     } catch (err) {
-        alert('Acknowledge fehlgeschlagen: ' + err.message);
+        alert(t('dash.ack_failed', {error: err.message}));
         btn.disabled = false;
-        btn.textContent = 'Ack';
+        btn.textContent = t('dash.ack');
     }
 }
 
@@ -960,13 +960,13 @@ async function updateFwLogsTable() {
         const tbody = document.getElementById('fwLogsTable');
 
         if (logs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:2rem">Keine Firewall-Logs. Sophos Firewall Syslog an Port 5514 (UDP/TCP) konfigurieren.</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:2rem">${t('dash.fw_logs_empty')}</td></tr>`;
             return;
         }
 
         tbody.innerHTML = logs.map(l => {
             const blockedBadge = l.source_blocked
-                ? ' <span class="blocked-badge" title="IP ist aktuell auf der Firewall geblockt">BLOCKED</span>'
+                ? ` <span class="blocked-badge" title="${t('dash.ip_blocked_fw')}">BLOCKED</span>`
                 : '';
             const blockLink = l.source_ip && !l.source_blocked && isPublicIpClient(l.source_ip)
                 ? ` <a class="block-link" href="#" onclick="event.preventDefault();blockFromCell('${l.source_ip}', '${(l.threat || l.log_type || 'fw-log').replace(/'/g, "")}')">[block]</a>`
@@ -997,9 +997,9 @@ async function triggerCollection() {
     try {
         const resp = await fetch('/api/collect', { method: 'POST' });
         const data = await resp.json();
-        alert('Datensammlung gestartet');
+        alert(t('dash.collection_started'));
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('dash.error_prefix', {error: err.message}));
     }
 }
 
@@ -1022,7 +1022,7 @@ async function addFirewall() {
     };
 
     if (!data.name || isNaN(data.lat) || isNaN(data.lon)) {
-        alert('Name, Breitengrad und Laengengrad sind Pflichtfelder');
+        alert(t('dash.fw_required_fields'));
         return;
     }
 
@@ -1039,7 +1039,7 @@ async function addFirewall() {
         });
         refreshAll();
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('dash.error_prefix', {error: err.message}));
     }
 }
 

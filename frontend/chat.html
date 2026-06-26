@@ -62,7 +62,7 @@
 
     <main class="app-main">
         <div class="app-content-header">
-            <div class="container-fluid"><h3 class="mb-0">🤖 KI-Chat - Befehle in natürlicher Sprache</h3></div>
+            <div class="container-fluid"><h3 class="mb-0" data-i18n-html="chat.header">🤖 KI-Chat - Befehle in natürlicher Sprache</h3></div>
         </div>
         <div class="app-content">
             <div class="container-fluid chat-wrap">
@@ -70,16 +70,16 @@
                     <div class="card-body p-0">
                         <div class="chat-log" id="chatLog"></div>
                         <div class="chat-input-row border-top">
-                            <input type="text" id="chatInput" class="form-control" placeholder="z.B. blockiere 1.2.3.4  ·  isoliere PC-12345  ·  Statistik-Report" autocomplete="off">
-                            <button class="btn btn-primary" id="chatSend"><i class="bi bi-send"></i></button>
+                            <input type="text" id="chatInput" class="form-control" placeholder="z.B. blockiere 1.2.3.4  ·  isoliere PC-12345  ·  Statistik-Report" data-i18n-placeholder="chat.ask_placeholder" autocomplete="off">
+                            <button class="btn btn-primary" id="chatSend" aria-label="Senden" data-i18n-aria-label="common.send"><i class="bi bi-send"></i></button>
                         </div>
                     </div>
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                    <span class="badge text-bg-secondary chip" data-cmd="hilfe">Hilfe</span>
-                    <span class="badge text-bg-secondary chip" data-cmd="Statistik-Report der letzten 7 Tage">Statistik-Report</span>
-                    <span class="badge text-bg-secondary chip" data-cmd="zeig die Quarantäne">Quarantäne</span>
-                    <span class="badge text-bg-secondary chip" data-cmd="OSINT zu 8.8.8.8">OSINT 8.8.8.8</span>
+                    <span class="badge text-bg-secondary chip" data-cmd="hilfe" data-i18n="chat.chip_help">Hilfe</span>
+                    <span class="badge text-bg-secondary chip" data-cmd="Statistik-Report der letzten 7 Tage" data-i18n="chat.chip_stats">Statistik-Report</span>
+                    <span class="badge text-bg-secondary chip" data-cmd="zeig die Quarantäne" data-i18n="chat.chip_quarantine">Quarantäne</span>
+                    <span class="badge text-bg-secondary chip" data-cmd="OSINT zu 8.8.8.8" data-i18n="chat.chip_osint">OSINT 8.8.8.8</span>
                 </div>
             </div>
         </div>
@@ -87,6 +87,11 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/chat.de.js"></script>
+    <script src="/i18n/chat.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
 <script src="/js/chat.js"></script>

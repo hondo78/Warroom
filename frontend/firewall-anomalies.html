@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Warroom - FW-Anomalien</title>
+    <title data-i18n="fwAnomalies.page_title">Warroom - FW-Anomalien</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
@@ -21,26 +21,26 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
                 <input id="anIp" type="text" class="form-control form-control-sm" style="width:170px"
-                       placeholder="IP-Fokus (optional)"
-                       title="Bestimmte IP analysieren — leer = gesamtes Netzwerk">
+                       placeholder="IP-Fokus (optional)" data-i18n-placeholder="fwAnomalies.ip_focus_placeholder"
+                       title="Bestimmte IP analysieren — leer = gesamtes Netzwerk" data-i18n-title="fwAnomalies.ip_focus_title">
                 <select id="anRole" class="form-select form-select-sm" style="width:auto"
-                        title="Rolle: ohne IP-Fokus = Quell- vs. Ziel-IPs analysieren; mit IP-Fokus = Rolle der gewählten IP">
-                    <option value="src" selected>Quelle</option>
-                    <option value="dst">Ziel</option>
+                        title="Rolle: ohne IP-Fokus = Quell- vs. Ziel-IPs analysieren; mit IP-Fokus = Rolle der gewählten IP" data-i18n-title="fwAnomalies.role_title">
+                    <option value="src" selected data-i18n="fwAnomalies.role_src">Quelle</option>
+                    <option value="dst" data-i18n="fwAnomalies.role_dst">Ziel</option>
                 </select>
                 <select id="anHours" class="form-select form-select-sm" style="width:auto">
-                    <option value="6">6 Stunden</option>
-                    <option value="24" selected>24 Stunden</option>
-                    <option value="72">3 Tage</option>
-                    <option value="168">7 Tage</option>
+                    <option value="6" data-i18n="fwAnomalies.range_6h">6 Stunden</option>
+                    <option value="24" selected data-i18n="fwAnomalies.range_24h">24 Stunden</option>
+                    <option value="72" data-i18n="fwAnomalies.range_3d">3 Tage</option>
+                    <option value="168" data-i18n="fwAnomalies.range_7d">7 Tage</option>
                 </select>
-                <select id="anMinFlows" class="form-select form-select-sm" style="width:auto" title="Mindestanzahl Flows pro IP">
+                <select id="anMinFlows" class="form-select form-select-sm" style="width:auto" title="Mindestanzahl Flows pro IP" data-i18n-title="fwAnomalies.min_flows_title">
                     <option value="5" selected>≥ 5 Flows</option>
                     <option value="20">≥ 20 Flows</option>
                     <option value="100">≥ 100 Flows</option>
                     <option value="1000">≥ 1000 Flows</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="anomalyRefresh()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="anomalyRefresh()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
     </nav>
@@ -78,7 +78,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">Firewall-Anomalien <small class="text-secondary fs-6">Isolation Forest · NetFlow · 3 frei wählbare Dimensionen</small></h3>
+                <h3 class="mb-0"><span data-i18n="fwAnomalies.header_title">Firewall-Anomalien</span> <small class="text-secondary fs-6" data-i18n="fwAnomalies.header_sub">Isolation Forest · NetFlow · 3 frei wählbare Dimensionen</small></h3>
                 <div id="anFocusInfo" class="text-info small mt-1"></div>
             </div>
         </div>
@@ -90,29 +90,29 @@
                 <div class="row g-3 mb-3">
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-info">
-                            <div class="inner"><h3 id="anAnalyzed">-</h3><p>Analysierte IPs</p></div>
+                            <div class="inner"><h3 id="anAnalyzed">-</h3><p data-i18n="fwAnomalies.stat_analyzed">Analysierte IPs</p></div>
                             <div class="small-box-footer" id="anWindow">-</div>
                             <span class="icon"><i class="bi bi-broadcast-pin"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-danger">
-                            <div class="inner"><h3 id="anAnomalies">-</h3><p>Anomalien</p></div>
-                            <div class="small-box-footer">über Schwelle</div>
+                            <div class="inner"><h3 id="anAnomalies">-</h3><p data-i18n="fwAnomalies.stat_anomalies">Anomalien</p></div>
+                            <div class="small-box-footer" data-i18n="fwAnomalies.stat_over_threshold">über Schwelle</div>
                             <span class="icon"><i class="bi bi-exclamation-octagon"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-warning">
-                            <div class="inner"><h3 id="anTopScore">-</h3><p>Höchster Score</p></div>
+                            <div class="inner"><h3 id="anTopScore">-</h3><p data-i18n="fwAnomalies.stat_top_score">Höchster Score</p></div>
                             <div class="small-box-footer" id="anTopIp">-</div>
                             <span class="icon"><i class="bi bi-graph-up-arrow"></i></span>
                         </div>
                     </div>
                     <div class="col-12 col-sm-6 col-xl">
                         <div class="small-box bg-secondary">
-                            <div class="inner"><h3 id="anThreshold">-</h3><p>Schwelle</p></div>
-                            <div class="small-box-footer">Score ≥ = Anomalie</div>
+                            <div class="inner"><h3 id="anThreshold">-</h3><p data-i18n="fwAnomalies.stat_threshold">Schwelle</p></div>
+                            <div class="small-box-footer" data-i18n="fwAnomalies.stat_threshold_sub">Score ≥ = Anomalie</div>
                             <span class="icon"><i class="bi bi-sliders"></i></span>
                         </div>
                     </div>
@@ -120,24 +120,24 @@
 
                 <!-- Dimension selectors: pick any 3 dimensions to analyse + plot -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Analyse-Dimensionen <small class="text-secondary">— 3 frei wählbar (X · Y · Z)</small></h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0"><span data-i18n="fwAnomalies.dims_title">Analyse-Dimensionen</span> <small class="text-secondary" data-i18n="fwAnomalies.dims_title_sub">— 3 frei wählbar (X · Y · Z)</small></h3></div>
                     <div class="card-body">
-                        <p class="admin-hint" style="margin:0 0 .6rem">
+                        <p class="admin-hint" style="margin:0 0 .6rem" data-i18n-html="fwAnomalies.dims_hint">
                             Wähle die drei Achsen, in deren Raum die Quell-IPs verglichen werden. Der
                             Isolation-Forest-<strong>Score wird aus genau diesen drei Dimensionen berechnet</strong>,
                             und beide Graphen unten zeigen sie als Achsen. Jede Dimension lässt sich nur einmal wählen.
                         </p>
                         <div class="row g-2">
                             <div class="col-12 col-md-4">
-                                <label class="form-label small mb-1" for="anDimX">Achse X</label>
+                                <label class="form-label small mb-1" for="anDimX" data-i18n="fwAnomalies.axis_x">Achse X</label>
                                 <select id="anDimX" class="form-select form-select-sm"></select>
                             </div>
                             <div class="col-12 col-md-4">
-                                <label class="form-label small mb-1" for="anDimY">Achse Y</label>
+                                <label class="form-label small mb-1" for="anDimY" data-i18n="fwAnomalies.axis_y">Achse Y</label>
                                 <select id="anDimY" class="form-select form-select-sm"></select>
                             </div>
                             <div class="col-12 col-md-4">
-                                <label class="form-label small mb-1" for="anDimZ">Achse Z</label>
+                                <label class="form-label small mb-1" for="anDimZ" data-i18n="fwAnomalies.axis_z">Achse Z</label>
                                 <select id="anDimZ" class="form-select form-select-sm"></select>
                             </div>
                         </div>
@@ -154,7 +154,7 @@
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" id="an3dTitle">3-D-Ansicht</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint" style="margin:0 0 .5rem">
+                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n-html="fwAnomalies.scatter3d_hint">
                             Jeder Punkt ist eine IP im Raum der <strong>drei gewählten Dimensionen</strong>
                             (Achse X, Y, Z). <strong>Rote</strong> Punkte sind Anomalien — sie heben sich in
                             diesem Raum vom Normalbereich ab. Mit der Maus <strong>drehen, zoomen</strong> und
@@ -166,9 +166,9 @@
 
                 <!-- Anomaly table -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Auffälligste Quell-IPs</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="fwAnomalies.table_title">Auffälligste Quell-IPs</h3></div>
                     <div class="card-body">
-                        <p class="admin-hint" style="margin:0 0 .5rem">
+                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n-html="fwAnomalies.table_hint">
                             Verglichen werden die <strong id="anDimsText">drei gewählten Dimensionen</strong>.
                             Je höher der Score (0–1), desto leichter isoliert das Modell die IP von der Masse —
                             z. B. Exfil-Hosts mit ungewöhnlichem Volumen, Portscanner oder Quellen aus seltenen
@@ -178,22 +178,22 @@
                             alle bekannten Verbindungen (ein- &amp; ausgehend, inkl. geblockter Firewall-Versuche).
                         </p>
                         <div class="filter-row">
-                            <input type="text" data-filter-for="anTable" class="form-control form-control-sm" placeholder="Filter (IP, Land…)">
+                            <input type="text" data-filter-for="anTable" class="form-control form-control-sm" placeholder="Filter (IP, Land…)" data-i18n-placeholder="fwAnomalies.filter_placeholder">
                         </div>
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr id="anSortRow">
-                                    <th data-sort="score" style="cursor:pointer;user-select:none">Score <span class="sort-ind"></span></th>
+                                    <th data-sort="score" style="cursor:pointer;user-select:none"><span data-i18n="common.score">Score</span> <span class="sort-ind"></span></th>
                                     <th data-sort="ip" style="cursor:pointer;user-select:none"><span id="anIpHdr">Quell-IP</span> <span class="sort-ind"></span></th>
-                                    <th data-sort="peer" style="cursor:pointer;user-select:none" title="Haupt-Gegenstelle (Top nach Volumen) — Klick auf die Zeile zeigt alle Verbindungen"><span id="anPeerHdr">Ziel-IP</span> <span class="sort-ind"></span></th>
-                                    <th data-sort="country" style="cursor:pointer;user-select:none">Land <span class="sort-ind"></span></th>
-                                    <th data-sort="bytes" style="cursor:pointer;user-select:none">Volumen <span class="sort-ind"></span></th>
+                                    <th data-sort="peer" style="cursor:pointer;user-select:none" title="Haupt-Gegenstelle (Top nach Volumen) — Klick auf die Zeile zeigt alle Verbindungen" data-i18n-title="fwAnomalies.peer_hdr_title"><span id="anPeerHdr">Ziel-IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="country" style="cursor:pointer;user-select:none"><span data-i18n="common.country">Land</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="bytes" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_volume">Volumen</span> <span class="sort-ind"></span></th>
                                     <th data-sort="flows" style="cursor:pointer;user-select:none">Flows <span class="sort-ind"></span></th>
-                                    <th data-sort="dports" style="cursor:pointer;user-select:none">Ziel-Ports <span class="sort-ind"></span></th>
-                                    <th data-sort="dips" style="cursor:pointer;user-select:none">Ziel-IPs <span class="sort-ind"></span></th>
-                                    <th data-sort="night" style="cursor:pointer;user-select:none">Nacht <span class="sort-ind"></span></th>
-                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none">Zuletzt <span class="sort-ind"></span></th>
-                                    <th>Aktion</th>
+                                    <th data-sort="dports" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_dst_ports">Ziel-Ports</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="dips" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_dst_ips">Ziel-IPs</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="night" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_night">Nacht</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_last_seen">Zuletzt</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="common.action">Aktion</th>
                                 </tr></thead>
                                 <tbody id="anTable"></tbody>
                             </table>
@@ -210,12 +210,12 @@
 <div class="modal-overlay" id="connModal">
     <div class="modal alert-detail-modal" style="max-width:920px">
         <div class="alert-detail-header">
-            <h3 id="connModalTitle">Verbindungen</h3>
-            <button class="modal-close" onclick="closeConn()" title="Schliessen">×</button>
+            <h3 id="connModalTitle" data-i18n="fwAnomalies.conn_title">Verbindungen</h3>
+            <button class="modal-close" onclick="closeConn()" title="Schliessen" data-i18n-title="common.close">×</button>
         </div>
-        <div id="connModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="connModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="closeConn()">Schliessen</button>
+            <button onclick="closeConn()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>
@@ -224,18 +224,25 @@
 <div class="modal-overlay" id="osintModal">
     <div class="modal alert-detail-modal">
         <div class="alert-detail-header">
-            <h3 id="osintModalTitle">OSINT-Check</h3>
-            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            <h3 id="osintModalTitle" data-i18n="fwAnomalies.osint_title">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" title="Schliessen" data-i18n-title="common.close">×</button>
         </div>
-        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="osintModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
-            <button onclick="closeOsint()">Schliessen</button>
+            <button onclick="reloadOsint()" data-i18n="fwAnomalies.osint_recheck">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/osint.de.js"></script>
+    <script src="/i18n/osint.en.js"></script>
+    <script src="/i18n/firewall-anomalies.de.js"></script>
+    <script src="/i18n/firewall-anomalies.en.js"></script>
+    <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>

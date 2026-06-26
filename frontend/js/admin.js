@@ -17,7 +17,7 @@ const SECTIONS = {
     firewallFeed: ['firewall_threat_feed_enabled', 'firewall_mdr_feed_enabled', 'firewall_mdr_feed_firewall_ids', 'firewall_mdr_feed_sync_interval_seconds'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
-    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
+    agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_language', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
     // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
 };
 
@@ -49,29 +49,29 @@ async function loadCaPolicyState() {
         const r = await fetch('/api/admin/entra/ca-policy');
         const d = await r.json();
         if (!d.configured) {
-            status.innerHTML = 'M365-App nicht konfiguriert.';
+            status.innerHTML = t('admin.caM365NotConfigured');
             toggle.disabled = true; label.textContent = '—';
             return;
         }
         if (!d.found) {
             status.innerHTML = d.error
-                ? `Keine Policy gefunden (${adminEsc(d.error)}).`
-                : 'Keine Warroom-Policy gefunden. Lege sie im Entra-Portal an oder nutze „Jetzt syncen“.';
+                ? t('admin.caNoPolicyError', { error: adminEsc(d.error) })
+                : t('admin.caNoPolicy');
             toggle.disabled = true; label.textContent = '—';
             return;
         }
         toggle.disabled = false;
         toggle.checked = d.enabled;
         toggle.dataset.excludes = d.exclude_users || '';
-        label.textContent = d.enabled ? 'Erzwingung AN' : 'Erzwingung AUS';
+        label.textContent = d.enabled ? t('admin.enforcementOn') : t('admin.enforcementOff');
         const stateBadge = d.state === 'enabled'
-            ? '<span class="health-badge health-bad">erzwingend</span>'
+            ? `<span class="health-badge health-bad">${t('admin.stateEnforcing')}</span>`
             : d.state === 'disabled'
-                ? '<span class="health-badge health-good">deaktiviert</span>'
+                ? `<span class="health-badge health-good">${t('admin.stateDisabled')}</span>`
                 : `<span class="health-badge">${adminEsc(d.state)}</span>`;
-        status.innerHTML = `Policy: <strong>${adminEsc(d.displayName || "—")}</strong> &nbsp; ${stateBadge}`;
+        status.innerHTML = t('admin.caPolicyStatus', { name: adminEsc(d.displayName || "—"), badge: stateBadge });
     } catch (err) {
-        status.textContent = `Status nicht abrufbar: ${err.message}`;
+        status.textContent = t('admin.statusUnavailable', { error: err.message });
         toggle.disabled = true;
     }
 }
@@ -85,8 +85,7 @@ async function toggleCaPolicy(el) {
     if (enabled) {
         const current = el.dataset.excludes || '';
         const input = prompt(
-            'Erzwingung aktivieren — ausgeschlossene Konten (Break-Glass), die nie geblockt werden.\n' +
-            'UPN(s) oder Objekt-ID(s), kommagetrennt. Mindestens eines ist erforderlich:',
+            t('admin.enforcePrompt'),
             current
         );
         if (input === null) {            // user cancelled → revert toggle, do nothing
@@ -94,7 +93,7 @@ async function toggleCaPolicy(el) {
             return;
         }
         if (!input.trim()) {
-            toast('Mindestens ein Break-Glass-Konto erforderlich — Aktivierung abgebrochen.', 'error');
+            toast(t('admin.breakGlassRequired'), 'error');
             el.checked = false;
             return;
         }
@@ -110,9 +109,9 @@ async function toggleCaPolicy(el) {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        toast(`Policy ${enabled ? 'aktiviert (erzwingend)' : 'deaktiviert'}.`, 'success');
+        toast(enabled ? t('admin.policyEnabled') : t('admin.policyDisabled'), 'success');
     } catch (err) {
-        toast(`Umschalten fehlgeschlagen: ${err.message}`, 'error');
+        toast(t('admin.toggleFailed', { error: err.message }), 'error');
         el.checked = !enabled; // revert visual state
     } finally {
         el.disabled = false;
@@ -127,7 +126,7 @@ async function loadSettings() {
         const data = await resp.json();
         applyToForm(data);
     } catch (err) {
-        toast(`Fehler beim Laden: ${err.message}`, 'error');
+        toast(t('admin.loadError', { error: err.message }), 'error');
     }
 }
 
@@ -143,8 +142,8 @@ function applyToForm(data) {
             if (value && typeof value === 'object' && 'is_set' in value) {
                 el.value = '';
                 el.placeholder = value.is_set
-                    ? '••• gespeichert (leer lassen, um nicht zu ändern)'
-                    : 'Nicht gesetzt';
+                    ? t('admin.secretStored')
+                    : t('admin.secretNotSet');
             }
             return;
         }
@@ -162,8 +161,8 @@ function applyToForm(data) {
     const apiKeyEl = document.getElementById('roApiKey');
     if (apiKeyEl) {
         apiKeyEl.innerHTML = ro.warroom_api_key_is_set
-            ? '<span class="health-badge health-good">gesetzt</span>'
-            : '<span class="health-badge health-bad">leer (Open Mode)</span>';
+            ? `<span class="health-badge health-good">${t('admin.apiKeySet')}</span>`
+            : `<span class="health-badge health-bad">${t('admin.apiKeyEmpty')}</span>`;
     }
 }
 
@@ -197,7 +196,7 @@ async function saveSection(section) {
     }
 
     if (Object.keys(payload).length === 0) {
-        toast('Keine Änderungen.', 'info');
+        toast(t('admin.noChanges'), 'info');
         return;
     }
 
@@ -212,85 +211,85 @@ async function saveSection(section) {
             throw new Error(data.detail || `HTTP ${resp.status}`);
         }
         applyToForm(data.settings);
-        toast(`Gespeichert: ${data.updated.join(', ')}`, 'success');
+        toast(t('admin.saved', { items: data.updated.join(', ') }), 'success');
     } catch (err) {
-        toast(`Fehler beim Speichern: ${err.message}`, 'error');
+        toast(t('admin.saveError', { error: err.message }), 'error');
     }
 }
 
 async function testConnection(target) {
-    toast(`Teste ${target}…`, 'info');
+    toast(t('admin.testing', { target }), 'info');
     try {
         const resp = await fetch(`/api/admin/test/${target}`, {method: 'POST'});
         const data = await resp.json();
         if (data.ok) {
             const detail = target === 'sophos' && data.tenant_id
-                ? ` Tenant: ${data.tenant_id}`
+                ? t('admin.testTenant', { tenant: data.tenant_id })
                 : '';
-            toast(`✓ ${target} OK.${detail}`, 'success');
+            toast(t('admin.testOk', { target, detail }), 'success');
         } else {
-            toast(`✗ ${target}: ${data.error || 'unbekannter Fehler'}`, 'error');
+            toast(t('admin.testFail', { target, error: data.error || t('admin.unknownError') }), 'error');
         }
     } catch (err) {
-        toast(`Test-Fehler: ${err.message}`, 'error');
+        toast(t('admin.testError', { error: err.message }), 'error');
     }
 }
 
 async function syncMdrFeed() {
-    toast('Pushe Blocklisten in den MDR-Threat-Feed…', 'info');
+    toast(t('admin.mdrPushing'), 'info');
     try {
         const resp = await fetch('/api/firewall/mdr-feed/sync', { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        if (data.skipped) { toast(`Übersprungen: ${data.skipped}`, 'info'); return; }
+        if (data.skipped) { toast(t('admin.mdrSkipped', { reason: data.skipped }), 'info'); return; }
         const fws = data.firewalls || [];
-        if (!fws.length) { toast(`MDR-Push: keine Ziel-Firewalls (${data.note || '—'}).`, 'info'); return; }
+        if (!fws.length) { toast(t('admin.mdrNoTargets', { note: data.note || '—' }), 'info'); return; }
         const failed = fws.filter(f => f.error);
         const pushed = fws.reduce((s, f) => s + (f.pushed || 0), 0);
         const rejected = fws.reduce((s, f) => s + (f.rejected ? f.rejected.length : 0), 0);
         if (failed.length === fws.length) {
-            toast(`MDR-Push fehlgeschlagen: ${failed.map(f => f.firewall_id + ' (' + f.error + ')').join('; ')}`, 'error');
+            toast(t('admin.mdrPushFailed', { details: failed.map(f => f.firewall_id + ' (' + f.error + ')').join('; ') }), 'error');
         } else if (rejected || failed.length) {
-            toast(`MDR-Push: ${pushed} gepusht, ${rejected} Wert(e) abgelehnt${failed.length ? ', ' + failed.length + ' Firewall(s) mit Fehler' : ''}.`, 'info');
+            toast(t('admin.mdrPartial', { pushed, rejected }) + (failed.length ? t('admin.mdrPartialFailed', { n: failed.length }) : '') + '.', 'info');
         } else {
-            toast(`✓ MDR-Push: ${pushed} Indikator(en) an ${fws.length} Firewall(s).`, 'success');
+            toast(t('admin.mdrPushOk', { pushed, n: fws.length }), 'success');
         }
     } catch (err) {
-        toast(`MDR-Push fehlgeschlagen: ${err.message}`, 'error');
+        toast(t('admin.mdrPushFailedErr', { error: err.message }), 'error');
     }
 }
 
 async function verifyMdrFeed() {
-    toast('Prüfe Transaktionen des letzten MDR-Push…', 'info');
+    toast(t('admin.mdrVerifying'), 'info');
     try {
         const resp = await fetch('/api/firewall/mdr-feed/verify', { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        if (data.error) { toast(`Verifikation: ${data.error}`, 'info'); return; }
+        if (data.error) { toast(t('admin.mdrVerifyError', { error: data.error }), 'info'); return; }
         const fws = data.firewalls || [];
-        if (!fws.length) { toast('Verifikation: keine Transaktionen gefunden.', 'info'); return; }
+        if (!fws.length) { toast(t('admin.mdrVerifyNone'), 'info'); return; }
         const parts = fws.map(f =>
-            `${f.firewall_id.slice(0, 8)}…: ${f.completed}/${f.transactions} übernommen` +
-            (f.pending ? `, ${f.pending} pending` : '') +
-            (f.failed ? `, ${f.failed} fehlgeschlagen` : ''));
+            t('admin.mdrVerifyPart', { id: f.firewall_id.slice(0, 8), completed: f.completed, total: f.transactions }) +
+            (f.pending ? t('admin.mdrVerifyPending', { n: f.pending }) : '') +
+            (f.failed ? t('admin.mdrVerifyFailedPart', { n: f.failed }) : ''));
         const allApplied = fws.every(f => f.applied);
         const anyFailed = fws.some(f => f.failed);
-        toast(`MDR-Verifikation (Push ${data.pushed_at ? new Date(data.pushed_at).toLocaleString() : '—'}): ${parts.join(' | ')}`,
+        toast(t('admin.mdrVerifyResult', { at: data.pushed_at ? new Date(data.pushed_at).toLocaleString() : '—', parts: parts.join(' | ') }),
               allApplied ? 'success' : anyFailed ? 'error' : 'info');
     } catch (err) {
-        toast(`Verifikation fehlgeschlagen: ${err.message}`, 'error');
+        toast(t('admin.mdrVerifyFailed', { error: err.message }), 'error');
     }
 }
 
 async function entraSyncNow() {
-    toast('Entra-Sync läuft…', 'info');
+    toast(t('admin.entraSyncing'), 'info');
     try {
         const resp = await fetch('/api/admin/entra/sync-now', { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-        toast(`✓ ${data.ranges} IP-Range(s) zu Entra synchronisiert.`, 'success');
+        toast(t('admin.entraSyncOk', { ranges: data.ranges }), 'success');
     } catch (err) {
-        toast(`Entra-Sync fehlgeschlagen: ${err.message}`, 'error');
+        toast(t('admin.entraSyncFailed', { error: err.message }), 'error');
     }
 }
 
@@ -299,39 +298,39 @@ async function resetAnalystPersona() {
         const r = await fetch('/api/chat/default-persona');
         const d = await r.json();
         const ta = document.querySelector('[data-key="analyst_system_prompt"]');
-        if (ta && d.prompt) { ta.value = d.prompt; toast('Standard-Persona geladen — zum Übernehmen speichern.', 'info'); }
+        if (ta && d.prompt) { ta.value = d.prompt; toast(t('admin.personaLoaded'), 'info'); }
     } catch (err) {
-        toast('Standard-Persona laden fehlgeschlagen: ' + err.message, 'error');
+        toast(t('admin.personaLoadFailed', { error: err.message }), 'error');
     }
 }
 
 async function loadAgentModels() {
-    toast('Lade Modelle vom Agent-Endpoint…', 'info');
+    toast(t('admin.loadingModels'), 'info');
     try {
         const resp = await fetch('/api/admin/agent/models');
         const data = await resp.json();
         if (!data.ok) {
-            toast(`Modell-Liste fehlgeschlagen: ${data.error}`, 'error');
+            toast(t('admin.modelListFailed', { error: data.error }), 'error');
             return;
         }
         const sel = document.getElementById('agentModelSelect');
         if (!sel) return;
-        sel.innerHTML = '<option value="">— verfügbare Modelle —</option>' +
+        sel.innerHTML = `<option value="">${t('admin.availableModels')}</option>` +
             (data.models || []).map(m => `<option value="${m}">${m}</option>`).join('');
-        toast(`${(data.models || []).length} Modell(e) gefunden.`, 'success');
+        toast(t('admin.modelsFound', { n: (data.models || []).length }), 'success');
     } catch (err) {
-        toast(`Fehler: ${err.message}`, 'error');
+        toast(t('admin.errorGeneric', { error: err.message }), 'error');
     }
 }
 
 async function runFirewallRetention() {
-    if (!confirm('Firewall-Log-Retention jetzt ausführen? Alte Logs werden batchweise im Hintergrund gelöscht (kann je nach Rückstand einige Minuten dauern).')) return;
+    if (!confirm(t('admin.retentionConfirm'))) return;
     try {
         const resp = await fetch('/api/admin/firewall-retention/run-now', { method: 'POST' });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        toast('Retention-Lauf angestoßen — Löschung läuft im Hintergrund.', 'success');
+        toast(t('admin.retentionStarted'), 'success');
     } catch (err) {
-        toast(`Fehler: ${err.message}`, 'error');
+        toast(t('admin.errorGeneric', { error: err.message }), 'error');
     }
 }
 
@@ -339,9 +338,9 @@ async function agentRunNow() {
     try {
         const resp = await fetch('/api/agent/run-now', {method: 'POST'});
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        toast('Agent-Lauf angestoßen. Empfehlungen erscheinen im Dashboard.', 'success');
+        toast(t('admin.agentRunStarted'), 'success');
     } catch (err) {
-        toast(`Fehler: ${err.message}`, 'error');
+        toast(t('admin.errorGeneric', { error: err.message }), 'error');
     }
 }
 

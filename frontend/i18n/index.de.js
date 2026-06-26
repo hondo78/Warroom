@@ -1,0 +1,188 @@
+window.I18N = window.I18N || {}; window.I18N.de = window.I18N.de || {};
+window.I18N.de.dash = {
+    // stat boxes
+    stat_alerts_total: "Alarme Gesamt",
+    stat_events_total: "Events Gesamt",
+    stat_detections_total: "Detections Gesamt",
+    stat_fw_logs: "Firewall Logs",
+    stat_high_critical: "High/Critical (7d)",
+    stat_health_score: "Sophos Health Score",
+    stat_endpoints: "Endpoints",
+    stat_waf_detections: "WAF Detections",
+    stat_ips_detections: "IPS Detections",
+    in_24h: "in 24h",
+    needs_attention: "erfordert Aufmerksamkeit",
+
+    // agent card
+    agent_card_title: "🤖 KI-Agent — Empfehlungen",
+    agent_status_pending: "Pending",
+    agent_status_all: "Alle",
+    agent_status_approved: "Approved",
+    agent_status_rejected: "Rejected",
+    agent_status_executed: "Executed",
+    agent_status_failed: "Failed",
+    config: "⚙ Konfig",
+    col_reasoning: "Begründung",
+    col_alarm: "Alarm",
+    agent_empty: "Keine Agent-Empfehlungen für den aktuellen Filter. In der <a href=\"/admin.html\">Admin-Seite</a> Agent aktivieren und Modell wählen.",
+    execute: "✓ Ausführen",
+    reject: "✗ Ablehnen",
+    confirm_execute_decision: "Empfehlung jetzt ausführen?",
+    confirm_reject_decision: "Empfehlung als abgelehnt markieren?",
+    execute_failed: "Ausführen fehlgeschlagen: {error}",
+    reject_failed: "Ablehnen fehlgeschlagen: {error}",
+
+    // chart / card titles
+    map_title: "Angriffskarte — Quellen &amp; Ziele",
+    chart_timeline: "Timeline — Alerts / Events / Detections",
+    chart_by_severity: "Alarme nach Schweregrad",
+    chart_categories: "Alarm-Kategorien",
+    chart_top_attackers: "Top Angreifer IPs",
+    chart_alerts_per_fw: "Alarme pro Firewall",
+    chart_events_by_category: "Events nach Kategorie",
+
+    // section titles
+    failed_logins_title: "Fehlgeschlagene Login-Versuche",
+    waf_title: "WAF — Web Application Firewall",
+    ips_title: "IPS — Intrusion Prevention",
+    fw_syslog_title: "Firewall Security Logs (Syslog)",
+    sophos_events_title: "Sophos Central Events",
+    endpoints_title: "Endpoints (Sophos Central)",
+    recent_alerts_title: "Letzte Alarme",
+    recent_detections_title: "Letzte Detections",
+
+    // filter placeholders
+    filter_failed_logins: "Filter (IP, User, Land…)",
+    filter_waf: "Filter (IP, Host, URL, Reason…)",
+    filter_ips: "Filter (IP, Signatur, Kategorie…)",
+    filter_fw_logs: "Filter (IP, Typ, Threat, Firewall…)",
+    filter_events: "Filter (Device, Typ, Gruppe, Beschreibung…)",
+    filter_alerts: "Filter (Typ, Beschreibung, Quelle…)",
+    filter_detections: "Filter (Typ, Beschreibung, Gerät…)",
+    search_hostname: "Hostname suchen…",
+
+    // buttons
+    block_all: "Alle blocken",
+    block_all_ips: "Alle IPs blocken",
+    block: "Blocken",
+    block_ip: "IP blocken",
+    blocked_done: "✓ geblockt",
+    ack: "Ack",
+    ack_at_sophos: "Bei Sophos acknowledgen",
+    restore: "Restore",
+    isolate: "Isolate",
+
+    // table headers
+    count: "Anzahl",
+    host: "Host",
+    method: "Methode",
+    path: "Pfad",
+    http_status: "HTTP-Status",
+    reason_attack: "Grund / Attack",
+    target: "Ziel",
+    proto: "Proto",
+    signature: "Signatur",
+    category: "Kategorie",
+    type: "Typ",
+    threat_message: "Threat / Nachricht",
+    device: "Device",
+    group: "Gruppe",
+    description: "Beschreibung",
+    device_de: "Geraet",
+    hostname: "Hostname",
+    os: "OS",
+    last_contact: "Letzter Kontakt",
+    health: "Health",
+    isolation: "Isolation",
+    source: "Quelle",
+    last_24h: "Letzte 24h",
+    total: "Gesamt",
+    user_names: "User-Namen",
+    component: "Komponente",
+    last_attempt: "Letzter Versuch",
+    last_message: "Letzte Nachricht",
+
+    // WAF status-class options
+    http_status_class: "HTTP-Status-Klasse",
+    waf_status_4xx_5xx: "HTTP 4xx + 5xx (Default)",
+    waf_status_5xx: "Nur 5xx (Server-Fehler)",
+    waf_status_4xx: "Nur 4xx (Client-Fehler / Block)",
+    waf_status_2xx_3xx: "Nur 2xx + 3xx (durchgelassen)",
+    waf_status_all: "Alle Statusklassen",
+
+    // device filter options
+    all_health_states: "Alle Health-States",
+    all_isolation_states: "Alle Isolation-States",
+
+    // modals
+    osint_check: "OSINT-Check",
+    osint_recheck: "Neu prüfen (Cache umgehen)",
+    alert_details: "Alarm-Details",
+    fw_modal_title: "Firewall-Standort hinzufuegen",
+    fw_name: "Name",
+    fw_name_ph: "z.B. HQ Firewall",
+    fw_ip: "IP-Adresse",
+    fw_lat: "Breitengrad (Lat)",
+    fw_lon: "Laengengrad (Lon)",
+
+    // alert detail fields / sections
+    detail_created: "Erstellt",
+    no: "Nein",
+
+    // dynamic summaries / sub-labels
+    n_in_24h: "{n} in 24h",
+    n_blocked: "{n} blockiert",
+    n_clean: "{n} sauber",
+    n_isolated: "{n} isoliert",
+    n_online: "{n} online",
+    top_sources: "Top Quellen",
+    top_signatures: "Top Signaturen",
+    top_categories: "Top Kategorien",
+
+    // health tile
+    api_unavailable: "API nicht verfügbar",
+    no_health_scores: "Keine Health-Scores im Payload",
+    health_areas_below: "{count} Bereich(e) unter 100 (min {min})",
+    health_all_100: "alles bei 100",
+    load_error: "Fehler beim Laden",
+
+    // empty states
+    failed_logins_empty: "Keine fehlgeschlagenen Logins. SFOS Authentication-/Admin-Logs an Syslog-Server (UDP/TCP 5514) aktivieren: System → Administration → Notification settings.",
+    waf_empty: "Keine WAF-Detections. SFOS Web Server Protection / WAF-Logs an Syslog-Server (Port 5514) senden.",
+    ips_empty: "Keine IPS-Detections. SFOS IPS/IDP-Logs an Syslog-Server (Port 5514) senden.",
+    fw_logs_empty: "Keine Firewall-Logs. Sophos Firewall Syslog an Port 5514 (UDP/TCP) konfigurieren.",
+    endpoints_empty: "Keine Endpoints. Sophos Central muss Geräte managen, dann auf \"Daten sammeln\" klicken.",
+
+    // tooltips / inline cell text
+    no_action_in_log: "Keine Action im Log",
+    no_action_set: "Keine Action im Log gesetzt",
+    waf_block_http: "WAF block · HTTP {status}",
+    waf_no_reason: "Keine Attack-Begründung im Log — vermutlich erlaubter Request",
+    waf_hits_in_window: "Hits dieser IP im Zeitraum",
+    ip_blocked: "IP geblockt",
+    ip_blocked_fw: "IP ist aktuell auf der Firewall geblockt",
+    private: "privat",
+    fl_blocked_label: "geblockt",
+    fl_on_blocklist: "IP steht auf der Blocklist",
+    fl_blocked_since: "IP steht auf der Blocklist seit {time}",
+    fl_whitelisted: "IP steht auf der Whitelist — wird vom System niemals geblockt",
+    fl_whitelisted_src: "IP steht auf der Whitelist (Quelle: {source}) — wird vom System niemals geblockt",
+
+    // isolation prompt / actions
+    isolate_verb: "isolieren",
+    restore_verb: "wiederherstellen",
+    endpoint_action_prompt: "Endpoint {verb}? Optionaler Kommentar:",
+    action_failed: "Aktion fehlgeschlagen: {error}",
+
+    // confirms / alerts
+    no_blockable_ips: "Keine blockbaren IPs in der aktuellen Ansicht.",
+    confirm_block_n_ips: "{count} IP(s) auf die Blocklist setzen?",
+    blocking_n: "Blocke {count}…",
+    confirm_block_ip: "IP {ip} auf die Blocklist setzen?",
+    block_failed: "Block fehlgeschlagen: {error}",
+    confirm_ack: "Diesen Alarm bei Sophos Central als acknowledged markieren?",
+    ack_failed: "Acknowledge fehlgeschlagen: {error}",
+    error_prefix: "Fehler: {error}",
+    collection_started: "Datensammlung gestartet",
+    fw_required_fields: "Name, Breitengrad und Laengengrad sind Pflichtfelder",
+};

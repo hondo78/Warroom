@@ -59,6 +59,27 @@ quarantaene/quarantine -> quarantine_list. osint/pruefe/info zu -> osint.
 report/statistik/stats/zusammenfassung -> stats_report. hilfe/help -> help.
 Nur das JSON, keine Erklaerung."""
 
+_SYSTEM_PROMPT_EN = """You are the command parser for Warroom (security operations).
+Map the user's message to EXACTLY ONE tool and extract the arguments.
+Reply EXCLUSIVELY with JSON: {"tool": "<name>", "args": {...}}.
+
+Available tools:
+- block_ip         args: {"ip": "1.2.3.4"}                 add IP to the blocklist
+- block_domain     args: {"domain": "evil.example"}        block domain/FQDN
+- block_url        args: {"url": "http://.../path"}         block a complete URL
+- isolate_endpoint args: {"host": "PC-NAME"}               isolate endpoint/computer
+- quarantine_list  args: {}                                query the email quarantine
+- osint            args: {"value": "1.2.3.4", "type": "ip"|"domain"}
+- stats_report     args: {"days": 7}                       statistics report
+- help             args: {}                                help/overview
+- unknown          args: {}                                when unclear
+
+Recognise IPs, domains/FQDNs and hostnames from the text. block + IP ->
+block_ip; + domain -> block_domain. isolate a PC -> isolate_endpoint.
+quarantine -> quarantine_list. osint/check/info about -> osint.
+report/statistics/stats/summary -> stats_report. help -> help.
+Only the JSON, no explanation."""
+
 DEFAULT_ANALYST_PROMPT = """Du bist „Warroom Analyst", ein erfahrener Security-Operations-Analyst (SOC)
 als Assistent in der Warroom-Plattform (Sophos-zentriert: Firewall, Endpoints,
 Email, NetFlow, M365, OSINT, Blocklisten).
@@ -81,12 +102,39 @@ WICHTIG: Antworte IMMER auf Deutsch und gib NUR die finale Antwort aus. Zeige
 keine Denkschritte, kein internes Reasoning, keine Meta-Kommentare wie „Here's a
 thinking process" — direkt die fertige, knappe Analyse. /no_think"""
 
+DEFAULT_ANALYST_PROMPT_EN = """You are "Warroom Analyst", an experienced security operations analyst (SOC)
+acting as an assistant in the Warroom platform (Sophos-centric: firewall, endpoints,
+email, NetFlow, M365, OSINT, blocklists).
+
+Your job: help the analyst in conversation — assess threats, explain CVEs
+and attack patterns, evaluate IPs/domains/indicators, interpret logs and alerts,
+and give hardening and response recommendations.
+
+Style: precise, factual, in English, concise but well-founded. When useful,
+structure with short bullet points. No invented facts — if you are not sure
+about something, say so and propose a next step.
+
+You can also trigger actions: when the user wants to block or isolate something,
+query the quarantine or OSINT, or wants a statistics report, point them to the
+direct commands (e.g. "block 1.2.3.4", "isolate PC-12345",
+"OSINT for 8.8.8.8", "statistics report") — the system executes those directly.
+You yourself make no changes, you advise.
+
+IMPORTANT: ALWAYS answer in English and output ONLY the final answer. Do not show
+any reasoning steps, no internal reasoning, no meta comments like "Here's a
+thinking process" — directly the finished, concise analysis. /no_think"""
+
 _IP_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b")
 _DOMAIN_RE = re.compile(r"\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b", re.I)
 _URL_RE = re.compile(r"\bhttps?://[^\s]+", re.I)
 
 
 # -- intent resolution -------------------------------------------------------
+
+def _agent_lang() -> str:
+    """Resolve the configured agent prompt language ("de" or "en", default en)."""
+    return "de" if getattr(settings, "agent_language", "en") == "de" else "en"
+
 
 async def _llm_intent(text: str) -> dict[str, Any] | None:
     base = (settings.agent_base_url or "").rstrip("/")
@@ -100,7 +148,8 @@ async def _llm_intent(text: str) -> dict[str, Any] | None:
         "temperature": 0.0,
         "max_tokens": 400,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system",
+             "content": _SYSTEM_PROMPT_EN if _agent_lang() == "en" else _SYSTEM_PROMPT},
             {"role": "user", "content": text},
         ],
     }
@@ -427,7 +476,12 @@ async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
         return None
 
     db_enabled = bool(getattr(settings, "chat_sql_enabled", True))
-    system_prompt = (getattr(settings, "analyst_system_prompt", "") or "").strip() or DEFAULT_ANALYST_PROMPT
+    # Admin override (analyst_system_prompt) wins, else the EN/DE default per language.
+    system_prompt = (getattr(settings, "analyst_system_prompt", "") or "").strip()
+    if not system_prompt:
+        system_prompt = (
+            DEFAULT_ANALYST_PROMPT_EN if _agent_lang() == "en" else DEFAULT_ANALYST_PROMPT
+        )
     if db_enabled:
         from app import sql_query
         system_prompt = f"{system_prompt}\n\n{sql_query.prompt_section()}"

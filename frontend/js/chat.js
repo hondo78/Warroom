@@ -3,7 +3,7 @@ const _chatHistory = [];  // [{role:'user'|'assistant', content}]
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('chatInput');
     const send = document.getElementById('chatSend');
-    botMsg("Hi! Ich bin dein **Warroom Analyst**. Frag mich frei zu Bedrohungen, CVEs, IPs/Domains, Logs — oder gib direkte Befehle wie „blockiere 1.2.3.4“, „isoliere PC-12345“, „zeig die Quarantäne“, „OSINT zu 8.8.8.8“, „Statistik-Report“. „hilfe“ zeigt die Befehle.");
+    botMsg(t('chat.greeting'));
 
     send.addEventListener('click', submit);
     input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
@@ -26,14 +26,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = await r.json();
             thinking.remove();
             if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-            const reply = d.reply || '(keine Antwort)';
+            const reply = d.reply || t('chat.no_reply');
             botMsg(reply);
             // Only free conversation feeds the LLM history; command results don't.
             _chatHistory.push({ role: 'user', content: msg });
             if (d.tool === 'chat') _chatHistory.push({ role: 'assistant', content: reply });
         } catch (err) {
             thinking.remove();
-            botMsg('⚠️ Fehler: ' + err.message);
+            botMsg(t('chat.error', { msg: err.message }));
         } finally {
             input.disabled = send.disabled = false;
             input.focus();
