@@ -14,6 +14,7 @@ const SECTIONS = {
         'osint_intelix_daily_limit', 'osint_intelix_monthly_limit',
         'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
     ],
+    firewallFeed: ['firewall_threat_feed_enabled', 'firewall_mdr_feed_enabled', 'firewall_mdr_feed_firewall_ids', 'firewall_mdr_feed_sync_interval_seconds'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
@@ -232,6 +233,52 @@ async function testConnection(target) {
         }
     } catch (err) {
         toast(`Test-Fehler: ${err.message}`, 'error');
+    }
+}
+
+async function syncMdrFeed() {
+    toast('Pushe Blocklisten in den MDR-Threat-Feed…', 'info');
+    try {
+        const resp = await fetch('/api/firewall/mdr-feed/sync', { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        if (data.skipped) { toast(`Übersprungen: ${data.skipped}`, 'info'); return; }
+        const fws = data.firewalls || [];
+        if (!fws.length) { toast(`MDR-Push: keine Ziel-Firewalls (${data.note || '—'}).`, 'info'); return; }
+        const failed = fws.filter(f => f.error);
+        const pushed = fws.reduce((s, f) => s + (f.pushed || 0), 0);
+        const rejected = fws.reduce((s, f) => s + (f.rejected ? f.rejected.length : 0), 0);
+        if (failed.length === fws.length) {
+            toast(`MDR-Push fehlgeschlagen: ${failed.map(f => f.firewall_id + ' (' + f.error + ')').join('; ')}`, 'error');
+        } else if (rejected || failed.length) {
+            toast(`MDR-Push: ${pushed} gepusht, ${rejected} Wert(e) abgelehnt${failed.length ? ', ' + failed.length + ' Firewall(s) mit Fehler' : ''}.`, 'info');
+        } else {
+            toast(`✓ MDR-Push: ${pushed} Indikator(en) an ${fws.length} Firewall(s).`, 'success');
+        }
+    } catch (err) {
+        toast(`MDR-Push fehlgeschlagen: ${err.message}`, 'error');
+    }
+}
+
+async function verifyMdrFeed() {
+    toast('Prüfe Transaktionen des letzten MDR-Push…', 'info');
+    try {
+        const resp = await fetch('/api/firewall/mdr-feed/verify', { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+        if (data.error) { toast(`Verifikation: ${data.error}`, 'info'); return; }
+        const fws = data.firewalls || [];
+        if (!fws.length) { toast('Verifikation: keine Transaktionen gefunden.', 'info'); return; }
+        const parts = fws.map(f =>
+            `${f.firewall_id.slice(0, 8)}…: ${f.completed}/${f.transactions} übernommen` +
+            (f.pending ? `, ${f.pending} pending` : '') +
+            (f.failed ? `, ${f.failed} fehlgeschlagen` : ''));
+        const allApplied = fws.every(f => f.applied);
+        const anyFailed = fws.some(f => f.failed);
+        toast(`MDR-Verifikation (Push ${data.pushed_at ? new Date(data.pushed_at).toLocaleString() : '—'}): ${parts.join(' | ')}`,
+              allApplied ? 'success' : anyFailed ? 'error' : 'info');
+    } catch (err) {
+        toast(`Verifikation fehlgeschlagen: ${err.message}`, 'error');
     }
 }
 

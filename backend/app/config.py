@@ -9,6 +9,23 @@ class Settings(BaseSettings):
     sophos_client_secret: str = ""
     sophos_tenant_id: str = ""
 
+    # --- Firewall IOC delivery ---
+    # Two independent ways to get the blocklists onto the firewall; either or
+    # both may be active (admin-selectable).
+    # 1) Pull-based plaintext threat feeds (/ioc_IP, /ioc_domain, /ioc_url) that
+    #    the firewall fetches as third-party threat feeds. When off, the feeds
+    #    serve an empty body so a firewall that still polls them clears its list.
+    firewall_threat_feed_enabled: bool = True
+    # 2) Push-based delivery via the Sophos Central Firewall API MDR threat-feed
+    #    indicators endpoint (POST /firewall/v1/firewalls/{id}/mdr-threat-feed/
+    #    indicators). Reuses the existing Sophos Central OAuth credentials.
+    firewall_mdr_feed_enabled: bool = False
+    # Which Central-managed firewalls to push to: comma-separated firewall IDs.
+    # Empty = every firewall returned by /firewall/v1/firewalls.
+    firewall_mdr_feed_firewall_ids: str = ""
+    # How often (seconds) to reconcile the blocklists with the firewalls' MDR feed.
+    firewall_mdr_feed_sync_interval_seconds: int = 300
+
     # --- Microsoft 365 audit-log collector (Management Activity API) ---
     # Entra ID app registration with application permission ActivityFeed.Read
     # on "Office 365 Management APIs" (+ admin consent). Empty = collector idles.

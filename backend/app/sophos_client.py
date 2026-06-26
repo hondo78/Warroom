@@ -256,6 +256,42 @@ class SophosClient:
         logger.info(f"Fetched {len(firewalls)} firewalls from Sophos Central")
         return firewalls
 
+    async def post_mdr_indicators(self, firewall_id: str, body: dict) -> dict:
+        """Push IOC indicators to a firewall's MDR threat feed.
+
+        POST /firewall/v1/firewall-config/firewalls/{firewallId}/mdr-threat-feed/indicators
+        ``body`` is the request payload built by app.firewall_feed (kept there so
+        the exact indicator schema lives in one place). Returns the parsed JSON
+        response (or ``{"ok": True}`` for an empty 2xx body)."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "post",
+            f"{self._base_url()}/firewall/v1/firewall-config/firewalls/{firewall_id}/mdr-threat-feed/indicators",
+            headers=self._auth_headers(), json=body,
+        )
+        if resp.status_code >= 400:
+            # Surface the API's validation detail (lost by raise_for_status) so
+            # the caller/admin can see exactly why a payload was rejected.
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:600]}")
+        return resp.json() if resp.content else {"ok": True}
+
+    async def get_firewall_transaction(self, firewall_id: str, transaction_id: str) -> dict:
+        """Poll an async firewall-config transaction.
+
+        The firewall-config API queues every change/read as a transaction; the
+        returned ``status`` (pending | completed | failed) and ``result`` tell us
+        whether the firewall actually applied it. Used to verify an MDR push
+        reached the firewall."""
+        await self._ensure_auth()
+        resp = await _request(
+            self._get_client(), "get",
+            f"{self._base_url()}/firewall/v1/firewall-config/firewalls/{firewall_id}/transactions/{transaction_id}",
+            headers=self._auth_headers(),
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
+        return resp.json() if resp.content else {}
+
     async def get_endpoints(self) -> list[dict]:
         """Inventory of all managed endpoints (computers + servers).
 

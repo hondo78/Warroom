@@ -148,6 +148,15 @@ async def lifespan(app: FastAPI):
         id="firewall_retention",
     )
     scheduler.add_job(purge_firewall_logs, "date", id="initial_firewall_retention")
+    # Push the blocklists to the firewalls' MDR threat feed (no-op while
+    # firewall_mdr_feed_enabled is off). Pull-based feeds need no job — the
+    # firewall fetches /ioc_* directly.
+    from app.firewall_feed import sync_mdr_threat_feed
+    scheduler.add_job(
+        sync_mdr_threat_feed, "interval",
+        seconds=max(30, settings.firewall_mdr_feed_sync_interval_seconds),
+        id="firewall_mdr_feed_sync",
+    )
     scheduler.start()
     # Run initial collection after short delay
     scheduler.add_job(collect_all, "date", id="initial_collect")
@@ -1413,7 +1422,12 @@ async def ioc_ip_list(db: AsyncSession = Depends(get_db)):
     The firewall must send the X-API-Key header (same auth as /api/*).
     Updates are immediate — the list is read live from the DB on every request.
     """
-    rows = (await db.execute(select(BlockedIp.ip).order_by(BlockedIp.ip))).scalars().all()
+    # When the pull-based threat feed is disabled, serve an empty body so a
+    # firewall still polling this URL clears its third-party feed.
+    rows = (
+        (await db.execute(select(BlockedIp.ip).order_by(BlockedIp.ip))).scalars().all()
+        if settings.firewall_threat_feed_enabled else []
+    )
     body = "\n".join(rows)
     if body:
         body += "\n"
@@ -1634,7 +1648,10 @@ async def ioc_domain_list(db: AsyncSession = Depends(get_db)):
     Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
     request, so block/unblock takes effect immediately.
     """
-    rows = (await db.execute(select(BlockedDomain.domain).order_by(BlockedDomain.domain))).scalars().all()
+    rows = (
+        (await db.execute(select(BlockedDomain.domain).order_by(BlockedDomain.domain))).scalars().all()
+        if settings.firewall_threat_feed_enabled else []
+    )
     body = "\n".join(rows)
     if body:
         body += "\n"
@@ -1758,7 +1775,10 @@ async def ioc_url_list(db: AsyncSession = Depends(get_db)):
     Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
     request, so block/unblock takes effect immediately.
     """
-    rows = (await db.execute(select(BlockedUrl.url).order_by(BlockedUrl.url))).scalars().all()
+    rows = (
+        (await db.execute(select(BlockedUrl.url).order_by(BlockedUrl.url))).scalars().all()
+        if settings.firewall_threat_feed_enabled else []
+    )
     body = "\n".join(rows)
     if body:
         body += "\n"
@@ -1769,6 +1789,23 @@ async def ioc_url_list(db: AsyncSession = Depends(get_db)):
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.post("/api/firewall/mdr-feed/sync")
+async def mdr_feed_sync_now():
+    """Push the current blocklists to the firewalls' MDR threat feed right now.
+    Runs even when firewall_mdr_feed_enabled is off (admin-initiated test).
+    Returns the per-firewall push result so the admin can verify it worked."""
+    from app.firewall_feed import sync_mdr_threat_feed
+    return await sync_mdr_threat_feed(force=True)
+
+
+@app.post("/api/firewall/mdr-feed/verify")
+async def mdr_feed_verify():
+    """Poll the transactions from the most recent MDR push and report whether
+    each firewall has actually applied the indicators (completed vs pending)."""
+    from app.firewall_feed import verify_last_push
+    return await verify_last_push()
 
 
 # --- Whitelist (IPs that may never be blocked) ---
@@ -4076,6 +4113,10 @@ class AdminSettingsIn(BaseModel):
     sophos_client_id: str | None = None
     sophos_client_secret: str | None = None
     sophos_tenant_id: str | None = None
+    firewall_threat_feed_enabled: bool | None = None
+    firewall_mdr_feed_enabled: bool | None = None
+    firewall_mdr_feed_firewall_ids: str | None = Field(default=None, max_length=4000)
+    firewall_mdr_feed_sync_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     o365_tenant_id: str | None = None
     o365_client_id: str | None = None
     o365_client_secret: str | None = None
@@ -4790,24 +4831,13 @@ async def list_agent_models():
 @app.get("/api/admin/agent/default-prompt")
 async def get_agent_default_prompt(source: str = Query(default="alert")):
     """Return the bundled fallback system prompt so the admin UI can offer
-    'reset to default'. ``source`` is one of: alert (the original Sophos-
-    alert prompt), waf, ips, failed_login."""
-    from app.agent import (
-        DEFAULT_SYSTEM_PROMPT,
-        DEFAULT_WAF_PROMPT,
-        DEFAULT_IPS_PROMPT,
-        DEFAULT_FAILED_LOGIN_PROMPT,
-        DEFAULT_DISTRIBUTED_LOGIN_PROMPT,
-        DEFAULT_TRIAGE_PROMPT,
-    )
-    mapping = {
-        "alert":        DEFAULT_SYSTEM_PROMPT,
-        "waf":          DEFAULT_WAF_PROMPT,
-        "ips":          DEFAULT_IPS_PROMPT,
-        "failed_login": DEFAULT_FAILED_LOGIN_PROMPT,
-        "failed_login_distributed": DEFAULT_DISTRIBUTED_LOGIN_PROMPT,
-        "triage":       DEFAULT_TRIAGE_PROMPT,
-    }
+    'reset to default'. ``source`` is "alert" (the original Sophos-alert prompt)
+    or any key in agent._RULE_PROMPTS (waf, ips, event, failed_login,
+    failed_login_distributed, failed_login_user, triage)."""
+    from app.agent import DEFAULT_SYSTEM_PROMPT, _RULE_PROMPTS
+    # Single source of truth: derive from _RULE_PROMPTS so new stages can't drift.
+    mapping = {"alert": DEFAULT_SYSTEM_PROMPT}
+    mapping.update({src: default for src, (_attr, default) in _RULE_PROMPTS.items()})
     prompt = mapping.get(source)
     if prompt is None:
         raise HTTPException(
