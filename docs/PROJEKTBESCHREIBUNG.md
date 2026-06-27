@@ -1,97 +1,97 @@
-# Warroom — Projektbeschreibung
+# Warroom — Project Description
 
-> Security-Operations-Dashboard für Sophos Central & Sophos Firewalls mit
-> KI-Agent, OSINT-Anreicherung und automatisierter Abwehr.
-> Setup: siehe [`../README.md`](../README.md).
+> Security operations dashboard for Sophos Central & Sophos Firewalls with
+> AI agent, OSINT enrichment and automated defense.
+> Setup: see [`../README.md`](../README.md).
 
-## 1. Worum geht es?
+## 1. What is this about?
 
-Warroom bündelt die sicherheitsrelevanten Datenquellen einer Sophos-Umgebung an
-einem Ort und macht aus Monitoring eine aktive Verteidigung:
+Warroom brings together the security-relevant data sources of a Sophos environment in
+one place and turns monitoring into an active defense:
 
-- **Sehen:** Alerts/Events/Detections aus Sophos Central, Firewall-Logs
-  (IPS, WAF, Auth) und NetFlow — mit Live-Karte der Angreifer-Geolokation.
-- **Bewerten:** IPs/Domains/URLs gegen mehrere OSINT-Quellen prüfen (Intelix,
-  AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo, DNS) — manuell oder per KI.
-- **Handeln:** Treffer landen auf zentralen Blocklisten, die die Firewalls als
-  IOC-Feeds abholen; Mailboxen/Quarantäne über die Sophos Email API verwalten.
+- **See:** alerts/events/detections from Sophos Central, firewall logs
+  (IPS, WAF, auth) and NetFlow — with a live map of attacker geolocation.
+- **Assess:** check IPs/domains/URLs against several OSINT sources (Intelix,
+  AbuseIPDB, VirusTotal, Shodan, GreyNoise, ipinfo, DNS) — manually or via AI.
+- **Act:** hits land on central blocklists that the firewalls pull as
+  IOC feeds; manage mailboxes/quarantine via the Sophos Email API.
 
-**Zielgruppe:** SecOps/Admins kleiner–mittlerer Sophos-Umgebungen, die ein
-selbst gehostetes Cockpit ohne SaaS-Abhängigkeit wollen.
-**Prinzipien:** self-hosted, Mensch behält die Kontrolle (KI empfiehlt
-standardmäßig), Whitelist schützt eigene IPs vor versehentlichem Block.
+**Target audience:** SecOps/admins of small–medium Sophos environments who want a
+self-hosted cockpit without SaaS dependency.
+**Principles:** self-hosted, human stays in control (AI recommends
+by default), whitelist protects your own IPs from accidental blocking.
 
-## 2. Architektur
+## 2. Architecture
 
-Alles läuft in Containern (`docker-compose.yml`):
+Everything runs in containers (`docker-compose.yml`):
 
-| Container  | Port (Host)    | Aufgabe |
+| Container  | Port (host)    | Task |
 |------------|----------------|---------|
-| `frontend` | `8448`         | Nginx: statische UI + Reverse-Proxy `/api/`→backend, setzt API-Key |
-| `backend`  | intern `8000`  | FastAPI: REST-API, Sophos-Anbindung, KI-Agent, OSINT, IOC-Feeds |
-| `syslog`   | `5514/udp+tcp` | Sophos-Firewall-Syslog → `firewall_logs` |
+| `frontend` | `8448`         | Nginx: static UI + reverse proxy `/api/`→backend, sets API key |
+| `backend`  | internal `8000`  | FastAPI: REST API, Sophos integration, AI agent, OSINT, IOC feeds |
+| `syslog`   | `5514/udp+tcp` | Sophos Firewall syslog → `firewall_logs` |
 | `netflow`  | `2055/udp`     | NetFlow v5/v9/IPFIX → `netflow_buckets` |
-| `postgres` | intern `5432`  | Persistenz |
-| `redis`    | intern `6379`  | Cache (Summaries, OSINT-Lookups) |
-| `grafana`  | `3030`         | Dashboards direkt auf der DB |
+| `postgres` | internal `5432`  | Persistence |
+| `redis`    | internal `6379`  | Cache (summaries, OSINT lookups) |
+| `grafana`  | `3030`         | Dashboards directly on the DB |
 
 **Stack:** FastAPI + SQLAlchemy 2 (async) + APScheduler · PostgreSQL 16 · Redis 7
-· Vanilla JS/AdminLTE (kein Build-Step) · GeoIP MaxMind GeoLite2 · KI über
-OpenAI-kompatibles Endpoint (LMStudio/Ollama/vLLM/OpenAI) · Grafana 11.
+· Vanilla JS/AdminLTE (no build step) · GeoIP MaxMind GeoLite2 · AI via an
+OpenAI-compatible endpoint (LMStudio/Ollama/vLLM/OpenAI) · Grafana 11.
 
-**Backend-Module (`backend/app/`):** `main.py` (Routen, Scheduler) ·
-`sophos_client.py` (Central- + Email-API) · `collector.py` (Sync) · `agent.py`
-(KI-Loops, Triage) · `osint.py` (Lookups, 1 h-Cache) · `settings_store.py` (Live-
-Konfig) · `geoip_service.py` · `*_metrics.py`.
+**Backend modules (`backend/app/`):** `main.py` (routes, scheduler) ·
+`sophos_client.py` (Central + Email API) · `collector.py` (sync) · `agent.py`
+(AI loops, triage) · `osint.py` (lookups, 1 h cache) · `settings_store.py` (live
+config) · `geoip_service.py` · `*_metrics.py`.
 
-**Datenfluss:**
+**Data flow:**
 1. Sophos Central API → `collector` → DB
-2. Firewall-Syslog → `syslog` → `firewall_logs`
+2. Firewall syslog → `syslog` → `firewall_logs`
 3. NetFlow → `netflow` → `netflow_buckets`
-4. UI → Backend liest DB (teils Redis-gecacht) → Frontend
-5. Block-Aktion (UI/KI/OSINT) → `blocked_ips/_domains/_urls`
-6. Firewall pullt `/ioc_IP` · `/ioc_domain` · `/ioc_url` → live aus den Tabellen
+4. UI → backend reads DB (partly Redis-cached) → frontend
+5. Block action (UI/AI/OSINT) → `blocked_ips/_domains/_urls`
+6. Firewall pulls `/ioc_IP` · `/ioc_domain` · `/ioc_url` → live from the tables
 
-## 3. KI-Agent (optional)
+## 3. AI agent (optional)
 
-Nutzt ein OpenAI-kompatibles Modell; bekommt strukturiertes JSON und muss strikt
-JSON (`action`/`args`/`confidence`/`reasoning`) zurückgeben — das Backend
-re-validiert jede Antwort. Loops (einzeln aktivierbar, eigener Prompt): Alert,
-WAF, IPS, Failed-Login (per IP) sowie **verteilter Brute-Force** (der Agent
-bekommt alle Logins der letzten 60 Min, gruppiert selbst nach /24, zählt und
-empfiehlt `block_subnet`/`block_ips`) und **Triage** (Wert von der OSINT-Seite).
-Empfehlungen sind per Default `pending` (Freigabe durch Mensch); optional
-Auto-Execute/Konfidenz-Schwelle. Modell, Intervalle, Schwellen, Temperatur,
-max-Tokens und Prompts sind live im Admin-Bereich einstellbar.
+Uses an OpenAI-compatible model; receives structured JSON and must return strict
+JSON (`action`/`args`/`confidence`/`reasoning`) — the backend
+re-validates every response. Loops (individually activatable, own prompt): alert,
+WAF, IPS, failed login (per IP) as well as **distributed brute-force** (the agent
+receives all logins of the last 60 min, groups them itself by /24, counts and
+recommends `block_subnet`/`block_ips`) and **triage** (value from the OSINT page).
+Recommendations are `pending` by default (approval by a human); optionally
+auto-execute/confidence threshold. Model, intervals, thresholds, temperature,
+max tokens and prompts are configurable live in the admin area.
 
-## 4. Nutzung
+## 4. Usage
 
-Einstieg: `http://<host>:8448`.
+Entry point: `http://<host>:8448`.
 
-| Seite | URL | Nutzung |
+| Page | URL | Usage |
 |-------|-----|---------|
-| Dashboard | `/` | Lagebild, Angriffskarte, Firewall-Logs; IPs blocken, Alerts quittieren, Endpoints isolieren |
-| NetFlow | `/netflow.html` | Top-Talker, Ziele, Ports, Protokolle, Durchsatz |
-| Blocklist | `/blocked.html` | IPs/Domains/URLs blocken, Whitelist, IOC-Feeds |
-| Firewalls | `/firewalls.html` | Standorte, Interfaces, Whitelist |
-| Agent | `/agent.html` | KI-Entscheidungen genehmigen/ablehnen, LLM-Statistik |
-| Email | `/email.html` | Mailboxen verwalten, Quarantäne durchsuchen, freigeben/löschen |
-| OSINT | `/osint.html` | IP/Domain/URL prüfen → sofort blocken oder an KI-Triage |
-| Stats | `/stats.html` | OSINT-/LLM-Verbrauch, Cache-Quote |
-| Admin | `/admin.html` | API-Keys, Intervalle, LLM-Parameter, Prompts — live |
-| Grafana | `:3030` | Vorgefertigte DB-Dashboards |
+| Dashboard | `/` | Situational picture, attack map, firewall logs; block IPs, acknowledge alerts, isolate endpoints |
+| NetFlow | `/netflow.html` | Top talkers, destinations, ports, protocols, throughput |
+| Blocklist | `/blocked.html` | Block IPs/domains/URLs, whitelist, IOC feeds |
+| Firewalls | `/firewalls.html` | Locations, interfaces, whitelist |
+| Agent | `/agent.html` | Approve/reject AI decisions, LLM statistics |
+| Email | `/email.html` | Manage mailboxes, search quarantine, release/delete |
+| OSINT | `/osint.html` | Check IP/domain/URL → block immediately or hand to AI triage |
+| Stats | `/stats.html` | OSINT/LLM usage, cache rate |
+| Admin | `/admin.html` | API keys, intervals, LLM parameters, prompts — live |
+| Grafana | `:3030` | Prebuilt DB dashboards |
 
-**Typische Abläufe:** Angriff blocken (auffällige IP → 🔍 OSINT → sofort blocken
-oder an KI-Triage → Firewall holt IOC-Feed) · Agent betreiben (Admin: Modell/
-Loops/Schwellen → Agent: Empfehlungen prüfen/Auto-Execute) · verteilter
-Brute-Force (Agent erkennt /24-Cluster der letzten 60 Min) · E-Mail (Quarantäne
-durchsuchen, freigeben/löschen, Absender erlauben/blocken).
+**Typical workflows:** block an attack (suspicious IP → 🔍 OSINT → block immediately
+or hand to AI triage → firewall pulls IOC feed) · operate the agent (Admin: model/
+loops/thresholds → Agent: check recommendations/auto-execute) · distributed
+brute-force (agent detects /24 clusters of the last 60 min) · email (search the
+quarantine, release/delete, allow/block sender).
 
-**Datenquellen:** Sophos-Credentials in Admin/`.env`; Firewall-Syslog auf
-`host:5514`; NetFlow auf `host:2055`; Firewall holt `/ioc_*`.
+**Data sources:** Sophos credentials in Admin/`.env`; firewall syslog on
+`host:5514`; NetFlow on `host:2055`; firewall pulls `/ioc_*`.
 
-## 5. Sicherheit
+## 5. Security
 
-`X-API-Key` auf allen `/api/*` (Nginx injiziert) · strikte CSP & Security-Header
-· Whitelist verhindert Self-Block · KI per Default nur empfehlend · Secrets in
-der Admin-API maskiert. Mehr: [`REVIEW.md`](REVIEW.md).
+`X-API-Key` on all `/api/*` (injected by Nginx) · strict CSP & security headers
+· whitelist prevents self-block · AI by default only recommends · secrets masked in
+the Admin API. More: [`REVIEW.md`](REVIEW.md).

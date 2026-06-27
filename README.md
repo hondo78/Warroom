@@ -1,15 +1,15 @@
 # Warroom
 
-Security-Operations-Dashboard für kleine bis mittlere Sophos-Umgebungen.
-Bündelt Daten aus **Sophos Central** (Alerts, Events, Endpoints, Firewalls),
-**Sophos Firewall (SFOS) Syslog** (IPS, WAF, Auth, Traffic) sowie **NetFlow
-v5/v9/IPFIX** und reichert IPs per **GeoIP + AbuseIPDB / VirusTotal / Shodan /
-Sophos Intelix / GreyNoise** an. Geblockte IPs, Domains und URLs werden als
-**IOC-Feeds** (TXT) bereitgestellt, die Firewalls per URL abrufen.
+Security operations dashboard for small to medium-sized Sophos environments.
+Aggregates data from **Sophos Central** (alerts, events, endpoints, firewalls),
+**Sophos Firewall (SFOS) syslog** (IPS, WAF, auth, traffic) as well as **NetFlow
+v5/v9/IPFIX**, and enriches IPs via **GeoIP + AbuseIPDB / VirusTotal / Shodan /
+Sophos Intelix / GreyNoise**. Blocked IPs, domains and URLs are published as
+**IOC feeds** (TXT) that firewalls pull via URL.
 
-> **In einem Satz:** Logs reinschütten, Angreifer auf einer Karte sehen,
-> mit einem Klick (oder per KI-Agent) blocken – und die Firewall zieht die
-> Blockliste selbst.
+> **In one sentence:** Pour in your logs, see attackers on a map,
+> block them with a single click (or via AI agent) – and the firewall pulls
+> the blocklist itself.
 
 ```
 ┌──────────────────┐  Syslog 5514     ┌──────────┐
@@ -40,170 +40,170 @@ Sophos Intelix / GreyNoise** an. Geblockte IPs, Domains und URLs werden als
 
 ---
 
-## Inhalt
+## Contents
 
-> 📖 Ausführliche **Projektbeschreibung, Architektur & Nutzung**: [`docs/PROJEKTBESCHREIBUNG.md`](docs/PROJEKTBESCHREIBUNG.md)
+> 📖 Detailed **project description, architecture & usage**: [`docs/PROJEKTBESCHREIBUNG.md`](docs/PROJEKTBESCHREIBUNG.md)
 
-- [Was kann Warroom? (User-Sicht)](#was-kann-warroom-user-sicht)
-- [Voraussetzungen](#voraussetzungen)
-- [Setup in 6 Schritten](#setup-in-6-schritten)
-- [Was muss ich besorgen? (Checkliste)](#was-muss-ich-besorgen-checkliste)
-- [Datenquellen anbinden](#datenquellen-anbinden)
-- [IOC-Feeds für Firewalls](#ioc-feeds-für-firewalls)
-- [Block-API (Web-UI)](#block-api-web-ui)
-- [KI-Agent (optional)](#ki-agent-optional)
-- [Microsoft 365 Audit-Logs (optional)](#microsoft-365-audit-logs-optional)
-- [Entra ID Login-Blocking (optional)](#entra-id-login-blocking-optional)
-- [Telegram-Approvals (optional)](#telegram-approvals-optional)
-- [KI-Chat & Teams-Befehle](#ki-chat--teams-befehle)
-- [Sicherheit & Härtung](#sicherheit--härtung)
-- [Stack & Services](#stack--services)
+- [What can Warroom do? (User view)](#what-can-warroom-do-user-view)
+- [Requirements](#requirements)
+- [Setup in 6 steps](#setup-in-6-steps)
+- [What do I need to obtain? (Checklist)](#what-do-i-need-to-obtain-checklist)
+- [Connecting data sources](#connecting-data-sources)
+- [IOC feeds for firewalls](#ioc-feeds-for-firewalls)
+- [Block API (Web UI)](#block-api-web-ui)
+- [AI agent (optional)](#ai-agent-optional)
+- [Microsoft 365 audit logs (optional)](#microsoft-365-audit-logs-optional)
+- [Entra ID login blocking (optional)](#entra-id-login-blocking-optional)
+- [Telegram approvals (optional)](#telegram-approvals-optional)
+- [AI chat & Teams commands](#ai-chat--teams-commands)
+- [Security & hardening](#security--hardening)
+- [Stack & services](#stack--services)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Was kann Warroom? (User-Sicht)
+## What can Warroom do? (User view)
 
-Nach dem Login (Dashboard unter `http://<host>:8448`) stehen folgende Seiten
-zur Verfügung:
+After logging in (dashboard at `http://<host>:8448`), the following pages are
+available:
 
-| Seite | URL | Das kannst du dort tun |
+| Page | URL | What you can do there |
 |-------|-----|------------------------|
-| **Dashboard** | `/` | Alerts, Events & Detections aus Sophos Central; Live-Karte mit Angreifer-Geolokation; Firewall-Logs (IPS / WAF / Auth / Failed-Logins); KI-Agent-Empfehlungen; Endpoint-Übersicht. IPs direkt per Klick blocken, Alerts quittieren, Endpoints isolieren. |
-| **KI-Chat** | `/chat.html` | Befehle in natürlicher Sprache: IP/Domain/FQDN/URL blocken, Endpoint isolieren, Quarantäne abfragen, OSINT-Lookup, Statistik-Report. Dieselbe Engine ist über **Microsoft Teams** erreichbar. |
-| **Blocklist** | `/blocked.html` | IPs, Domains und URLs manuell blocken/entblocken; Whitelist pflegen; die fertigen IOC-Feeds einsehen. |
-| **NetFlow** | `/netflow.html` | Traffic-Analyse: Top-Talker, Ziele, Ports, Protokoll-Mix, Interface-Durchsatz. |
-| **Firewalls** | `/firewalls.html` | Firewall-Standorte auf der Karte, Interface-Statistiken, Whitelist-Verwaltung. |
-| **Endpoints** | `/endpoints.html` | Sophos Endpoint Management API: Geräte-**Inventar** (Health/Isolation/Tamper/OS) mit Detailansicht, isolieren/freigeben, On-Demand-Scan, de-registrieren · **Gruppen** (anlegen/löschen) · **Policies** (Liste + Detail) · **Einstellungen** (Tamper-Protection global, Allow-/Block-Liste, Scan-Ausschlüsse, Web-Control lokale Sites — je hinzufügen/löschen) · **Installer-Downloads** pro Plattform. |
-| **Agent** | `/agent.html` | Entscheidungs-Log des KI-Agenten; Empfehlungen genehmigen/ablehnen; LLM-Statistik. Erkennt u. a. **verteilte Brute-Force-Angriffe** (viele Quell-IPs über mehrere /24-Netze gegen dasselbe Konto → `block_ips`) und nimmt **Triage-Eingaben** entgegen. |
-| **Agent-Workflow** | `/agent-workflow.html` | Visualisiert die Entscheidungs-Pipeline und macht **jede Stufe** (Trigger, Schwellen, Intervall, erlaubte Aktionen, System-Prompt, Auto-Execute) live editierbar. Das LLM wird mit **strukturierten Ausgaben** (Pydantic-Schema via `response_format`) angesprochen und typisiert validiert. |
-| **Email** | `/email.html` | Sophos Email Management API: Mailboxen verwalten (anlegen/ändern/löschen), Quarantäne & Post-Delivery-Quarantäne durchsuchen, Nachrichten freigeben/löschen (optional Absender erlauben/blocken). |
-| **Microsoft 365** | `/o365.html` | M365-Login-Audit (Management Activity API): erfolgreiche & fehlgeschlagene Anmeldungen mit App, **Gerät** (Name/OS/Browser/Compliance), Quell-IP, Standort. Spalten **sortier- und filterbar**; OSINT-Drilldown pro IP; fehlgeschlagene Logins direkt blockbar (whitelistete IPs geschützt). |
-| **OSINT** | `/osint.html` | IP, Domain oder URL manuell prüfen — Sophos Intelix, AbuseIPDB, VirusTotal, GreyNoise, ipinfo & DNS parallel; Cache-Bypass. **Shodan** ist credit-sparend opt-in: erst per Button „🛰️ Shodan abfragen". Geprüfte Werte direkt **sofort blocken** oder **an die KI-Triage** übergeben. Jeder Lookup wird in einer durchsuchbaren **persistenten Historie** (`osint_results`) gespeichert (über den 1h-Redis-Cache hinaus); offene Ports & CVEs zusätzlich als Karten-Layer. |
-| **Stats** | `/stats.html` | Verbrauch der OSINT-Provider (Tages-/Monatslimits), LLM-Calls & Tokens, Cache-Trefferquote. |
-| **Admin** | `/admin.html` | Alle API-Keys, Intervalle, Loglevel und Agent-Einstellungen **live** editieren – ohne Container-Neustart. |
-| **Grafana** | `:3030` | Vorgefertigte Dashboards (Warroom, NetFlow, Blocklist) direkt auf der PostgreSQL-DB. |
+| **Dashboard** | `/` | Alerts, events & detections from Sophos Central; live map with attacker geolocation; firewall logs (IPS / WAF / auth / failed logins); AI agent recommendations; endpoint overview. Block IPs directly with a click, acknowledge alerts, isolate endpoints. |
+| **AI Chat** | `/chat.html` | Natural-language commands: block IP/domain/FQDN/URL, isolate endpoint, query quarantine, OSINT lookup, statistics report. The same engine is reachable via **Microsoft Teams**. |
+| **Blocklist** | `/blocked.html` | Manually block/unblock IPs, domains and URLs; maintain the whitelist; inspect the finished IOC feeds. |
+| **NetFlow** | `/netflow.html` | Traffic analysis: top talkers, destinations, ports, protocol mix, interface throughput. |
+| **Firewalls** | `/firewalls.html` | Firewall locations on the map, interface statistics, whitelist management. |
+| **Endpoints** | `/endpoints.html` | Sophos Endpoint Management API: device **inventory** (health/isolation/tamper/OS) with detail view, isolate/release, on-demand scan, de-register · **groups** (create/delete) · **policies** (list + detail) · **settings** (global tamper protection, allow/block list, scan exclusions, web control local sites — each add/delete) · **installer downloads** per platform. |
+| **Agent** | `/agent.html` | Decision log of the AI agent; approve/reject recommendations; LLM statistics. Detects, among other things, **distributed brute-force attacks** (many source IPs across multiple /24 networks against the same account → `block_ips`) and accepts **triage inputs**. |
+| **Agent Workflow** | `/agent-workflow.html` | Visualizes the decision pipeline and makes **every stage** (trigger, thresholds, interval, allowed actions, system prompt, auto-execute) editable live. The LLM is addressed with **structured outputs** (Pydantic schema via `response_format`) and validated in a typed manner. |
+| **Email** | `/email.html` | Sophos Email Management API: manage mailboxes (create/modify/delete), search quarantine & post-delivery quarantine, release/delete messages (optionally allow/block sender). |
+| **Microsoft 365** | `/o365.html` | M365 login audit (Management Activity API): successful & failed sign-ins with app, **device** (name/OS/browser/compliance), source IP, location. Columns **sortable and filterable**; OSINT drilldown per IP; failed logins directly blockable (whitelisted IPs protected). |
+| **OSINT** | `/osint.html` | Check an IP, domain or URL manually — Sophos Intelix, AbuseIPDB, VirusTotal, GreyNoise, ipinfo & DNS in parallel; cache bypass. **Shodan** is credit-frugal opt-in: only via the "🛰️ Query Shodan" button. Checked values can be **blocked immediately** or handed to the **AI triage**. Every lookup is stored in a searchable **persistent history** (`osint_results`) (beyond the 1h Redis cache); open ports & CVEs additionally as a map layer. |
+| **Stats** | `/stats.html` | Usage of the OSINT providers (daily/monthly limits), LLM calls & tokens, cache hit rate. |
+| **Admin** | `/admin.html` | Edit all API keys, intervals, log level and agent settings **live** – without restarting containers. |
+| **Grafana** | `:3030` | Prebuilt dashboards (Warroom, NetFlow, Blocklist) directly on the PostgreSQL DB. |
 
 ---
 
-## Voraussetzungen
+## Requirements
 
-Auf dem Host brauchst du nur:
+On the host you only need:
 
-- **Docker** und **Docker Compose v2** (`docker compose version` ≥ 2.x)
+- **Docker** and **Docker Compose v2** (`docker compose version` ≥ 2.x)
 - **Git**
-- Freie Ports auf dem Host: **8448** (Dashboard), **3030** (Grafana),
-  **5514/udp+tcp** (Syslog), **2055/udp** (NetFlow)
-- Optional, aber empfohlen: ein zweites Gerät, das Syslog/NetFlow sendet
-  (Sophos Firewall o. Ä.)
+- Free ports on the host: **8448** (dashboard), **3030** (Grafana),
+  **5514/udp+tcp** (syslog), **2055/udp** (NetFlow)
+- Optional, but recommended: a second device that sends syslog/NetFlow
+  (Sophos Firewall or similar)
 
-Es gibt **keinen Build-Step** für das Frontend (Vanilla JS) und keine lokale
-Python-Installation nötig – alles läuft in Containern.
+There is **no build step** for the frontend (vanilla JS) and no local
+Python installation needed – everything runs in containers.
 
 ---
 
-## Setup in 6 Schritten
+## Setup in 6 steps
 
 ```bash
-# 1) Klonen
+# 1) Clone
 git clone https://github.com/hondo78/Warroom.git
 cd Warroom
 
-# 2) Konfiguration anlegen
+# 2) Create configuration
 cp .env.example .env
 
-# 3) .env ausfüllen – mindestens:
-#    - POSTGRES_PASSWORD + DATABASE_URL (gleiches Passwort!)
-#    - WARROOM_API_KEY   (openssl rand -hex 32)   [dringend empfohlen]
+# 3) Fill in .env – at minimum:
+#    - POSTGRES_PASSWORD + DATABASE_URL (same password!)
+#    - WARROOM_API_KEY   (openssl rand -hex 32)   [strongly recommended]
 #    - GRAFANA_ADMIN_PASSWORD
-#    - SOPHOS_CLIENT_ID / SOPHOS_CLIENT_SECRET     [für Sophos-Central-Daten]
+#    - SOPHOS_CLIENT_ID / SOPHOS_CLIENT_SECRET     [for Sophos Central data]
 $EDITOR .env
 
-# 4) (Optional) GeoIP-Datenbanken bereitstellen – siehe Checkliste unten.
-#    Ohne läuft Warroom mit ip-api.com-Fallback.
-#    GeoLite2-City.mmdb und GeoLite2-ASN.mmdb nach ./geoip/ legen.
+# 4) (Optional) Provide GeoIP databases – see checklist below.
+#    Without them, Warroom runs with the ip-api.com fallback.
+#    Place GeoLite2-City.mmdb and GeoLite2-ASN.mmdb into ./geoip/.
 
-# 5) Starten
+# 5) Start
 docker compose up -d
 
-# 6) Status prüfen
+# 6) Check status
 docker compose ps
 docker compose logs -f backend
 ```
 
-Danach erreichbar:
+Then reachable at:
 
 - **Dashboard:** <http://localhost:8448>
-- **Admin-UI:** <http://localhost:8448/admin.html>
-- **Grafana:** <http://localhost:3030> (Login mit `GRAFANA_ADMIN_*`)
+- **Admin UI:** <http://localhost:8448/admin.html>
+- **Grafana:** <http://localhost:3030> (login with `GRAFANA_ADMIN_*`)
 
-Den Rest der Konfiguration (OSINT-Keys, Agent, Intervalle) kannst du bequem
-in der **Admin-UI** nachtragen – ein Neustart ist nicht nötig.
+The rest of the configuration (OSINT keys, agent, intervals) can be added
+conveniently in the **Admin UI** – no restart is needed.
 
 ---
 
-## Was muss ich besorgen? (Checkliste)
+## What do I need to obtain? (Checklist)
 
-| # | Was | Pflicht? | Woher | Wohin |
+| # | What | Required? | Where from | Where to |
 |---|-----|----------|-------|-------|
-| 1 | **DB-Passwort** | ✅ | selbst ausdenken | `POSTGRES_PASSWORD` **und** `DATABASE_URL` in `.env` |
-| 2 | **WARROOM_API_KEY** | ⭐ dringend empfohlen | `openssl rand -hex 32` | `WARROOM_API_KEY` in `.env` |
-| 3 | **Grafana-Passwort** | ⭐ empfohlen | selbst ausdenken | `GRAFANA_ADMIN_PASSWORD` in `.env` |
-| 4 | **Sophos-Central-Credentials** | für Central-Daten | Sophos Central → Global Settings → API Credentials Management → *Add Credential* | `SOPHOS_CLIENT_ID` / `SOPHOS_CLIENT_SECRET` |
-| 5 | **GeoLite2-City.mmdb + GeoLite2-ASN.mmdb** | optional | [MaxMind GeoLite2](https://www.maxmind.com/en/geolite2/signup) (kostenlos) | Dateien in `./geoip/` |
-| 6 | **AbuseIPDB-Key** | optional | <https://www.abuseipdb.com> | `ABUSEIPDB_API_KEY` |
-| 7 | **VirusTotal-Key** | optional | <https://www.virustotal.com> | `VIRUSTOTAL_API_KEY` |
-| 8 | **Shodan-Key** | optional | <https://account.shodan.io> | `SHODAN_API_KEY` |
-| 9 | **Sophos-Intelix-Credentials** | optional | <https://api.labs.sophos.com> | `SOPHOS_INTELIX_CLIENT_ID/SECRET` |
-| 10 | **LLM-Endpoint** (für KI-Agent) | optional | LMStudio / Ollama / vLLM / OpenAI | `AGENT_*` in `.env` |
+| 1 | **DB password** | ✅ | make one up yourself | `POSTGRES_PASSWORD` **and** `DATABASE_URL` in `.env` |
+| 2 | **WARROOM_API_KEY** | ⭐ strongly recommended | `openssl rand -hex 32` | `WARROOM_API_KEY` in `.env` |
+| 3 | **Grafana password** | ⭐ recommended | make one up yourself | `GRAFANA_ADMIN_PASSWORD` in `.env` |
+| 4 | **Sophos Central credentials** | for Central data | Sophos Central → Global Settings → API Credentials Management → *Add Credential* | `SOPHOS_CLIENT_ID` / `SOPHOS_CLIENT_SECRET` |
+| 5 | **GeoLite2-City.mmdb + GeoLite2-ASN.mmdb** | optional | [MaxMind GeoLite2](https://www.maxmind.com/en/geolite2/signup) (free) | files in `./geoip/` |
+| 6 | **AbuseIPDB key** | optional | <https://www.abuseipdb.com> | `ABUSEIPDB_API_KEY` |
+| 7 | **VirusTotal key** | optional | <https://www.virustotal.com> | `VIRUSTOTAL_API_KEY` |
+| 8 | **Shodan key** | optional | <https://account.shodan.io> | `SHODAN_API_KEY` |
+| 9 | **Sophos Intelix credentials** | optional | <https://api.labs.sophos.com> | `SOPHOS_INTELIX_CLIENT_ID/SECRET` |
+| 10 | **LLM endpoint** (for AI agent) | optional | LMStudio / Ollama / vLLM / OpenAI | `AGENT_*` in `.env` |
 
-> **Hinweis GeoIP:** `geoip/*.mmdb`, `*.tar.gz` und `*.zip` sind in
-> `.gitignore` ausgeschlossen (die Dateien sind groß und unterliegen der
-> MaxMind-Lizenz). Lade sie nach der Registrierung herunter und entpacke
-> `GeoLite2-City.mmdb` sowie `GeoLite2-ASN.mmdb` direkt nach `./geoip/`.
-> Backend und Syslog-Service mounten dieses Verzeichnis automatisch.
+> **GeoIP note:** `geoip/*.mmdb`, `*.tar.gz` and `*.zip` are excluded in
+> `.gitignore` (the files are large and subject to the
+> MaxMind license). Download them after registration and unpack
+> `GeoLite2-City.mmdb` and `GeoLite2-ASN.mmdb` directly into `./geoip/`.
+> Backend and syslog service mount this directory automatically.
 
 ---
 
-## Datenquellen anbinden
+## Connecting data sources
 
 ### Sophos Firewall Syslog
 
 *System → Administration → Notification settings → Syslog Server:*
 
-- **Host:** IP des Warroom-Hosts
-- **Port:** 5514 (UDP oder TCP)
+- **Host:** IP of the Warroom host
+- **Port:** 5514 (UDP or TCP)
 - **Format:** Standard / Device-Syslog
-- Aktivierte Kategorien: **Firewall** (Traffic), **IPS**, **WAF**,
+- Enabled categories: **Firewall** (traffic), **IPS**, **WAF**,
   **Authentication**, **Admin**, **System**
 
 ### NetFlow
 
-NetFlow-Export (v5/v9/IPFIX) der Firewall/des Routers auf
-**`<warroom-host>:2055/udp`** richten. Buckets werden minütlich aggregiert,
-Retention standardmäßig 30 Tage (`RETENTION_DAYS` im `netflow`-Service).
+Point the NetFlow export (v5/v9/IPFIX) of the firewall/router to
+**`<warroom-host>:2055/udp`**. Buckets are aggregated per minute,
+retention by default 30 days (`RETENTION_DAYS` in the `netflow` service).
 
 ### Sophos Central
 
-Sobald `SOPHOS_CLIENT_ID`/`SECRET` gesetzt sind, ruft der `collector` alle
-`COLLECTOR_INTERVAL` Sekunden (Default 300) Alerts, Events, Endpoints und
-Firewall-Status ab.
+As soon as `SOPHOS_CLIENT_ID`/`SECRET` are set, the `collector` fetches
+alerts, events, endpoints and firewall status every `COLLECTOR_INTERVAL`
+seconds (default 300).
 
 ---
 
-## IOC-Feeds für Firewalls
+## IOC feeds for firewalls
 
-Gepflegt werden die Listen unter <http://localhost:8448/blocked.html>. Jede
-Block-/Unblock-Aktion ist **sofort** im Feed sichtbar (live aus der DB, kein
-Push, kein Reconcile, kein Cache).
+The lists are maintained at <http://localhost:8448/blocked.html>. Every
+block/unblock action is visible in the feed **immediately** (live from the DB, no
+push, no reconcile, no cache).
 
 | Feed | Endpoint | Format |
 |------|----------|--------|
-| IPs | `GET /ioc_IP` | eine IPv4/IPv6 pro Zeile, sortiert |
-| Domains | `GET /ioc_domain` | Hostnamen, Wildcards `*.evil.tld` erlaubt |
-| URLs | `GET /ioc_url` | vollständige URLs inkl. `http(s)://` und Pfad |
+| IPs | `GET /ioc_IP` | one IPv4/IPv6 per line, sorted |
+| Domains | `GET /ioc_domain` | hostnames, wildcards `*.evil.tld` allowed |
+| URLs | `GET /ioc_url` | full URLs incl. `http(s)://` and path |
 
-Alle Feeds erwarten den Header `X-API-Key: <WARROOM_API_KEY>` (außer im Open
+All feeds expect the header `X-API-Key: <WARROOM_API_KEY>` (except in Open
 Mode).
 
 ```
@@ -211,27 +211,27 @@ GET https://<warroom-host>:8448/ioc_IP
 Header: X-API-Key: <WARROOM_API_KEY>
 ```
 
-### Firewall-Anbindung
+### Firewall integration
 
-**Sophos XG / XGS** — *Hosts and Services → IP List → Add* → URL eintragen,
-„Custom HTTP Headers" für `X-API-Key` nutzen, Update-Intervall z. B. 5 Min.
+**Sophos XG / XGS** — *Hosts and Services → IP List → Add* → enter the URL,
+use "Custom HTTP Headers" for `X-API-Key`, update interval e.g. 5 min.
 
 **Fortinet FortiGate** — *Security Fabric → External Connectors → Threat Feeds
-→ IP Address* → URL eintragen, HTTP-Header `X-API-Key` setzen.
+→ IP Address* → enter the URL, set the HTTP header `X-API-Key`.
 
-**pfSense / OPNsense (pfBlockerNG)** — URL als IPv4-Feed-Source hinzufügen.
-pfBlockerNG sendet keine Custom-Header → entweder den Endpoint hinter einen
-Proxy mit IP-Whitelist legen oder Open Mode (`WARROOM_API_KEY` leer) nur für
-die Firewall-IP per nginx-Config erlauben.
+**pfSense / OPNsense (pfBlockerNG)** — add the URL as an IPv4 feed source.
+pfBlockerNG does not send custom headers → either place the endpoint behind a
+proxy with an IP whitelist, or allow Open Mode (`WARROOM_API_KEY` empty) only for
+the firewall IP via nginx config.
 
 ---
 
-## Block-API (Web-UI)
+## Block API (Web UI)
 
-Die Block-Buttons im Dashboard und die Blocklist-Seite rufen folgende
-Endpoints auf:
+The block buttons in the dashboard and the blocklist page call the following
+endpoints:
 
-| Methode | Route | Body |
+| Method | Route | Body |
 |---------|-------|------|
 | POST | `/api/firewall/block-ip` | `{"ip": "1.2.3.4", "comment": "..."}` |
 | POST | `/api/firewall/block-ips` | `{"ips": ["1.2.3.4", ...]}` |
@@ -246,252 +246,250 @@ Endpoints auf:
 | POST | `/api/firewall/unblock-url` | `{"url": "https://evil.tld/x"}` |
 | GET | `/api/firewall/blocked-urls` | – |
 
-IPs landen in `blocked_ips`, Hostnamen in `blocked_domains`, URLs in
-`blocked_urls`. Die Feeds lesen diese Tabellen live → keine Sync-Logik.
+IPs end up in `blocked_ips`, hostnames in `blocked_domains`, URLs in
+`blocked_urls`. The feeds read these tables live → no sync logic.
 
 ---
 
-## KI-Agent (optional)
+## AI agent (optional)
 
-Der Agent analysiert Firewall-Logs (WAF/IPS/Failed-Login) per LLM und schlägt
-Blocks vor – oder führt sie automatisch aus. Standardmäßig **aus**.
+The agent analyzes firewall logs (WAF/IPS/failed login) via LLM and proposes
+blocks – or executes them automatically. **Off** by default.
 
-1. LLM-Endpoint bereitstellen (LMStudio/Ollama/vLLM lokal oder OpenAI).
-   `host.docker.internal` zeigt aus dem Container auf den Docker-Host.
-2. In der Admin-UI oder `.env`: `AGENT_ENABLED=true`, `AGENT_BASE_URL`,
-   `AGENT_MODEL` setzen.
-3. Standardmäßig bleiben Empfehlungen **pending** und müssen unter
-   `/agent.html` genehmigt werden. `AGENT_AUTO_EXECUTE=true` oder die
-   Konfidenz-Fast-Lane (`AGENT_AUTO_EXECUTE_THRESHOLD`) führen sie automatisch
-   aus.
+1. Provide an LLM endpoint (LMStudio/Ollama/vLLM locally or OpenAI).
+   `host.docker.internal` points from the container to the Docker host.
+2. In the Admin UI or `.env`: set `AGENT_ENABLED=true`, `AGENT_BASE_URL`,
+   `AGENT_MODEL`.
+3. By default, recommendations remain **pending** and must be approved at
+   `/agent.html`. `AGENT_AUTO_EXECUTE=true` or the confidence fast lane
+   (`AGENT_AUTO_EXECUTE_THRESHOLD`) execute them automatically.
 
-> Die mitgelieferten System-Prompts sind auf **Deutsch**. Wenn du ein
-> englischsprachiges Modell nutzt, passe die Prompts in der Admin-UI an.
+> The bundled system prompts are in **German**. If you use an
+> English-language model, adapt the prompts in the Admin UI.
 
 ---
 
-## Microsoft 365 Audit-Logs (optional)
+## Microsoft 365 audit logs (optional)
 
-Zieht **Login-Ereignisse** (UserLoggedIn / UserLoginFailed) aus der Microsoft
-365 Management Activity API und reichert sie mit GeoIP an. Fehlgeschlagene
-Logins erscheinen zusätzlich als Alerts auf der Attack-Map und werden vom
-KI-Agenten mit ausgewertet. Anzeige unter `/o365.html`, Konfiguration unter
+Pulls **login events** (UserLoggedIn / UserLoginFailed) from the Microsoft
+365 Management Activity API and enriches them with GeoIP. Failed
+logins additionally appear as alerts on the attack map and are also evaluated by
+the AI agent. Display at `/o365.html`, configuration at
 **Admin → Microsoft 365**.
 
-**Azure-App-Registrierung (einmalig):**
+**Azure app registration (one-time):**
 
-1. [entra.microsoft.com](https://entra.microsoft.com) → **App-Registrierungen →
-   Neue Registrierung** (Single Tenant).
-2. **API-Berechtigungen → Office 365 Management APIs → Anwendungsberechtigungen →
-   `ActivityFeed.Read`** → **Administratorzustimmung erteilen**.
-3. **Zertifikate & Geheimnisse → Neuer geheimer Clientschlüssel** → Wert kopieren.
-4. In Warroom **Admin → Microsoft 365**: Tenant-ID, Client-ID, Client-Secret
-   eintragen → **Verbindung testen**. Der Collector startet automatisch
-   (Audit-Events treffen mit ~5–30 min Verzögerung ein).
+1. [entra.microsoft.com](https://entra.microsoft.com) → **App registrations →
+   New registration** (single tenant).
+2. **API permissions → Office 365 Management APIs → Application permissions →
+   `ActivityFeed.Read`** → **Grant admin consent**.
+3. **Certificates & secrets → New client secret** → copy the value.
+4. In Warroom **Admin → Microsoft 365**: enter tenant ID, client ID, client secret
+   → **Test connection**. The collector starts automatically
+   (audit events arrive with a ~5–30 min delay).
 
-> Bekannte Microsoft-App-IDs werden zu Klarnamen aufgelöst (Azure Portal,
-> Outlook Web App, Teams, …); unbekannte erscheinen als gekürzte GUID.
-
----
-
-## Entra ID Login-Blocking (optional)
-
-Synct die Warroom-Blocklist zusätzlich in eine Entra **Named Location**, die an
-eine **Conditional-Access-Policy** gebunden ist — M365-Logins von geblockten IPs
-werden dann direkt bei Microsoft abgewiesen (ergänzend zum Firewall-IOC-Feed).
-Konfiguration unter **Admin → Entra ID**.
-
-- **Nutzt dieselbe App-Registrierung** wie der M365-Collector, braucht aber
-  zusätzlich die Graph-Anwendungsberechtigungen
-  `Policy.ReadWrite.ConditionalAccess` + `Policy.Read.All` (Admin-Consent) sowie
-  eine **Entra ID P1**-Lizenz (in Microsoft 365 E3/E5 enthalten).
-- **Named Location & Policy werden automatisch angelegt** (Self-Healing: wird die
-  Policy extern gelöscht, legt der nächste Sync sie neu an). Policy-Name:
-  *„Warroom — Block IPs (managed)"*.
-- **Sicherheits-Default Report-Only:** Die Policy erzwingt zunächst nichts. Über
-  den Admin-Toggle *„Erzwingung AN/AUS"* schaltest du sie scharf — dabei wird
-  zwingend ein **Break-Glass-Konto** abgefragt (UPN oder Objekt-ID), das nie
-  geblockt wird (Schutz gegen Selbst-Aussperrung). UPNs werden permission-frei
-  aus den M365-Audit-Logs zur Objekt-ID aufgelöst.
+> Known Microsoft app IDs are resolved to readable names (Azure Portal,
+> Outlook Web App, Teams, …); unknown ones appear as a shortened GUID.
 
 ---
 
-## Telegram-Approvals (optional)
+## Entra ID login blocking (optional)
 
-Schickt **jede offene Agent-Entscheidung** als Telegram-Nachricht mit
-**✅ Approve / ❌ Reject**-Buttons; die Entscheidung wird direkt aus Telegram
-ausgeführt (Long-Polling, kein öffentlicher Webhook nötig). Konfiguration unter
+Additionally syncs the Warroom blocklist into an Entra **Named Location** bound
+to a **Conditional Access policy** — M365 logins from blocked IPs are
+then rejected directly at Microsoft (complementing the firewall IOC feed).
+Configuration at **Admin → Entra ID**.
+
+- **Uses the same app registration** as the M365 collector, but additionally
+  needs the Graph application permissions
+  `Policy.ReadWrite.ConditionalAccess` + `Policy.Read.All` (admin consent) as well as
+  an **Entra ID P1** license (included in Microsoft 365 E3/E5).
+- **Named Location & policy are created automatically** (self-healing: if the
+  policy is deleted externally, the next sync recreates it). Policy name:
+  *"Warroom — Block IPs (managed)"*.
+- **Security default report-only:** The policy initially enforces nothing. Via
+  the admin toggle *"Enforcement ON/OFF"* you arm it — at which point a
+  **break-glass account** is mandatorily requested (UPN or object ID) that is never
+  blocked (protection against locking yourself out). UPNs are resolved to the object ID
+  permission-free from the M365 audit logs.
+
+---
+
+## Telegram approvals (optional)
+
+Sends **every open agent decision** as a Telegram message with
+**✅ Approve / ❌ Reject** buttons; the decision is executed directly from Telegram
+(long-polling, no public webhook needed). Configuration at
 **Admin → Telegram**.
 
-1. Bot via [@BotFather](https://t.me/BotFather) anlegen → Bot-Token kopieren.
-2. `chat_id` ermitteln (z.B. über `@userinfobot`) und den Bot **zuerst einmal
-   anschreiben** bzw. zur Gruppe hinzufügen.
-3. In Warroom **Admin → Telegram**: Token + Chat-ID eintragen, aktivieren,
-   **Testnachricht senden**.
+1. Create a bot via [@BotFather](https://t.me/BotFather) → copy the bot token.
+2. Determine the `chat_id` (e.g. via `@userinfobot`) and **message the bot once
+   first** or add it to the group.
+3. In Warroom **Admin → Telegram**: enter token + chat ID, enable,
+   **send a test message**.
 
-> Nur der konfigurierte Chat darf Approvals ausführen; Taps aus anderen Chats
-> werden abgewiesen.
-
----
-
-## KI-Chat & Teams-Befehle
-
-Eine **Befehls-Schnittstelle in natürlicher Sprache** — erreichbar über den
-In-App-**KI-Chat** (`/chat.html`) und **Microsoft Teams**. Damit lassen sich per
-Nachricht ausführen:
-
-- **Blocklist:** IP / Domain / FQDN / URL setzen
-  („blockiere 1.2.3.4", „sperre boese.example")
-- **Endpoint isolieren** („isoliere PC-12345")
-- **Quarantäne abfragen** („zeig die Quarantäne")
-- **OSINT** zu IP/Domain („OSINT zu 8.8.8.8") — günstige Provider; Shodan bleibt
-  Button-only
-- **Statistik-Report** („Statistik-Report der letzten 7 Tage")
-
-Die Intent-Erkennung läuft zuerst über einen **Keyword-Parser** (sofortige
-Antwort für klare Befehle) und fällt bei unklaren Formulierungen auf den
-**LLM-Agenten** zurück — die Kern-Befehle funktionieren also auch ohne Agent.
-
-**Freier Chat mit dem LLM:** Alles, was kein erkannter Befehl ist, beantwortet
-eine **Security-Analyst-Persona** (LLM) — Bedrohungen einordnen, CVEs erklären,
-Indikatoren bewerten, Logs interpretieren. Funktioniert über **alle drei
-Kanäle** (KI-Chat, Teams, Telegram). Der System-Prompt der Persona ist unter
-**Admin → KI-Analyst — Persona** editierbar (mit „Standard laden"). Benötigt
-einen aktivierten Agenten (LLM-Endpoint).
-
-**Microsoft Teams einrichten** (Admin → Microsoft Teams):
-1. Im Team → **… → Verwalten → Outgoing Webhooks → Erstellen**.
-2. Callback-URL: `https://<warroom>/api/teams/command` (Warroom muss per HTTPS
-   erreichbar sein).
-3. Das von Teams erzeugte **HMAC-Secret** im Admin hinterlegen — jede Teams-
-   Anfrage wird damit signaturgeprüft.
-4. Im Team `@Botname <befehl>` schreiben.
-
-> Sicherheit: Der Teams-Endpoint ist von der `X-API-Key`-Prüfung ausgenommen und
-> authentifiziert sich ausschließlich über die HMAC-Signatur. Block-Befehle aus
-> Chat/Teams sind direkte menschliche Aktionen und werden sofort ausgeführt
-> (Whitelist-IPs bleiben geschützt).
+> Only the configured chat may execute approvals; taps from other chats
+> are rejected.
 
 ---
 
-## Shodan-Host-Intelligence (optional)
+## AI chat & Teams commands
 
-Liefert pro IP **offene Ports** und **bekannte CVEs**. Diese werden langfristig in
-`shodan_hosts` gespeichert und als optionaler Karten-Layer dargestellt
-(Marker nach CVE-Anzahl gefärbt, Popup mit Ports + CVE-Links). Setzt einen
-**Shodan API Key** voraus (Admin → OSINT).
+A **natural-language command interface** — reachable via the
+in-app **AI chat** (`/chat.html`) and **Microsoft Teams**. With it the following can be executed
+by message:
 
-**Shodan-Credits sind knapp — deshalb wird Shodan nie automatisch abgefragt:**
+- **Blocklist:** set IP / domain / FQDN / URL
+  ("block 1.2.3.4", "block boese.example")
+- **Isolate endpoint** ("isolate PC-12345")
+- **Query quarantine** ("show the quarantine")
+- **OSINT** for IP/domain ("OSINT for 8.8.8.8") — inexpensive providers; Shodan stays
+  button-only
+- **Statistics report** ("statistics report for the last 7 days")
 
-- **Mensch:** nur per Button **„🛰️ Shodan abfragen"** im OSINT-Panel
-  (`POST /api/osint/shodan/{ip}`). Das routinemäßige OSINT-Panel löst **keine**
-  Shodan-Abfrage aus.
-- **Automatik:** die regelbasierten Agent-Loops fragen Shodan nur, wenn die
-  günstigen Provider die IP bereits als **klar schädlich** einstufen
-  (AbuseIPDB ≥ Schwelle / VirusTotal ≥ 3 / GreyNoise = malicious). Steuerbar
-  über *Shodan: Auto-Abfrage bei schädlicher IP* + *Schwelle* (Admin → OSINT);
-  abschalten ⇒ Shodan ist rein manuell.
+Intent detection first runs through a **keyword parser** (immediate
+response for clear commands) and falls back to the
+**LLM agent** for unclear phrasings — so the core commands work even without an agent.
 
-Den Karten-Layer findest du in der **Attack-Map-Legende** unter „LAYER →
-Shodan-Hosts" (und im OSIRIS-Dashboard als eigener Layer).
+**Free chat with the LLM:** Anything that is not a recognized command is answered by
+a **security analyst persona** (LLM) — classify threats, explain CVEs,
+assess indicators, interpret logs. Works across **all three
+channels** (AI chat, Teams, Telegram). The persona's system prompt is
+editable at **Admin → AI Analyst — Persona** (with "Load default"). Requires
+an enabled agent (LLM endpoint).
+
+**Setting up Microsoft Teams** (Admin → Microsoft Teams):
+1. In the team → **… → Manage → Outgoing Webhooks → Create**.
+2. Callback URL: `https://<warroom>/api/teams/command` (Warroom must be reachable
+   via HTTPS).
+3. Store the **HMAC secret** generated by Teams in the admin area — every Teams
+   request is signature-verified with it.
+4. In the team write `@Botname <command>`.
+
+> Security: The Teams endpoint is exempted from the `X-API-Key` check and
+> authenticates solely via the HMAC signature. Block commands from
+> chat/Teams are direct human actions and are executed immediately
+> (whitelist IPs remain protected).
 
 ---
 
-## Sicherheit & Härtung
+## Shodan host intelligence (optional)
 
-Warroom ist als **internes Tool hinter VPN/Firewall** gedacht. Vor einem
-Einsatz mit echten Daten unbedingt beachten:
+Delivers **open ports** and **known CVEs** per IP. These are stored long-term in
+`shodan_hosts` and displayed as an optional map layer
+(markers colored by CVE count, popup with ports + CVE links). Requires a
+**Shodan API key** (Admin → OSINT).
 
-- **`WARROOM_API_KEY` setzen.** Ohne läuft das Backend im *Open Mode* – jeder
-  mit Netzwerkzugriff kann das Dashboard bedienen, IPs blocken/entblocken und
-  Endpoints isolieren. Es gibt **kein Benutzer-Login**; der API-Key ist die
-  einzige Zugangskontrolle.
-- **`.env` enthält Klartext-Secrets** (DB-Passwort, Sophos-Secret, API-Keys).
-  Die Datei ist in `.gitignore` und darf **nie** committet werden. Auch in der
-  DB (`app_settings`) werden Secrets unverschlüsselt abgelegt → DB-Zugriff
-  schützen.
-- **Grafana** ist mit `admin/admin` vorbelegt und erlaubt **anonymen
-  Viewer-Zugriff** (alle Logs/Karten ohne Login sichtbar). Passwort ändern und
-  ggf. `GF_AUTH_ANONYMOUS_ENABLED=false` setzen, falls nicht erwünscht.
-- **Kein HTTPS out-of-the-box** – nginx lauscht auf Port 80 (gemappt auf 8448).
-  Für Produktion einen TLS-Reverse-Proxy davorsetzen.
-- **Exponierte Ports** (5514, 2055, 3030, 5051, 5540, 8448) nur im
-  vertrauenswürdigen Netz freigeben. **RedisInsight (5540)** läuft ohne Auth und
-  erlaubt vollen Lese-/Schreibzugriff auf den Cache, **pgAdmin (5051)** hat zwar
-  ein Login (`PGADMIN_EMAIL`/`PGADMIN_PASSWORD`), gibt aber vollen DB-Zugriff →
-  beide hinter Firewall/Proxy absichern und Default-Passwörter ändern.
-- **M365/Telegram-Secrets** (Client-Secret, Bot-Token) liegen wie alle anderen
-  unverschlüsselt in `app_settings`. Die Entra-App sollte nur die minimal nötigen
-  Graph-Berechtigungen besitzen.
+**Shodan credits are scarce — that's why Shodan is never queried automatically:**
 
-Eine ausführliche Bewertung inkl. Verbesserungs-Roadmap steht in
+- **Human:** only via the **"🛰️ Query Shodan"** button in the OSINT panel
+  (`POST /api/osint/shodan/{ip}`). The routine OSINT panel does **not** trigger
+  a Shodan query.
+- **Automatic:** the rule-based agent loops query Shodan only when the
+  inexpensive providers already classify the IP as **clearly malicious**
+  (AbuseIPDB ≥ threshold / VirusTotal ≥ 3 / GreyNoise = malicious). Controllable
+  via *Shodan: auto-query on malicious IP* + *threshold* (Admin → OSINT);
+  turn it off ⇒ Shodan is purely manual.
+
+You'll find the map layer in the **attack map legend** under "LAYER →
+Shodan Hosts" (and in the OSIRIS dashboard as a separate layer).
+
+---
+
+## Security & hardening
+
+Warroom is intended as an **internal tool behind VPN/firewall**. Before
+using it with real data, be sure to note:
+
+- **Set `WARROOM_API_KEY`.** Without it, the backend runs in *Open Mode* – anyone
+  with network access can operate the dashboard, block/unblock IPs and
+  isolate endpoints. There is **no user login**; the API key is the
+  only access control.
+- **`.env` contains plaintext secrets** (DB password, Sophos secret, API keys).
+  The file is in `.gitignore` and must **never** be committed. In the
+  DB (`app_settings`) too, secrets are stored unencrypted → protect DB access.
+- **Grafana** is preset with `admin/admin` and allows **anonymous
+  viewer access** (all logs/maps visible without login). Change the password and
+  set `GF_AUTH_ANONYMOUS_ENABLED=false` if not desired.
+- **No HTTPS out-of-the-box** – nginx listens on port 80 (mapped to 8448).
+  For production, put a TLS reverse proxy in front.
+- **Exposed ports** (5514, 2055, 3030, 5051, 5540, 8448) should only be exposed in
+  the trusted network. **RedisInsight (5540)** runs without auth and
+  allows full read/write access to the cache, **pgAdmin (5051)** does have
+  a login (`PGADMIN_EMAIL`/`PGADMIN_PASSWORD`) but grants full DB access →
+  secure both behind a firewall/proxy and change the default passwords.
+- **M365/Telegram secrets** (client secret, bot token) are, like all others,
+  stored unencrypted in `app_settings`. The Entra app should only have the minimally
+  required Graph permissions.
+
+A detailed assessment including an improvement roadmap is in
 [`docs/REVIEW.md`](docs/REVIEW.md).
 
 ---
 
-## Stack & Services
+## Stack & services
 
-| Komponente | Tech |
+| Component | Tech |
 |------------|------|
 | Backend | FastAPI 0.115, SQLAlchemy 2 async, APScheduler |
 | Database | PostgreSQL 16 |
 | Cache | Redis 7 |
-| Frontend | Vanilla JS + Nginx (kein Build-Step) |
-| Syslog | Custom Python Receiver (UDP/TCP 5514) |
-| NetFlow | Custom Python Collector (UDP 2055) |
-| GeoIP | MaxMind GeoLite2 (Fallback: ip-api.com) |
+| Frontend | Vanilla JS + Nginx (no build step) |
+| Syslog | Custom Python receiver (UDP/TCP 5514) |
+| NetFlow | Custom Python collector (UDP 2055) |
+| GeoIP | MaxMind GeoLite2 (fallback: ip-api.com) |
 | Dashboards | Grafana 11 |
-| Redis-GUI | RedisInsight (Cache-Inspektion) |
-| DB-GUI | pgAdmin 4 (PostgreSQL-Verwaltung) |
-| Cloud-APIs | Sophos Central/Email, Microsoft 365 (Management Activity + Graph), Telegram |
+| Redis GUI | RedisInsight (cache inspection) |
+| DB GUI | pgAdmin 4 (PostgreSQL management) |
+| Cloud APIs | Sophos Central/Email, Microsoft 365 (Management Activity + Graph), Telegram |
 
-| Container | Port (Host) | Beschreibung |
+| Container | Port (host) | Description |
 |-----------|-------------|--------------|
-| `frontend` | `8448` | Nginx, Static-Files + Reverse-Proxy |
-| `backend` | (intern 8000) | FastAPI, REST + IOC-Feeds |
-| `syslog` | `5514/udp+tcp` | Sophos-Firewall-Syslog-Empfänger |
-| `netflow` | `2055/udp` | NetFlow v5/v9/IPFIX Collector |
-| `postgres` | (intern 5432) | Daten-Persistenz |
-| `redis` | (intern 6379) | Cache (Summary, OSINT-Lookups) |
-| `redisinsight` | `5540` | RedisInsight — Redis-GUI (Cache vorkonfiguriert) |
-| `pgadmin` | `5051` | pgAdmin 4 — PostgreSQL-GUI (Server „Warroom DB" vorkonfiguriert) |
+| `frontend` | `8448` | Nginx, static files + reverse proxy |
+| `backend` | (internal 8000) | FastAPI, REST + IOC feeds |
+| `syslog` | `5514/udp+tcp` | Sophos Firewall syslog receiver |
+| `netflow` | `2055/udp` | NetFlow v5/v9/IPFIX collector |
+| `postgres` | (internal 5432) | Data persistence |
+| `redis` | (internal 6379) | Cache (summary, OSINT lookups) |
+| `redisinsight` | `5540` | RedisInsight — Redis GUI (cache preconfigured) |
+| `pgadmin` | `5051` | pgAdmin 4 — PostgreSQL GUI ("Warroom DB" server preconfigured) |
 | `grafana` | `3030` | Dashboards |
 
-### Datenfluss
+### Data flow
 
-1. **Sophos Central API** → `collector.py` (alle 300 s default) → DB
-2. **Sophos Firewall Syslog** → `syslog`-Service → DB (`firewall_logs`)
-3. **NetFlow** → `netflow`-Service → DB (`netflow_buckets`)
+1. **Sophos Central API** → `collector.py` (every 300 s default) → DB
+2. **Sophos Firewall syslog** → `syslog` service → DB (`firewall_logs`)
+3. **NetFlow** → `netflow` service → DB (`netflow_buckets`)
 4. **Microsoft 365 Activity API** → `o365_client.py` → DB (`o365_audit_logs`)
-5. **Dashboard** → Backend liest aus DB → Frontend rendert
-6. **Block-Aktion (UI/Agent/Telegram)** → `blocked_ips` / `_domains` / `_urls`
-7. **Firewall pullt** `/ioc_*` → Backend liest die Tabellen live
-8. **Optional: Entra-Sync** → Blocklist → Named Location + Conditional-Access-Policy
+5. **Dashboard** → backend reads from DB → frontend renders
+6. **Block action (UI/agent/Telegram)** → `blocked_ips` / `_domains` / `_urls`
+7. **Firewall pulls** `/ioc_*` → backend reads the tables live
+8. **Optional: Entra sync** → blocklist → Named Location + Conditional Access policy
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Ursache / Lösung |
+| Symptom | Cause / solution |
 |---------|------------------|
-| Dashboard leer, keine Alerts | Sophos-Credentials fehlen/falsch → `docker compose logs backend`. Ohne Sophos bleiben nur Syslog/NetFlow/Blocklist befüllt. |
-| `401 invalid or missing X-API-Key` beim Feed-Abruf | Firewall sendet den `X-API-Key`-Header nicht oder falsch. |
-| Karte zeigt keine Standorte | GeoIP-DB fehlt und ip-api.com ist rate-limitiert → mmdb-Dateien nach `./geoip/` legen. |
-| Syslog/NetFlow kommt nicht an | Ports 5514/2055 auf dem Host freigegeben? Firewall sendet an die richtige IP? |
-| Postgres startet nicht | `POSTGRES_PASSWORD` ≠ Passwort in `DATABASE_URL`. Müssen identisch sein. |
-| Änderung in `.env` greift nicht | `.env`-Werte sind nur Startwerte. Laufende Änderungen über `/admin.html` oder `docker compose up -d` neu anwenden. |
-| M365-Seite leer / „nicht konfiguriert" | Entra-App-Credentials unter Admin → Microsoft 365 fehlen oder `ActivityFeed.Read`-Consent nicht erteilt. Audit-Events kommen zudem mit Verzögerung. |
-| Entra-Sync `403 not licensed` | Tenant ohne Entra ID P1 (in M365 E3/E5 enthalten) — Lizenz einem Benutzer zuweisen. CA-Policy lässt sich ohne P1 nicht anlegen/aktivieren. |
-| Entra-Policy lässt sich nicht aktivieren | Kein Break-Glass-Konto gesetzt (Microsofts „BlockEveryonePolicy"-Schutz) bzw. UPN nicht auflösbar → Objekt-ID eintragen. |
-| Telegram-Approval kommt nicht an | Bot nicht aktiviert, falsche `chat_id`, oder Bot wurde nie angeschrieben / nicht in der Gruppe. „Testnachricht senden" prüfen. |
+| Dashboard empty, no alerts | Sophos credentials missing/wrong → `docker compose logs backend`. Without Sophos, only syslog/NetFlow/blocklist stay populated. |
+| `401 invalid or missing X-API-Key` when fetching the feed | Firewall does not send the `X-API-Key` header or sends it wrong. |
+| Map shows no locations | GeoIP DB missing and ip-api.com is rate-limited → place mmdb files into `./geoip/`. |
+| Syslog/NetFlow does not arrive | Are ports 5514/2055 open on the host? Does the firewall send to the right IP? |
+| Postgres does not start | `POSTGRES_PASSWORD` ≠ password in `DATABASE_URL`. They must be identical. |
+| Change in `.env` has no effect | `.env` values are only start values. Apply running changes via `/admin.html` or re-apply with `docker compose up -d`. |
+| M365 page empty / "not configured" | Entra app credentials missing under Admin → Microsoft 365, or `ActivityFeed.Read` consent not granted. Audit events also arrive with a delay. |
+| Entra sync `403 not licensed` | Tenant without Entra ID P1 (included in M365 E3/E5) — assign a license to a user. The CA policy cannot be created/activated without P1. |
+| Entra policy cannot be activated | No break-glass account set (Microsoft's "BlockEveryonePolicy" protection) or UPN not resolvable → enter the object ID. |
+| Telegram approval does not arrive | Bot not enabled, wrong `chat_id`, or the bot was never messaged / not in the group. Check with "send test message". |
 
 ---
 
-## Lizenz
+## License
 
-Privates Projekt — kein offizieller Support.
+Private project — no official support.
 
 ## Trademarks
 
-Sophos, Sophos Central, Sophos Firewall und Sophos Intelix sind eingetragene
-Marken von Sophos Ltd. Dieses Projekt ist nicht mit Sophos affiliated.
+Sophos, Sophos Central, Sophos Firewall and Sophos Intelix are registered
+trademarks of Sophos Ltd. This project is not affiliated with Sophos.

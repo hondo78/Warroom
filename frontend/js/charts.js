@@ -48,6 +48,7 @@ function initCharts() {
         },
         options: {
             responsive: true,
+            aspectRatio: 2.5,
             interaction: { mode: 'index', intersect: false },
             scales: {
                 x: { grid: { color: 'rgba(42,58,78,0.5)' } },
@@ -69,6 +70,7 @@ function initCharts() {
         },
         options: {
             responsive: true,
+            aspectRatio: 1.8,
             plugins: {
                 legend: { position: 'right' },
             },
@@ -90,6 +92,7 @@ function initCharts() {
         },
         options: {
             responsive: true,
+            aspectRatio: 2.5,
             indexAxis: 'y',
             scales: {
                 x: { beginAtZero: true, grid: { color: 'rgba(42,58,78,0.5)' } },
@@ -114,6 +117,7 @@ function initCharts() {
         },
         options: {
             responsive: true,
+            aspectRatio: 2.5,
             indexAxis: 'y',
             scales: {
                 x: { beginAtZero: true, grid: { color: 'rgba(42,58,78,0.5)' } },
@@ -137,6 +141,7 @@ function initCharts() {
         },
         options: {
             responsive: true,
+            aspectRatio: 2.5,
             indexAxis: 'y',
             scales: {
                 x: { beginAtZero: true, grid: { color: 'rgba(42,58,78,0.5)' } },

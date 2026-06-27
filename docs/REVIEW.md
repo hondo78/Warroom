@@ -1,90 +1,90 @@
-# Warroom – Projekt-Review & Verbesserungs-Roadmap
+# Warroom – Project Review & Improvement Roadmap
 
-Stand: 2026-05-29. Vollständiges Review von Backend, Frontend, Collectoren,
-DB-Schema und Infrastruktur. Befunde sind am Code verifiziert; Schweregrade
-spiegeln den Einsatz als **internes Tool hinter VPN/Firewall** wider.
+Status: 2026-05-29. Complete review of backend, frontend, collectors,
+DB schema and infrastructure. Findings are verified against the code; severities
+reflect the use as an **internal tool behind VPN/firewall**.
 
-## Gesamteindruck
+## Overall impression
 
-Solide, durchdachte Architektur für ein privates SecOps-Tool. Besonders gut:
+Solid, well-thought-out architecture for a private SecOps tool. Particularly good:
 
-- **API-Key sauber server-seitig injiziert** – nginx hängt `X-API-Key` an
-  `/api/*`, der Key liegt nie im Browser (`frontend/nginx.conf.template`).
-- **Auth global** über `dependencies=[Depends(verify_api_key)]`
-  (`backend/app/main.py:107`), Vergleich timing-safe via `hmac.compare_digest`.
-- **Konsistenter XSS-Schutz**: `escapeHtml()` wird in allen JS-Dateien vor
-  `innerHTML` verwendet.
-- **Live-IOC-Feeds ohne Sync-Logik** – Block/Unblock sofort im Feed.
-- **Laufzeit-Konfiguration** über Admin-UI ohne Container-Neustart.
-- SQL durchgängig parametrisiert (`:since`, `:ips`); keine echte Injection
-  gefunden – die `text()`-Fragmente sind statische Konstanten.
+- **API key cleanly injected server-side** – nginx appends `X-API-Key` to
+  `/api/*`, the key is never in the browser (`frontend/nginx.conf.template`).
+- **Auth global** via `dependencies=[Depends(verify_api_key)]`
+  (`backend/app/main.py:107`), comparison timing-safe via `hmac.compare_digest`.
+- **Consistent XSS protection**: `escapeHtml()` is used in all JS files before
+  `innerHTML`.
+- **Live IOC feeds without sync logic** – block/unblock instantly in the feed.
+- **Runtime configuration** via the Admin UI without restarting containers.
+- SQL parameterized throughout (`:since`, `:ips`); no real injection
+  found – the `text()` fragments are static constants.
 
-## Korrektur zu einem oft vermuteten Punkt
+## Correction to an often-assumed point
 
-**Es liegen KEINE Secrets im Git-Repo.** `.env` ist in `.gitignore` und taucht
-weder in `git ls-files` noch im `git log` auf. Die echten Credentials existieren
-nur in der lokalen `.env`-Arbeitskopie – korrekt. (Trotzdem: lokale `.env`
-schützen, nie committen.)
+**There are NO secrets in the Git repo.** `.env` is in `.gitignore` and appears
+neither in `git ls-files` nor in the `git log`. The real credentials exist
+only in the local `.env` working copy – correct. (Nevertheless: protect the local
+`.env`, never commit it.)
 
 ---
 
-## Priorisierte Verbesserungen
+## Prioritized improvements
 
-### P1 – Vor Produktivbetrieb erledigen
+### P1 – Do before production use
 
-| # | Thema | Datei(en) | Empfehlung |
+| # | Topic | File(s) | Recommendation |
 |---|-------|-----------|------------|
-| 1 | **Open-Mode-Default** | `config.py:27`, `main.py:42` | `WARROOM_API_KEY` ist leer-default → komplett offen. Setzen erzwingen/dokumentieren (im README jetzt als „dringend empfohlen" markiert). |
-| 2 | **Grafana admin/admin + anonym** | `docker-compose.yml:98-102` | Default-Passwort und anonymer Viewer-Zugriff. Passwort über `GRAFANA_ADMIN_PASSWORD` setzen; anonym ggf. deaktivieren. |
-| 3 | **Kein HTTPS** | `nginx.conf.template` | Nur Port 80. TLS-Reverse-Proxy davor oder Zertifikat in nginx. |
-| 4 | **Sicherheits-Header fehlen** | `nginx.conf.template` | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, CSP ergänzen. Schnell umsetzbar, hoher Nutzen. |
+| 1 | **Open-mode default** | `config.py:27`, `main.py:42` | `WARROOM_API_KEY` defaults to empty → completely open. Enforce/document setting it (now marked "strongly recommended" in the README). |
+| 2 | **Grafana admin/admin + anonymous** | `docker-compose.yml:98-102` | Default password and anonymous viewer access. Set the password via `GRAFANA_ADMIN_PASSWORD`; disable anonymous if necessary. |
+| 3 | **No HTTPS** | `nginx.conf.template` | Only port 80. Put a TLS reverse proxy in front or a certificate in nginx. |
+| 4 | **Security headers missing** | `nginx.conf.template` | Add `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, CSP. Quick to implement, high benefit. |
 
-### P2 – Robustheit & Datenhaltung
+### P2 – Robustness & data retention
 
-| # | Thema | Datei(en) | Empfehlung |
+| # | Topic | File(s) | Recommendation |
 |---|-------|-----------|------------|
-| 5 | **Keine DB-Retention** | `db/init.sql` | `firewall_logs`, `events`, `alerts`, `geoip_cache` wachsen unbegrenzt (nur NetFlow hat 30-Tage-Cleanup). Cleanup-Job oder Range-Partitionierung nach `created_at`. |
-| 6 | **Syslog-Queue verwirft still** | `syslog/syslog_receiver.py` (Queue maxsize 10000) | Bei Lastspitzen werden Messages mit reiner `warning` verworfen. Counter/Metrik + ggf. Persistenz ergänzen. |
-| 7 | **Healthchecks fehlen** | `docker-compose.yml` (syslog, netflow, backend, frontend) | Nur postgres/redis haben Healthchecks. Crash bleibt sonst unbemerkt. |
-| 8 | **Keine Ressourcenlimits** | `docker-compose.yml` | `deploy.resources.limits` je Service, damit ein Leak nicht den Host killt. |
-| 9 | **LLM-Endpoint-Ausfall** | `agent.py`, `main.py:72-91` | Scheduler feuert alle ~120 s weiter, jede Decision „failed". Backoff/Circuit-Breaker bei wiederholtem Fehlschlag. |
+| 5 | **No DB retention** | `db/init.sql` | `firewall_logs`, `events`, `alerts`, `geoip_cache` grow unbounded (only NetFlow has a 30-day cleanup). Cleanup job or range partitioning by `created_at`. |
+| 6 | **Syslog queue drops silently** | `syslog/syslog_receiver.py` (queue maxsize 10000) | Under load spikes, messages are dropped with a mere `warning`. Add a counter/metric and possibly persistence. |
+| 7 | **Healthchecks missing** | `docker-compose.yml` (syslog, netflow, backend, frontend) | Only postgres/redis have healthchecks. A crash otherwise goes unnoticed. |
+| 8 | **No resource limits** | `docker-compose.yml` | `deploy.resources.limits` per service so a leak does not kill the host. |
+| 9 | **LLM endpoint outage** | `agent.py`, `main.py:72-91` | The scheduler keeps firing every ~120 s, every decision "failed". Backoff/circuit breaker on repeated failure. |
 
-### P3 – Code-Qualität & Wartbarkeit
+### P3 – Code quality & maintainability
 
-| # | Thema | Datei(en) | Empfehlung |
+| # | Topic | File(s) | Recommendation |
 |---|-------|-----------|------------|
-| 10 | **JS-Duplizierung** | `frontend/js/*.js` | `escapeHtml`/`formatTime`/`truncate` 4–6× definiert. In `js/common.js` zentralisieren. |
-| 11 | **inline `onclick` mit String-Interpolation** | `app.js` (block-Buttons) | Komma/Quote-Bruch möglich. Auf `addEventListener` + `data-*`-Attribute umstellen. |
-| 12 | **Doppelte SQL-Fragmente** | `agent.py` vs. `main.py` (`_WAF_FILTER_SQL*`) | WAF/IPS-Filter an einer Stelle definieren und importieren. |
-| 13 | **Blocking MaxMind-Lookup in async** | `geoip_service.py:92` | `_lookup_maxmind` ist synchron; memory-mapped → minimal, aber sauberer via `run_in_executor`. |
-| 14 | **Redis-Client nie geschlossen** | `geoip_service.py:24-28` | In `lifespan`-Shutdown `await _redis.aclose()` ergänzen. |
-| 15 | **LLM-JSON-Parsing tolerant** | `agent.py` `_parse_decision` | Nimmt „letzten Block" – Reasoning-Modelle können Draft-Aktionen hinterlassen. Strikteres Schema/Validierung. |
-| 16 | **Hardcodierte /24-Subnetzmaske** | `agent.py` (Failed-Login-Subnet) | Maske konfigurierbar machen (z. B. auch /16). |
-| 17 | **Postgres SSL disabled** | `grafana/.../postgres.yml:sslmode=disable` | Im selben Docker-Netz vertretbar; bei externem DB-Zugriff aktivieren. |
+| 10 | **JS duplication** | `frontend/js/*.js` | `escapeHtml`/`formatTime`/`truncate` defined 4–6×. Centralize in `js/common.js`. |
+| 11 | **inline `onclick` with string interpolation** | `app.js` (block buttons) | Comma/quote breakage possible. Switch to `addEventListener` + `data-*` attributes. |
+| 12 | **Duplicate SQL fragments** | `agent.py` vs. `main.py` (`_WAF_FILTER_SQL*`) | Define the WAF/IPS filter in one place and import it. |
+| 13 | **Blocking MaxMind lookup in async** | `geoip_service.py:92` | `_lookup_maxmind` is synchronous; memory-mapped → minimal, but cleaner via `run_in_executor`. |
+| 14 | **Redis client never closed** | `geoip_service.py:24-28` | Add `await _redis.aclose()` in the `lifespan` shutdown. |
+| 15 | **LLM JSON parsing tolerant** | `agent.py` `_parse_decision` | Takes the "last block" – reasoning models can leave draft actions behind. Stricter schema/validation. |
+| 16 | **Hardcoded /24 subnet mask** | `agent.py` (failed-login subnet) | Make the mask configurable (e.g. also /16). |
+| 17 | **Postgres SSL disabled** | `grafana/.../postgres.yml:sslmode=disable` | Acceptable within the same Docker network; enable for external DB access. |
 
 ### P4 – Nice-to-have
 
-- Strukturiertes (JSON-)Logging im Backend für Aggregation.
-- Subresource Integrity (SRI) für CDN-Skripte in den HTML-Seiten.
-- DB-Backup-/WAL-Strategie für `postgres_data` dokumentieren.
-- IDN-/Homograph-Prüfung bei Domain-/URL-Normalisierung (`main.py`).
-- NetFlow-Template-Cache ohne TTL (theoretischer Memory-Drift bei
-  langlaufenden Exportern mit Template-Reuse).
+- Structured (JSON) logging in the backend for aggregation.
+- Subresource Integrity (SRI) for CDN scripts in the HTML pages.
+- Document a DB backup/WAL strategy for `postgres_data`.
+- IDN/homograph check in domain/URL normalization (`main.py`).
+- NetFlow template cache without TTL (theoretical memory drift with
+  long-running exporters that reuse templates).
 
 ---
 
-## Quick Wins (klein, sofort, hoher Nutzen)
+## Quick wins (small, immediate, high benefit)
 
-1. ✅ **Erledigt** – Security-Header + CSP in `nginx.conf.template` (P1 #4).
-   CSP behält vorerst `'unsafe-inline'` im `script-src`, weil noch Inline-
-   `onclick`-Handler existieren (siehe P3 #11). Nach deren Umbau kann
-   `'unsafe-inline'` entfernt werden → strikte Policy.
-2. ✅ **Teilweise erledigt** – `frontend/js/common.js` zentralisiert jetzt
-   `escapeHtml()` + `escapeAttr()` (vorher 5×/2× dupliziert). `formatTime()`
-   und `truncate()` bleiben bewusst seitenlokal (unterscheiden sich je Seite).
-3. ✅ **Erledigt** – Redis-`close_redis()` wird im `lifespan`-Shutdown
-   aufgerufen (`geoip_service.py` / `main.py`).
-4. ⬜ Offen – Healthcheck für `backend` (`GET /` o. `/health`) und `syslog`
-   (P2 #7). Achtung: globale Auth-Dependency → entweder ein auth-freier
-   `/health`-Endpoint oder der Healthcheck sendet den `X-API-Key`.
-5. ⬜ Offen – Cron-Cleanup-Query für `firewall_logs`/`geoip_cache` (P2 #5).
+1. ✅ **Done** – Security headers + CSP in `nginx.conf.template` (P1 #4).
+   CSP keeps `'unsafe-inline'` in `script-src` for now, because inline
+   `onclick` handlers still exist (see P3 #11). After their rework,
+   `'unsafe-inline'` can be removed → strict policy.
+2. ✅ **Partially done** – `frontend/js/common.js` now centralizes
+   `escapeHtml()` + `escapeAttr()` (previously duplicated 5×/2×). `formatTime()`
+   and `truncate()` deliberately stay page-local (they differ per page).
+3. ✅ **Done** – Redis `close_redis()` is called in the `lifespan` shutdown
+   (`geoip_service.py` / `main.py`).
+4. ⬜ Open – Healthcheck for `backend` (`GET /` or `/health`) and `syslog`
+   (P2 #7). Note: global auth dependency → either an auth-free
+   `/health` endpoint or the healthcheck sends the `X-API-Key`.
+5. ⬜ Open – Cron cleanup query for `firewall_logs`/`geoip_cache` (P2 #5).

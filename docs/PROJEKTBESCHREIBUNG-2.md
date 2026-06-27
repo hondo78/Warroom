@@ -1,4 +1,4 @@
-# Warroom — Agent-Architektur (Kurzbeschreibung)
+# Warroom — Agent Architecture (Brief Description)
 
 A security-operations system where agents detect threats and drive automated defense across a Sophos environment.
 
