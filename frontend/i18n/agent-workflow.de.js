@@ -45,4 +45,40 @@ window.I18N.de.agentWorkflow = {
     confirmClear: "Feld leeren? Beim Speichern greift der eingebaute Default-Prompt.",
     runStarted: "Lauf angestoßen — Ergebnisse erscheinen unter /agent.html.",
     error: "Fehler: {error}",
+
+    // Entscheidungs-Pipeline (vom Backend geliefert, nach Schritt-Key)
+    pipeline: {
+        candidates: { step: "Kandidaten", detail: "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)" },
+        osint: { step: "OSINT", detail: "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ Block-Indikator" },
+        llm: { step: "LLM", detail: "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt" },
+        validation: { step: "Validierung", detail: "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe" },
+        persistence: { step: "Persistenz", detail: "Entscheidung in agent_decisions gespeichert" },
+        execution: { step: "Ausführung", detail: "Auto-Execute nur für acknowledge (Master-Switch); Block-Aktionen immer pending zur Freigabe" },
+    },
+
+    // Stufen-Karten (vom Backend geliefert, nach Stufen-Key)
+    stages: {
+        alert: { label: "Sophos Alerts", trigger: "Neue Alarme aus Sophos Central (letzte 24 h)" },
+        event: { label: "Central Events", trigger: "Sophos-Central-Event-Stream (Endpoint-Threat/C2/Exploit), gefiltert nach event_type" },
+        waf: { label: "WAF", trigger: "Frische 4xx/5xx-WAF-Events pro IP · Pfad-Cache (Redis, 24 h) erkennt Wordlist-/Directory-Brute-Force" },
+        ips: { label: "IPS / IDP", trigger: "IDP/IPS-Intrusion-Events pro IP" },
+        failed_login: { label: "Failed-Login (per IP)", trigger: "Fehlgeschlagene Logins pro Quell-IP" },
+        failed_login_distributed: { label: "Verteilter Brute-Force", trigger: "Alle Login-Versuche des Fensters → LLM gruppiert nach /24" },
+        triage: { label: "Triage (OSINT-Übergabe)", trigger: "Manuelle Übergabe eines Werts von der OSINT-Seite" },
+    },
+
+    // Numerische Stufen-Feld-Labels (nach Setting-Key)
+    fields: {
+        agent_interval_seconds: "Intervall (s)",
+        agent_event_interval_seconds: "Intervall (s)",
+        agent_waf_threshold: "Schwelle (24 h)",
+        agent_waf_interval_seconds: "Intervall (s)",
+        agent_ips_threshold: "Schwelle (24 h)",
+        agent_ips_interval_seconds: "Intervall (s)",
+        agent_failed_login_threshold: "Schwelle (24 h)",
+        agent_failed_login_interval_seconds: "Intervall (s)",
+        agent_failed_login_distributed_window_minutes: "Fenster (min)",
+        agent_failed_login_distributed_attempts: "Versuche/​/24 (Richtwert)",
+        agent_failed_login_distributed_min_ips: "Distinct-IPs/​/24",
+    },
 };

@@ -45,4 +45,40 @@ window.I18N.en.agentWorkflow = {
     confirmClear: "Clear field? On save the built-in default prompt takes effect.",
     runStarted: "Run started — results will appear under /agent.html.",
     error: "Error: {error}",
+
+    // decision pipeline (backend-driven, keyed by step id)
+    pipeline: {
+        candidates: { step: "Candidates", detail: "Source yields candidates (alert / WAF / IPS / login events)" },
+        osint: { step: "OSINT", detail: "Enrichment of public IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ block indicator" },
+        llm: { step: "LLM", detail: "Structured query with Pydantic schema (response_format) per stage prompt" },
+        validation: { step: "Validation", detail: "Pydantic validation + restriction to the stage's allowed actions" },
+        persistence: { step: "Persistence", detail: "Decision stored in agent_decisions" },
+        execution: { step: "Execution", detail: "Auto-execute only for acknowledge (master switch); block actions always stay pending for approval" },
+    },
+
+    // stage cards (backend-driven, keyed by stage key)
+    stages: {
+        alert: { label: "Sophos Alerts", trigger: "New alerts from Sophos Central (last 24 h)" },
+        event: { label: "Central Events", trigger: "Sophos Central event stream (endpoint threat/C2/exploit), filtered by event_type" },
+        waf: { label: "WAF", trigger: "Fresh 4xx/5xx WAF events per IP · path cache (Redis, 24 h) detects wordlist/directory brute force" },
+        ips: { label: "IPS / IDP", trigger: "IDP/IPS intrusion events per IP" },
+        failed_login: { label: "Failed login (per IP)", trigger: "Failed logins per source IP" },
+        failed_login_distributed: { label: "Distributed brute force", trigger: "All login attempts in the window → LLM groups by /24" },
+        triage: { label: "Triage (OSINT handoff)", trigger: "Manual handoff of a value from the OSINT page" },
+    },
+
+    // stage numeric-setting field labels (keyed by setting key)
+    fields: {
+        agent_interval_seconds: "Interval (s)",
+        agent_event_interval_seconds: "Interval (s)",
+        agent_waf_threshold: "Threshold (24 h)",
+        agent_waf_interval_seconds: "Interval (s)",
+        agent_ips_threshold: "Threshold (24 h)",
+        agent_ips_interval_seconds: "Interval (s)",
+        agent_failed_login_threshold: "Threshold (24 h)",
+        agent_failed_login_interval_seconds: "Interval (s)",
+        agent_failed_login_distributed_window_minutes: "Window (min)",
+        agent_failed_login_distributed_attempts: "Attempts //24 (guideline)",
+        agent_failed_login_distributed_min_ips: "Distinct IPs //24",
+    },
 };

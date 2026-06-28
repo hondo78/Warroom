@@ -13,6 +13,16 @@ const ACT_COLOR = {
 
 document.addEventListener('DOMContentLoaded', loadWorkflow);
 
+// Backend ships German text for pipeline/stage/field labels (the structure
+// lives there). Prefer the i18n dict keyed by the stable id, fall back to the
+// backend text when no translation exists. t() returns the key verbatim on a
+// miss, which is how we detect "untranslated".
+function wfT(key, fallback) {
+    const v = t(key);
+    return v === key ? fallback : v;
+}
+const stageLabel = st => wfT(`agentWorkflow.stages.${st.key}.label`, st.label);
+
 async function loadWorkflow() {
     try {
         const [wfR, setR] = await Promise.all([
@@ -35,9 +45,11 @@ async function loadWorkflow() {
 }
 
 function renderPipeline(steps) {
-    document.getElementById('wfPipeline').innerHTML = steps.map((s, i) =>
-        `<div class="wf-step"><h6>${i + 1}. ${escapeHtml(s.step)}</h6><small>${escapeHtml(s.detail)}</small></div>`
-    ).join('');
+    document.getElementById('wfPipeline').innerHTML = steps.map((s, i) => {
+        const step = wfT(`agentWorkflow.pipeline.${s.key}.step`, s.step);
+        const detail = wfT(`agentWorkflow.pipeline.${s.key}.detail`, s.detail);
+        return `<div class="wf-step"><h6>${i + 1}. ${escapeHtml(step)}</h6><small>${escapeHtml(detail)}</small></div>`;
+    }).join('');
 }
 
 function populateGlobal(g) {
@@ -68,7 +80,7 @@ function renderStages(stages) {
             `<span class="badge wf-act text-bg-${ACT_COLOR[a] || 'secondary'}">${escapeHtml(a)}</span>`
         ).join(' ');
         const numFields = (st.settings || []).map(s =>
-            `<div class="col-md-3"><label class="form-label">${escapeHtml(s.label)}</label>
+            `<div class="col-md-3"><label class="form-label">${escapeHtml(wfT(`agentWorkflow.fields.${s.key}`, s.label))}</label>
                 <input type="number" class="form-control form-control-sm" id="st_${st.key}_${s.key}"
                        value="${s.value ?? ''}" min="${s.min ?? 0}" max="${s.max ?? 1000000}"></div>`
         ).join('');
@@ -85,14 +97,14 @@ function renderStages(stages) {
         return `
         <div class="card mb-3 ${off}">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h3 class="card-title mb-0">${escapeHtml(st.label)} ${enableToggle}</h3>
+                <h3 class="card-title mb-0">${escapeHtml(stageLabel(st))} ${enableToggle}</h3>
                 <div>${acts}</div>
             </div>
             <div class="card-body">
-                <p class="admin-hint mb-2"><strong>${t('agentWorkflow.triggerLabel')}</strong> ${escapeHtml(st.trigger)} · ${promptBadge}</p>
+                <p class="admin-hint mb-2"><strong>${t('agentWorkflow.triggerLabel')}</strong> ${escapeHtml(wfT(`agentWorkflow.stages.${st.key}.trigger`, st.trigger))} · ${promptBadge}</p>
                 ${numFields ? `<div class="row g-2 align-items-end mb-1">${numFields}</div>` : ''}
                 <label class="form-label mt-2">${t('agentWorkflow.systemPrompt')} <span class="text-secondary">${t('agentWorkflow.systemPromptHint')}</span></label>
-                <textarea class="form-control form-control-sm wf-prompt" id="st_${st.key}_prompt" rows="10" placeholder="${escapeHtml(t('agentWorkflow.promptPlaceholder', { stage: st.label }))}">${escapeHtml(promptVal)}</textarea>
+                <textarea class="form-control form-control-sm wf-prompt" id="st_${st.key}_prompt" rows="10" placeholder="${escapeHtml(t('agentWorkflow.promptPlaceholder', { stage: stageLabel(st) }))}">${escapeHtml(promptVal)}</textarea>
                 <div class="d-flex justify-content-between gap-2 mt-2 flex-wrap">
                     <div>${runBtn}</div>
                     <div class="d-flex gap-2 flex-wrap">
@@ -120,7 +132,7 @@ function saveStage(key) {
     }
     const pt = document.getElementById(`st_${key}_prompt`);
     if (pt) payload[st.prompt_key] = pt.value;
-    putSettings(payload, t('agentWorkflow.stageSaved', { stage: st.label }));
+    putSettings(payload, t('agentWorkflow.stageSaved', { stage: stageLabel(st) }));
 }
 
 async function putSettings(payload, okMsg) {

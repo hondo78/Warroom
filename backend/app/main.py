@@ -4641,13 +4641,15 @@ async def get_agent_workflow():
         "interval_seconds": settings.agent_interval_seconds,
     }
 
+    # step/detail are German fallbacks; the frontend prefers the i18n dict
+    # keyed by `key` (agentWorkflow.pipeline.<key>.step/.detail).
     pipeline = [
-        {"step": "Kandidaten", "detail": "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)"},
-        {"step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ Block-Indikator"},
-        {"step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
-        {"step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
-        {"step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},
-        {"step": "Ausführung", "detail": "Auto-Execute nur für acknowledge (Master-Switch); Block-Aktionen immer pending zur Freigabe"},
+        {"key": "candidates", "step": "Kandidaten", "detail": "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)"},
+        {"key": "osint", "step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ Block-Indikator"},
+        {"key": "llm", "step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
+        {"key": "validation", "step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
+        {"key": "persistence", "step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},
+        {"key": "execution", "step": "Ausführung", "detail": "Auto-Execute nur für acknowledge (Master-Switch); Block-Aktionen immer pending zur Freigabe"},
     ]
 
     stages = [
