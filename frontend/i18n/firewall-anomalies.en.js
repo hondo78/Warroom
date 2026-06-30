@@ -40,10 +40,18 @@ window.I18N.en.fwAnomalies = {
     dim_volume: "Volume (Bytes)",
     dim_ports: "Destination ports",
     dim_dst_ips: "Destination IPs",
+    dim_src_ips: "Source IPs",
     dim_flows: "Flows",
     dim_packets: "Packets",
     dim_night: "Time of day (night)",
     dim_country: "Country rarity",
+
+    // driver chip tooltip + contextual focus description (interpolated)
+    percentile: "Percentile {p}%",
+    focus_from: "Destination IPs contacted by {ip} (source)",
+    focus_to: "Source IPs that contact {ip} (destination)",
+    focus_all_src: "All source IPs (global)",
+    focus_all_dst: "All destination IPs (global)",
 
     // chart titles (interpolated)
     scatter_title: "Bubble: {x} × {y} · bubble size = {z} · red = anomaly",

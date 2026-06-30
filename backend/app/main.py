@@ -2115,7 +2115,6 @@ ANOMALY_DIMENSIONS = [
     {"key": "country", "label": "Land-Seltenheit",   "axis": "linear"},
 ]
 _ANOMALY_DIM_KEYS = {d["key"] for d in ANOMALY_DIMENSIONS}
-_ANOMALY_DIM_LABEL = {d["key"]: d["label"] for d in ANOMALY_DIMENSIONS}
 _ANOMALY_DEFAULT_DIMS = ["volume", "ports", "night"]
 
 
@@ -2275,20 +2274,21 @@ async def firewall_anomalies(
             it[f"f_{k}"] = feat[k]
         items.append(it)
 
-    # The distinct-peer dimension is labelled by what the peer is: when source
-    # IPs are scored the peers are destinations (Ziel-IPs); when destination IPs
-    # are scored the peers are sources (Quell-IPs).
-    dim_label = dict(_ANOMALY_DIM_LABEL)
-    dim_label["dst_ips"] = "Ziel-IPs" if entity_col == "src_ip" else "Quell-IPs"
-    available = [dict(d, label=dim_label[d["key"]]) for d in ANOMALY_DIMENSIONS]
+    # Language-neutral payload: emit dimension KEYS and let the frontend
+    # translate them (i18n). The peer dimension's contextual label
+    # (destinations when source IPs are scored, sources otherwise) is derived
+    # client-side from `focus.entity`.
+    available = [{"key": d["key"], "axis": d["axis"]} for d in ANOMALY_DIMENSIONS]
 
     from app import anomaly
     feature_keys = [f"f_{k}" for k in selected]
-    dim_labels = {f"f_{k}": dim_label[k] for k in selected}
+    # Map feature column -> bare dimension key so `drivers[].dim` carries the
+    # key (e.g. "volume"), which the frontend resolves to a localized label.
+    dim_keys = {f"f_{k}": k for k in selected}
 
     def _score():
         res = anomaly.score_items(items, feature_keys)
-        return anomaly.attribute_drivers(res, feature_keys, dim_labels)
+        return anomaly.attribute_drivers(res, feature_keys, dim_keys)
 
     result = await asyncio.to_thread(_score)
     ranked = result["items"]
@@ -2324,24 +2324,17 @@ async def firewall_anomalies(
         for it in table:
             it["top_peer"] = top_peer.get(it["ip"])
 
-    # Human description of what was scored, for the dashboard header.
-    scored_label = "Quell-IPs" if entity_col == "src_ip" else "Ziel-IPs"
-    if focus_ip:
-        focus_desc = (f"Ziel-IPs, die von {focus_ip} (Quelle) kontaktiert werden"
-                      if role == "src" else
-                      f"Quell-IPs, die {focus_ip} (Ziel) kontaktieren")
-    else:
-        focus_desc = "Alle Quell-IPs (global)" if entity_col == "src_ip" else "Alle Ziel-IPs (global)"
-
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
         "window_hours": hours,
         "source": "netflow",
         "selected_dims": selected,
-        "dimensions": [dim_label[k] for k in selected],
+        "dimensions": selected,
         "available_dimensions": available,
+        # Language-neutral context; the frontend builds the human description
+        # via i18n from these fields (entity + scope + ip/role).
         "focus": {"ip": focus_ip, "role": role, "entity": entity_col,
-                  "scored": scored_label, "description": focus_desc},
+                  "scope": "focus" if focus_ip else "global"},
         "params": {"min_flows": min_flows, "max_ips": max_ips,
                    "threshold": result["threshold"]},
         "analyzed": result["analyzed"],

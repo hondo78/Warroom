@@ -40,10 +40,18 @@ window.I18N.de.fwAnomalies = {
     dim_volume: "Volumen (Bytes)",
     dim_ports: "Ziel-Ports",
     dim_dst_ips: "Ziel-IPs",
+    dim_src_ips: "Quell-IPs",
     dim_flows: "Flows",
     dim_packets: "Pakete",
     dim_night: "Tageszeit (Nacht)",
     dim_country: "Land-Seltenheit",
+
+    // Treiber-Chip-Tooltip + kontextuelle Fokus-Beschreibung (interpoliert)
+    percentile: "Perzentil {p}%",
+    focus_from: "Ziel-IPs, die von {ip} (Quelle) kontaktiert werden",
+    focus_to: "Quell-IPs, die {ip} (Ziel) kontaktieren",
+    focus_all_src: "Alle Quell-IPs (global)",
+    focus_all_dst: "Alle Ziel-IPs (global)",
 
     // chart titles (interpolated)
     scatter_title: "Bubble: {x} × {y} · Blasengröße = {z} · rot = Anomalie",

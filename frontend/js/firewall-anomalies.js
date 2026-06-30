@@ -15,7 +15,6 @@ const AN_DIMS = [
     { key: 'country', label: t('fwAnomalies.dim_country'), axis: 'linear', color: '#198754' },
 ];
 const AN_DIM_BY_KEY = Object.fromEntries(AN_DIMS.map(d => [d.key, d]));
-const AN_DIM_BY_LABEL = Object.fromEntries(AN_DIMS.map(d => [d.label, d]));
 const AN_DEFAULT_DIMS = ['volume', 'ports', 'night'];
 // Currently selected dimension keys for [X, Y, Z].
 let _anDims = AN_DEFAULT_DIMS.slice();
@@ -149,9 +148,14 @@ function scoreBadge(s) {
 
 function driverChips(drivers) {
     if (!drivers || !drivers.length) return '';
+    // `d.dim` is the dimension KEY (e.g. "volume"); resolve colour + localized
+    // label from the registry so chips follow the chosen language.
     return '<div style="margin-top:.2rem">' + drivers.map(d => {
-        const color = AN_DIM_BY_LABEL[d.dim]?.color || '#6c757d';
-        return `<span class="badge" style="font-size:.66rem;background:${color};color:#0b0e14" title="Perzentil ${Math.round((d.pct || 0) * 100)}%">${escapeHtml(d.dim)}</span>`;
+        const dim = AN_DIM_BY_KEY[d.dim];
+        const color = dim?.color || '#6c757d';
+        const label = dim?.label || d.dim;
+        const title = t('fwAnomalies.percentile', { p: Math.round((d.pct || 0) * 100) });
+        return `<span class="badge" style="font-size:.66rem;background:${color};color:#0b0e14" title="${escapeAttr(title)}">${escapeHtml(label)}</span>`;
     }).join(' ') + '</div>';
 }
 
@@ -164,22 +168,36 @@ function updateDimLabels() {
     set('anDimsText', t('fwAnomalies.dims_text', { x, y, z }));
 }
 
-// Apply the API's contextual dimension labels (e.g. Ziel-IPs ↔ Quell-IPs depending
-// on whether source or destination IPs are scored) to the registry, dropdowns and
-// the label→colour map used by the driver chips. Selections are preserved (by key).
-function applyDimMeta(avail) {
-    if (!Array.isArray(avail)) return;
-    avail.forEach(d => { if (AN_DIM_BY_KEY[d.key]) AN_DIM_BY_KEY[d.key].label = d.label; });
-    Object.keys(AN_DIM_BY_LABEL).forEach(k => delete AN_DIM_BY_LABEL[k]);
-    AN_DIMS.forEach(d => { AN_DIM_BY_LABEL[d.label] = d; });
+// The distinct-peer dimension is contextual: when SOURCE IPs are scored the
+// peers are destinations ("Destination IPs"); when DESTINATION IPs are scored
+// the peers are sources ("Source IPs"). Labels come from i18n by key — never
+// from the backend — so the page stays in the chosen language. Selections are
+// preserved (the dropdowns key by dimension key, only the text is refreshed).
+function applyDimMeta(focus) {
+    const dd = AN_DIM_BY_KEY['dst_ips'];
+    if (dd) dd.label = (focus && focus.entity === 'dst_ip')
+        ? t('fwAnomalies.dim_src_ips') : t('fwAnomalies.dim_dst_ips');
     AN_DIM_SELECTS.forEach(id => {
         const sel = document.getElementById(id);
         if (!sel) return;
         Array.from(sel.options).forEach(o => {
-            const dd = AN_DIM_BY_KEY[o.value];
-            if (dd) o.textContent = dd.label;
+            const opt = AN_DIM_BY_KEY[o.value];
+            if (opt) o.textContent = opt.label;
         });
     });
+}
+
+// Build the localized "what was scored" line from the structured focus object.
+function focusDescription(focus) {
+    const f = focus || {};
+    if (f.scope === 'focus' && f.ip) {
+        return f.role === 'src'
+            ? t('fwAnomalies.focus_from', { ip: f.ip })
+            : t('fwAnomalies.focus_to', { ip: f.ip });
+    }
+    return f.entity === 'dst_ip'
+        ? t('fwAnomalies.focus_all_dst')
+        : t('fwAnomalies.focus_all_src');
 }
 
 async function anomalyRefresh() {
@@ -200,11 +218,14 @@ async function anomalyRefresh() {
         }
         const d = await r.json();
 
-        // Adopt contextual dimension labels, then refresh chart titles + scope line.
-        applyDimMeta(d.available_dimensions);
+        // Adopt the contextual peer label, then refresh chart titles + scope line.
+        applyDimMeta(d.focus);
         updateDimLabels();
         const fi = document.getElementById('anFocusInfo');
-        if (fi) fi.textContent = d.focus?.description ? t('fwAnomalies.focus_info', { desc: d.focus.description, n: (d.analyzed || 0).toLocaleString('de-DE') }) : '';
+        if (fi) fi.textContent = t('fwAnomalies.focus_info', {
+            desc: focusDescription(d.focus),
+            n: (d.analyzed || 0).toLocaleString(),
+        });
         const ipHdr = document.getElementById('anIpHdr');
         if (ipHdr) ipHdr.textContent = d.focus?.entity === 'dst_ip' ? t('common.dest_ip') : t('fwAnomalies.source_ip');
         const peerHdr = document.getElementById('anPeerHdr');
