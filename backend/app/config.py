@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     # require human approval regardless of this switch. Actions are chosen purely
     # from per-source thresholds in the prompts — there is no confidence score.
     agent_auto_execute: bool = False
+    # Self-learning auto-approval: when enabled, the agent records every human
+    # approval/rejection per decision "signature" (source_type|action|rule).
+    # Once a signature's NET score (approvals − rejections) reaches
+    # agent_learning_threshold, matching new decisions are auto-approved and
+    # executed without asking — including block actions. Off by default (opt-in);
+    # execute_decision still re-checks the whitelist on every run.
+    agent_learning_enabled: bool = False
+    agent_learning_threshold: int = 3
     # Empty -> fall back to DEFAULT_SYSTEM_PROMPT in app.agent.
     agent_system_prompt: str = ""
     # Per-source LLM system prompts for rule-based decisions. Empty -> fall

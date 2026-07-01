@@ -34,7 +34,9 @@ async function loadWorkflow() {
         SETTINGS = await setR.json();
         renderPipeline(WF.pipeline || []);
         populateGlobal(WF.global || {});
+        populateLearning(WF.global || {});
         renderStages(WF.stages || []);
+        loadPatterns();
         const badge = document.getElementById('wfStructuredBadge');
         const on = !!(WF.global && WF.global.structured_output);
         badge.textContent = on ? t('agentWorkflow.structuredOn') : t('agentWorkflow.structuredOff');
@@ -71,6 +73,74 @@ async function saveGlobal() {
         agent_auto_execute: document.getElementById('g_agent_auto_execute').checked,
     };
     await putSettings(payload, t('agentWorkflow.globalSaved'));
+}
+
+// --- Self-learning auto-approval ------------------------------------------
+
+function populateLearning(g) {
+    const en = document.getElementById('g_agent_learning_enabled');
+    const th = document.getElementById('g_agent_learning_threshold');
+    if (en) en.checked = !!g.learning_enabled;
+    if (th) th.value = g.learning_threshold ?? 3;
+}
+
+async function saveLearning() {
+    const payload = {
+        agent_learning_enabled: document.getElementById('g_agent_learning_enabled').checked,
+        agent_learning_threshold: parseInt(document.getElementById('g_agent_learning_threshold').value, 10),
+    };
+    await putSettings(payload, t('agentWorkflow.learnSaved'));
+}
+
+async function loadPatterns() {
+    const tb = document.getElementById('wfPatterns');
+    if (!tb) return;
+    try {
+        const r = await fetch('/api/agent/approval-patterns');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        renderPatterns(d.patterns || [], d.threshold);
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="9" class="text-secondary">${t('agentWorkflow.error', { error: e.message })}</td></tr>`;
+    }
+}
+
+function renderPatterns(patterns, threshold) {
+    const tb = document.getElementById('wfPatterns');
+    if (!tb) return;
+    if (!patterns.length) {
+        tb.innerHTML = `<tr><td colspan="9" class="text-secondary">${t('agentWorkflow.learnNoPatterns')}</td></tr>`;
+        return;
+    }
+    tb.innerHTML = patterns.map(p => {
+        const badge = p.eligible
+            ? `<span class="badge text-bg-success">${t('agentWorkflow.learnEligible')}</span>`
+            : `<span class="badge text-bg-secondary">${t('agentWorkflow.learnProgress', { n: p.net, t: threshold })}</span>`;
+        const rule = p.rule ? escapeHtml(p.rule) : '<span class="text-secondary">—</span>';
+        return `<tr>
+            <td>${escapeHtml(p.source_type)}</td>
+            <td><span class="badge wf-act text-bg-${ACT_COLOR[p.action] || 'secondary'}">${escapeHtml(p.action)}</span></td>
+            <td>${rule}</td>
+            <td class="text-end">${p.approvals}</td>
+            <td class="text-end">${p.rejections}</td>
+            <td class="text-end"><strong>${p.net}</strong></td>
+            <td class="text-end">${p.auto_approved}</td>
+            <td>${badge}</td>
+            <td class="text-end"><button class="block-link" onclick="forgetPattern(${p.id})">${t('agentWorkflow.learnForget')}</button></td>
+        </tr>`;
+    }).join('');
+}
+
+async function forgetPattern(id) {
+    if (!confirm(t('agentWorkflow.learnForgetConfirm'))) return;
+    try {
+        const r = await fetch(`/api/agent/approval-patterns/${id}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        toast(t('agentWorkflow.learnForgotten'), 'success');
+        loadPatterns();
+    } catch (e) {
+        toast(t('agentWorkflow.error', { error: e.message }), 'error');
+    }
 }
 
 function renderStages(stages) {

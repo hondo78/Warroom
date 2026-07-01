@@ -46,6 +46,30 @@ window.I18N.en.agentWorkflow = {
     runStarted: "Run started — results will appear under /agent.html.",
     error: "Error: {error}",
 
+    // self-learning auto-approval
+    learnTitle: "🧠 Self-learning auto-approval",
+    learnHint: "Records every human approval/rejection per decision <strong>signature</strong> (source · action · rule). Once a signature's <strong>net score</strong> (approvals − rejections) reaches the threshold, matching new decisions are <strong>auto-approved and executed</strong> — block actions included. The whitelist is always re-checked, so your own IPs stay safe.",
+    learnEnabled: "Learning active",
+    learnThreshold: "Approval threshold",
+    learnSave: "Save learning settings",
+    learnSaved: "Learning settings saved",
+    learnPatternsTitle: "Learned patterns",
+    learnPatternsHint: "Eligible patterns (net ≥ threshold) auto-approve while learning is active.",
+    learnNoPatterns: "Nothing learned yet — approve or reject decisions to train patterns.",
+    learnEligible: "auto-approves",
+    learnProgress: "learning ({n}/{t})",
+    learnForget: "forget",
+    learnForgetConfirm: "Forget this learned pattern? Its approvals/rejections are reset.",
+    learnForgotten: "Pattern forgotten.",
+    colSource: "Source",
+    colAction: "Action",
+    colRule: "Rule / signature",
+    colApprovals: "Appr.",
+    colRejections: "Rej.",
+    colNet: "Net",
+    colAuto: "Auto",
+    colStatus: "Status",
+
     // decision pipeline (backend-driven, keyed by step id)
     pipeline: {
         candidates: { step: "Candidates", detail: "Source yields candidates (alert / WAF / IPS / login events)" },

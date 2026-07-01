@@ -141,6 +141,24 @@ _MIGRATIONS = [
     "ALTER TABLE agent_decisions ALTER COLUMN alert_id DROP NOT NULL",
     # confidence scoring removed — actions are chosen purely from per-source thresholds
     "ALTER TABLE agent_decisions DROP COLUMN IF EXISTS confidence",
+    # Self-learning auto-approval: one row per decision "signature"
+    # (source_type|action|rule). NET score = approvals − rejections; once it
+    # reaches the configured threshold, matching new decisions auto-approve.
+    """
+    CREATE TABLE IF NOT EXISTS agent_approval_patterns (
+        id BIGSERIAL PRIMARY KEY,
+        signature VARCHAR(300) NOT NULL UNIQUE,
+        source_type VARCHAR(20) NOT NULL DEFAULT 'alert',
+        action VARCHAR(50) NOT NULL,
+        rule VARCHAR(200) NOT NULL DEFAULT '',
+        approvals INTEGER NOT NULL DEFAULT 0,
+        rejections INTEGER NOT NULL DEFAULT 0,
+        auto_approved INTEGER NOT NULL DEFAULT 0,
+        last_decided_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_agent_approval_patterns_st ON agent_approval_patterns(source_type, action)",
     """
     CREATE TABLE IF NOT EXISTS whitelisted_ips (
         ip VARCHAR(45) PRIMARY KEY,

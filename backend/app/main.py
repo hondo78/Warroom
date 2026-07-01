@@ -19,7 +19,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -4149,6 +4149,8 @@ class AdminSettingsIn(BaseModel):
     agent_max_tokens: int | None = Field(default=None, ge=1, le=32000)
     agent_structured_output: bool | None = None
     agent_auto_execute: bool | None = None
+    agent_learning_enabled: bool | None = None
+    agent_learning_threshold: int | None = Field(default=None, ge=1, le=1000)
     agent_language: str | None = Field(default=None, pattern="^(en|de)$")
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_system_prompt: str | None = Field(default=None, max_length=20000)
@@ -4420,16 +4422,22 @@ async def approve_agent_decision(decision_id: int, body: DecisionFeedback | None
     rec = await db.get(AgentDecision, decision_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="decision not found")
+    was_pending = rec.status == "pending"
     if body and body.comment is not None:
         rec.human_comment = body.comment
         await db.commit()
-    from app.agent import execute_decision
+    from app.agent import execute_decision, record_feedback_by_id
     try:
-        return await execute_decision(decision_id)
+        result = await execute_decision(decision_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    # Learn from this human approval (only count a genuine pending->executed
+    # transition, not a re-approve of an already-executed decision).
+    if was_pending:
+        await record_feedback_by_id(decision_id, approved=True)
+    return result
 
 
 @app.post("/api/agent/decisions/{decision_id}/reject")
@@ -4437,11 +4445,16 @@ async def reject_agent_decision(decision_id: int, body: DecisionFeedback | None 
     rec = await db.get(AgentDecision, decision_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="decision not found")
+    was_pending = rec.status == "pending"
     rec.status = "rejected"
     rec.decided_at = datetime.now(timezone.utc)
     if body and body.comment is not None:
         rec.human_comment = body.comment
     await db.commit()
+    # Learn from this human rejection (subtracts from the pattern's net score).
+    if was_pending:
+        from app.agent import record_feedback_by_id
+        await record_feedback_by_id(decision_id, approved=False)
     return {"ok": True}
 
 
@@ -4471,13 +4484,15 @@ async def approve_all_pending(body: BulkApproveIn | None = None, db: AsyncSessio
             rec.human_comment = body.comment
         await db.commit()
 
-    from app.agent import execute_decision
+    from app.agent import execute_decision, record_feedback_by_id
     approved: list[int] = []
     errors: list[dict[str, str | int]] = []
     for rec in rows:
         try:
             await execute_decision(rec.id)
             approved.append(rec.id)
+            # Each bulk-approved row is a human approval — feed the learner.
+            await record_feedback_by_id(rec.id, approved=True)
         except Exception as e:
             errors.append({"id": rec.id, "error": str(e)[:200]})
             logger.warning(f"bulk-approve: decision {rec.id} failed: {e}")
@@ -4488,6 +4503,41 @@ async def approve_all_pending(body: BulkApproveIn | None = None, db: AsyncSessio
         "ids": approved,
         "errors": errors,
     }
+
+
+@app.get("/api/agent/approval-patterns")
+async def list_approval_patterns(db: AsyncSession = Depends(get_db)):
+    """Learned approval patterns for the self-learning auto-approval feature.
+    net = approvals − rejections; eligible = learning ON and net ≥ threshold."""
+    rows = (await db.execute(select(AgentApprovalPattern))).scalars().all()
+    threshold = max(1, int(settings.agent_learning_threshold or 3))
+    enabled = bool(settings.agent_learning_enabled)
+
+    def _ser(p: AgentApprovalPattern) -> dict:
+        net = (p.approvals or 0) - (p.rejections or 0)
+        return {
+            "id": p.id, "signature": p.signature, "source_type": p.source_type,
+            "action": p.action, "rule": p.rule,
+            "approvals": p.approvals, "rejections": p.rejections,
+            "auto_approved": p.auto_approved, "net": net,
+            "eligible": enabled and net >= threshold,
+            "last_decided_at": p.last_decided_at.isoformat() if p.last_decided_at else None,
+        }
+
+    patterns = sorted((_ser(p) for p in rows), key=lambda x: (-x["net"], -x["id"]))
+    return {"enabled": enabled, "threshold": threshold, "patterns": patterns}
+
+
+@app.delete("/api/agent/approval-patterns/{pattern_id}")
+async def delete_approval_pattern(pattern_id: int, db: AsyncSession = Depends(get_db)):
+    """Forget a learned pattern — removes its accumulated approvals/rejections
+    so it must be re-learned from scratch."""
+    p = await db.get(AgentApprovalPattern, pattern_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="pattern not found")
+    await db.delete(p)
+    await db.commit()
+    return {"ok": True}
 
 
 _ALLOWED_HUMAN_ACTIONS = {"block_ip", "acknowledge", "isolate", "no_action"}
@@ -4547,11 +4597,14 @@ async def manual_agent_decision(body: HumanDecisionIn, db: AsyncSession = Depend
             await db.commit()
 
     if body.execute:
-        from app.agent import execute_decision
+        from app.agent import execute_decision, record_feedback_by_id
         try:
             await execute_decision(rec.id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"recorded but execution failed: {e}")
+        # A manual execute is the human endorsing this action for this
+        # situation — teach the pattern so similar future ones can auto-run.
+        await record_feedback_by_id(rec.id, approved=True)
 
     await db.refresh(rec)
     return _serialize_decision(rec, alert)
@@ -4632,6 +4685,8 @@ async def get_agent_workflow():
         "max_tokens": settings.agent_max_tokens,
         "auto_execute": settings.agent_auto_execute,
         "interval_seconds": settings.agent_interval_seconds,
+        "learning_enabled": settings.agent_learning_enabled,
+        "learning_threshold": settings.agent_learning_threshold,
     }
 
     # step/detail are German fallbacks; the frontend prefers the i18n dict

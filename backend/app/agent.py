@@ -29,8 +29,8 @@ from app import waf_path_cache
 from app.config import settings
 from app.database import async_session
 from app.models import (
-    AgentDecision, Alert, BlockedDomain, BlockedIp, BlockedUrl,
-    Event, FirewallLog, WhitelistedIp,
+    AgentApprovalPattern, AgentDecision, Alert, BlockedDomain, BlockedIp,
+    BlockedUrl, Event, FirewallLog, WhitelistedIp,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,137 @@ def _should_auto_execute(action: str) -> tuple[bool, str]:
     if settings.agent_auto_execute:
         return True, "agent_auto_execute master switch is ON"
     return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Self-learning auto-approval
+#
+# Every human approve/reject is recorded per decision "signature". A signature
+# groups *similar* decisions by source_type + action + a best-available
+# rule/signature field. Once a signature's NET score (approvals − rejections)
+# reaches settings.agent_learning_threshold, matching NEW decisions are
+# auto-approved and executed without asking — block actions included. Rejections
+# subtract from the net, so a pattern can lose (and later regain) eligibility.
+# ---------------------------------------------------------------------------
+
+def _signature_rule(source_type: str | None, action_args: dict | None,
+                    alert_type: str | None) -> str:
+    """Best-available 'rule/signature' identifier for grouping similar
+    decisions. Empty string when a source has no stable sub-signature (then a
+    pattern is effectively source_type+action)."""
+    st = source_type or "alert"
+    ctx = (action_args or {}).get("context") or {}
+    if st == "event":
+        return str(ctx.get("event_type") or "")
+    if st == "ips":
+        cats = [str(c).strip().lower() for c in (ctx.get("categories") or []) if c]
+        return "/".join(sorted(set(cats)))
+    if st == "triage":
+        return str(ctx.get("value_type") or "")
+    if st == "failed_login":
+        if ctx.get("distributed_brute_force_indicator"):
+            return "distributed"
+        if ctx.get("subnet_brute_force_indicator"):
+            return "subnet"
+        return "per_ip"
+    if st == "alert":
+        return str(alert_type or "")
+    # waf and anything else: group by source_type + action only.
+    return str(ctx.get("rule") or "")
+
+
+async def _decision_signature(rec: AgentDecision) -> tuple[str, str]:
+    """Return (signature, rule) for a decision. Loads the alert type for
+    alert-sourced decisions so their signature reflects the alarm type."""
+    st = rec.source_type or "alert"
+    alert_type = None
+    if st == "alert" and rec.alert_id:
+        async with async_session() as db:
+            a = await db.get(Alert, rec.alert_id)
+            alert_type = a.alert_type if a else None
+    rule = _signature_rule(st, rec.action_args, alert_type)
+    signature = f"{st}|{rec.action}|{rule}".lower()
+    return signature, rule
+
+
+async def record_approval_feedback(rec: AgentDecision, approved: bool) -> None:
+    """Record one human approve/reject against the decision's pattern.
+    Best-effort: learning must never break the approve/reject flow."""
+    try:
+        signature, rule = await _decision_signature(rec)
+        async with async_session() as db:
+            pat = (await db.execute(
+                select(AgentApprovalPattern).where(AgentApprovalPattern.signature == signature)
+            )).scalar_one_or_none()
+            if pat is None:
+                pat = AgentApprovalPattern(
+                    signature=signature, source_type=rec.source_type or "alert",
+                    action=rec.action, rule=rule,
+                )
+                db.add(pat)
+            if approved:
+                pat.approvals = (pat.approvals or 0) + 1
+            else:
+                pat.rejections = (pat.rejections or 0) + 1
+            pat.last_decided_at = datetime.now(timezone.utc)
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"agent: record_approval_feedback failed: {e}")
+
+
+async def record_feedback_by_id(decision_id: int, approved: bool) -> None:
+    """Load a decision fresh and record one human approve/reject against its
+    pattern. Convenience wrapper for the API handlers."""
+    async with async_session() as db:
+        rec = await db.get(AgentDecision, decision_id)
+    if rec is not None:
+        await record_approval_feedback(rec, approved)
+
+
+async def _maybe_learned_auto_approve(rec: AgentDecision) -> bool:
+    """If learning is on and this decision's pattern has enough net approvals,
+    execute it now (auto-approve) and return True. execute_decision still
+    re-checks the whitelist, so a learned block can't hit a protected IP."""
+    if not settings.agent_learning_enabled:
+        return False
+    threshold = max(1, int(settings.agent_learning_threshold or 3))
+    try:
+        signature, _rule = await _decision_signature(rec)
+        async with async_session() as db:
+            pat = (await db.execute(
+                select(AgentApprovalPattern).where(AgentApprovalPattern.signature == signature)
+            )).scalar_one_or_none()
+            net = ((pat.approvals or 0) - (pat.rejections or 0)) if pat else 0
+            if pat is None or net < threshold:
+                return False
+            pat.auto_approved = (pat.auto_approved or 0) + 1
+            pat.last_decided_at = datetime.now(timezone.utc)
+            await db.commit()
+
+        # Annotate provenance so the UI/audit trail shows it wasn't a human.
+        async with async_session() as db:
+            r = await db.get(AgentDecision, rec.id)
+            if r is None:
+                return False
+            note = f"Auto-approved by learned pattern (net {net} ≥ threshold {threshold})."
+            r.human_comment = r.human_comment or note
+            aa = dict(r.action_args or {})
+            aa["auto_approved"] = {"by": "learned_pattern", "signature": signature,
+                                   "net": net, "threshold": threshold}
+            r.action_args = aa
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"agent: learned auto-approve check failed for {rec.id}: {e}")
+        return False
+
+    logger.info(f"agent: learned auto-approve decision {rec.id} "
+                f"(sig={signature}, net={net}>={threshold})")
+    try:
+        await execute_decision(rec.id)
+    except Exception as e:
+        logger.warning(f"agent: learned auto-approve execute failed for {rec.id}: {e}")
+    return True
+
 
 DEFAULT_SYSTEM_PROMPT = """Du bist ein Security-Operations-Assistent für Warroom.
 Du bekommst einen einzelnen Alarm und sollst eine Empfehlung für die nächste Aktion abgeben.
@@ -1251,6 +1382,11 @@ async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
         await db.commit()
         await db.refresh(record)
 
+    # Learned auto-approval takes precedence: if the human has approved this
+    # decision's pattern enough times, execute it without asking.
+    if await _maybe_learned_auto_approve(record):
+        return
+
     should, why = _should_auto_execute(decision["action"])
     if should:
         logger.info(f"agent: auto-executing decision {record.id} ({why})")
@@ -1628,6 +1764,10 @@ async def _store_rule_decision(
         db.add(rec)
         await db.commit()
         await db.refresh(rec)
+
+    # Learned auto-approval takes precedence over the pending/notify path.
+    if await _maybe_learned_auto_approve(rec):
+        return rec.id
 
     should, why = _should_auto_execute(action)
     if should:

@@ -46,6 +46,30 @@ window.I18N.de.agentWorkflow = {
     runStarted: "Lauf angestoßen — Ergebnisse erscheinen unter /agent.html.",
     error: "Fehler: {error}",
 
+    // Selbstlernende Auto-Freigabe
+    learnTitle: "🧠 Selbstlernende Auto-Freigabe",
+    learnHint: "Erfasst jede menschliche Freigabe/Ablehnung pro Entscheidungs-<strong>Signatur</strong> (Quelle · Aktion · Regel). Sobald der <strong>Netto-Score</strong> einer Signatur (Freigaben − Ablehnungen) den Schwellenwert erreicht, werden passende neue Entscheidungen <strong>automatisch freigegeben und ausgeführt</strong> — inkl. Block-Aktionen. Die Whitelist wird immer erneut geprüft, eigene IPs bleiben also geschützt.",
+    learnEnabled: "Lernen aktiv",
+    learnThreshold: "Freigabe-Schwelle",
+    learnSave: "Lern-Einstellungen speichern",
+    learnSaved: "Lern-Einstellungen gespeichert",
+    learnPatternsTitle: "Gelernte Muster",
+    learnPatternsHint: "Qualifizierte Muster (Netto ≥ Schwelle) werden bei aktivem Lernen automatisch freigegeben.",
+    learnNoPatterns: "Noch nichts gelernt — genehmige oder lehne Entscheidungen ab, um Muster zu trainieren.",
+    learnEligible: "auto-freigabe",
+    learnProgress: "lernt ({n}/{t})",
+    learnForget: "vergessen",
+    learnForgetConfirm: "Dieses gelernte Muster vergessen? Freigaben/Ablehnungen werden zurückgesetzt.",
+    learnForgotten: "Muster vergessen.",
+    colSource: "Quelle",
+    colAction: "Aktion",
+    colRule: "Regel / Signatur",
+    colApprovals: "Frei.",
+    colRejections: "Abl.",
+    colNet: "Netto",
+    colAuto: "Auto",
+    colStatus: "Status",
+
     // Entscheidungs-Pipeline (vom Backend geliefert, nach Schritt-Key)
     pipeline: {
         candidates: { step: "Kandidaten", detail: "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)" },

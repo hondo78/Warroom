@@ -70,6 +70,8 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_structured_output": bool,
     "agent_language": str,
     "agent_auto_execute": bool,
+    "agent_learning_enabled": bool,
+    "agent_learning_threshold": int,
     "agent_system_prompt": str,
     "agent_waf_system_prompt": str,
     "agent_ips_system_prompt": str,

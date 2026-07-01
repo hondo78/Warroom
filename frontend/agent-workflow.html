@@ -106,6 +106,39 @@
                     </div>
                 </div>
 
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="agentWorkflow.learnTitle">🧠 Self-learning auto-approval</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint mb-2" data-i18n-html="agentWorkflow.learnHint">Records every human approval/rejection per decision <strong>signature</strong> (source · action · rule). Once a signature's <strong>net score</strong> (approvals − rejections) reaches the threshold, matching new decisions are <strong>auto-approved and executed</strong> — block actions included. The whitelist is always re-checked, so your own IPs stay safe.</p>
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.learnEnabled">Learning active</label></div>
+                            <div class="col-md-3"><div class="form-check form-switch mt-1"><input class="form-check-input" type="checkbox" id="g_agent_learning_enabled"></div></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.learnThreshold">Approval threshold</label></div>
+                            <div class="col-md-3"><input type="number" min="1" max="1000" class="form-control form-control-sm" id="g_agent_learning_threshold"></div>
+                        </div>
+                        <div class="text-end mt-3"><button class="btn btn-primary btn-sm" onclick="saveLearning()" data-i18n="agentWorkflow.learnSave">Save learning settings</button></div>
+
+                        <h4 class="mt-3" data-i18n="agentWorkflow.learnPatternsTitle">Learned patterns</h4>
+                        <p class="admin-hint" data-i18n="agentWorkflow.learnPatternsHint">Eligible patterns (net ≥ threshold) auto-approve while learning is active.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead><tr>
+                                    <th data-i18n="agentWorkflow.colSource">Source</th>
+                                    <th data-i18n="agentWorkflow.colAction">Action</th>
+                                    <th data-i18n="agentWorkflow.colRule">Rule / signature</th>
+                                    <th class="text-end" data-i18n="agentWorkflow.colApprovals">Appr.</th>
+                                    <th class="text-end" data-i18n="agentWorkflow.colRejections">Rej.</th>
+                                    <th class="text-end" data-i18n="agentWorkflow.colNet">Net</th>
+                                    <th class="text-end" data-i18n="agentWorkflow.colAuto">Auto</th>
+                                    <th data-i18n="agentWorkflow.colStatus">Status</th>
+                                    <th></th>
+                                </tr></thead>
+                                <tbody id="wfPatterns"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="wfStages"></div>
 
             </div>

@@ -289,6 +289,25 @@ class AgentDecision(Base):
     telegram_message_id = Column(BigInteger, nullable=True)
 
 
+class AgentApprovalPattern(Base):
+    """Self-learning auto-approval memory. One row per decision *signature*
+    ("source_type|action|rule"). Human approvals/rejections accumulate here;
+    once ``approvals - rejections`` reaches the configured threshold, matching
+    new decisions are auto-approved and executed without asking."""
+    __tablename__ = "agent_approval_patterns"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    signature = Column(String(300), nullable=False, unique=True)
+    source_type = Column(String(20), nullable=False, default="alert")
+    action = Column(String(50), nullable=False)
+    rule = Column(String(200), nullable=False, default="")
+    approvals = Column(Integer, nullable=False, default=0)
+    rejections = Column(Integer, nullable=False, default=0)
+    auto_approved = Column(Integer, nullable=False, default=0)   # times this pattern auto-approved
+    last_decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class NetflowBucket(Base):
     __tablename__ = "netflow_buckets"
 
