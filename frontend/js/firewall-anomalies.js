@@ -24,12 +24,17 @@ let _anItems = [];
 const _anSort = { key: 'score', dir: 'desc' };
 const AN_COLS = 11;
 
+// Number formatting follows the chosen UI language (thousands separators differ
+// between en/de). Language can't change without a reload, so resolve it once.
+const AN_LANG = (typeof currentLang === 'function') ? currentLang() : 'en';
+const AN_LOCALE = AN_LANG === 'de' ? 'de-DE' : 'en-US';
+
 // Format a raw dimension value for axis ticks / hover, per dimension type.
 function fmtDimVal(key, v) {
     if (key === 'volume') return fmtBytes(v);
     if (key === 'night') return Math.round((v || 0) * 100) + '%';
     if (key === 'country') return 'r' + (Number(v) || 0).toFixed(1);
-    return (Number(v) || 0).toLocaleString('de-DE');
+    return (Number(v) || 0).toLocaleString(AN_LOCALE);
 }
 
 // Numeric plot value; log axes need a positive floor so 0 doesn't break them.
@@ -128,7 +133,7 @@ function syncDimOptionStates() {
 function fmtTs(iso) {
     if (!iso) return '—';
     try {
-        return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        return new Date(iso).toLocaleString(AN_LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     } catch (e) { return '—'; }
 }
 
@@ -224,15 +229,15 @@ async function anomalyRefresh() {
         const fi = document.getElementById('anFocusInfo');
         if (fi) fi.textContent = t('fwAnomalies.focus_info', {
             desc: focusDescription(d.focus),
-            n: (d.analyzed || 0).toLocaleString(),
+            n: (d.analyzed || 0).toLocaleString(AN_LOCALE),
         });
         const ipHdr = document.getElementById('anIpHdr');
         if (ipHdr) ipHdr.textContent = d.focus?.entity === 'dst_ip' ? t('common.dest_ip') : t('fwAnomalies.source_ip');
         const peerHdr = document.getElementById('anPeerHdr');
         if (peerHdr) peerHdr.textContent = d.focus?.entity === 'dst_ip' ? t('fwAnomalies.source_ip') : t('common.dest_ip');
 
-        document.getElementById('anAnalyzed').textContent = (d.analyzed || 0).toLocaleString('de-DE');
-        document.getElementById('anAnomalies').textContent = (d.anomaly_count || 0).toLocaleString('de-DE');
+        document.getElementById('anAnalyzed').textContent = (d.analyzed || 0).toLocaleString(AN_LOCALE);
+        document.getElementById('anAnomalies').textContent = (d.anomaly_count || 0).toLocaleString(AN_LOCALE);
         document.getElementById('anWindow').textContent = t('fwAnomalies.window_label', { h: d.window_hours });
         document.getElementById('anThreshold').textContent = (d.params?.threshold ?? '—').toString();
         const top = (d.anomalies || [])[0];
@@ -288,7 +293,7 @@ function _anRenderRows() {
     const items = _anItems.slice().sort((a, b) => {
         const va = _anSortVal(a, key), vb = _anSortVal(b, key);
         if (typeof va === 'string' || typeof vb === 'string') {
-            return mul * String(va).localeCompare(String(vb), 'de', { numeric: true });
+            return mul * String(va).localeCompare(String(vb), AN_LANG, { numeric: true });
         }
         return mul * (va - vb);
     });
@@ -311,9 +316,9 @@ function _anRenderRows() {
             <td>${peer}</td>
             <td>${country}</td>
             <td>${fmtBytes(it.bytes)}</td>
-            <td>${(it.flows || 0).toLocaleString('de-DE')}</td>
-            <td>${(it.distinct_dst_ports || 0).toLocaleString('de-DE')}</td>
-            <td>${(it.distinct_dst_ips || 0).toLocaleString('de-DE')}</td>
+            <td>${(it.flows || 0).toLocaleString(AN_LOCALE)}</td>
+            <td>${(it.distinct_dst_ports || 0).toLocaleString(AN_LOCALE)}</td>
+            <td>${(it.distinct_dst_ips || 0).toLocaleString(AN_LOCALE)}</td>
             <td>${night}%</td>
             <td style="white-space:nowrap">${fmtTs(it.last_seen)}</td>
             <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">${t('fwAnomalies.block')}</button></td>
@@ -509,8 +514,8 @@ function connNfTable(side, peerLabel) {
         <td>${c.port ?? '—'}</td>
         <td>${escapeHtml(c.protocol || '—')}</td>
         <td>${fmtBytes(c.bytes)}</td>
-        <td>${(c.flows || 0).toLocaleString('de-DE')}</td>
-        <td>${(c.packets || 0).toLocaleString('de-DE')}</td>
+        <td>${(c.flows || 0).toLocaleString(AN_LOCALE)}</td>
+        <td>${(c.packets || 0).toLocaleString(AN_LOCALE)}</td>
         <td style="white-space:nowrap">${fmtTs(c.first_seen)}</td>
         <td style="white-space:nowrap">${fmtTs(c.last_seen)}</td>
     </tr>`).join('');
@@ -532,7 +537,7 @@ function connFwTable(side, peerLabel) {
         <td>${c.port ?? '—'}</td>
         <td>${escapeHtml(c.protocol || '—')}</td>
         <td><span class="badge text-bg-danger">${escapeHtml(c.action || 'deny')}</span></td>
-        <td>${(c.events || 0).toLocaleString('de-DE')}</td>
+        <td>${(c.events || 0).toLocaleString(AN_LOCALE)}</td>
         <td style="white-space:nowrap">${fmtTs(c.last_seen)}</td>
     </tr>`).join('');
     return `<div class="table-scroll"><table class="table table-sm table-hover align-middle">
@@ -544,7 +549,7 @@ function connFwTable(side, peerLabel) {
 function connSummary(side) {
     if (!side) return '';
     return `<span class="text-secondary" style="font-size:.78rem">`
-        + `${(side.peers || 0).toLocaleString('de-DE')} ${t('fwAnomalies.peers')} · ${fmtBytes(side.bytes || 0)} · ${(side.flows || 0).toLocaleString('de-DE')} Flows</span>`;
+        + `${(side.peers || 0).toLocaleString(AN_LOCALE)} ${t('fwAnomalies.peers')} · ${fmtBytes(side.bytes || 0)} · ${(side.flows || 0).toLocaleString(AN_LOCALE)} Flows</span>`;
 }
 
 function renderConnBody(d) {
