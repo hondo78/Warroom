@@ -4458,6 +4458,51 @@ async def reject_agent_decision(decision_id: int, body: DecisionFeedback | None 
     return {"ok": True}
 
 
+class DeclineIn(BaseModel):
+    # Full reset wipes the learned pattern; otherwise decline counts as one
+    # rejection (net −1) so the pattern can drop below the threshold.
+    reset_pattern: bool = False
+    comment: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/agent/decisions/{decision_id}/decline")
+async def decline_agent_decision(decision_id: int, body: DeclineIn | None = None, db: AsyncSession = Depends(get_db)):
+    """Decline an already-executed decision after the fact: remove the IP(s)/
+    domain/URL it put on the blocklist, mark it 'declined', and correct the
+    learner — either record a rejection (net −1) or, if reset_pattern is set,
+    forget the whole pattern's statistics."""
+    rec = await db.get(AgentDecision, decision_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="decision not found")
+    if rec.status != "executed":
+        raise HTTPException(status_code=400, detail="only executed decisions can be declined")
+
+    from app.agent import revert_decision, record_feedback_by_id, forget_pattern_for
+    try:
+        reverted = await revert_decision(decision_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"revert failed: {e}")
+
+    reset = bool(body and body.reset_pattern)
+    if reset:
+        pattern_reset = await forget_pattern_for(decision_id)
+    else:
+        pattern_reset = False
+        await record_feedback_by_id(decision_id, approved=False)
+
+    rec = await db.get(AgentDecision, decision_id)
+    rec.status = "declined"
+    rec.decided_at = datetime.now(timezone.utc)
+    default_note = "Declined after execution — blocklist entries removed."
+    if body and body.comment:
+        rec.human_comment = body.comment
+    elif not rec.human_comment:
+        rec.human_comment = default_note
+    await db.commit()
+
+    return {"ok": True, "reverted": reverted, "pattern_reset": pattern_reset}
+
+
 class BulkApproveIn(BaseModel):
     source_type: str | None = Field(None, max_length=20)
     action: str | None = Field(None, max_length=50)

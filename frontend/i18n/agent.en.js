@@ -163,4 +163,16 @@ window.I18N.en.agent = {
     running: "… running",
     bulk_executed: "{n} executed",
     bulk_failed: ", {n} failed (see console)",
+
+    // auto-approval provenance + post-hoc decline
+    auto_approved_title: "Auto-approved (learned pattern)",
+    auto_approved_desc: "Executed automatically because this decision's pattern had net {net} ≥ threshold {t} learned approvals — no human was asked.",
+    decline_title: "Decline & revert",
+    decline_hint: "Remove the IP(s)/domain/URL this decision put on the blocklist and mark it declined. Counts as one rejection (net −1) for the learned pattern.",
+    decline_hint_auto: "This was auto-approved. Declining removes the IP(s)/domain/URL from the blocklist and counts as one rejection (net −1) so it won't immediately auto-approve again.",
+    decline_reset: "Also reset this learned pattern completely (forget all approvals)",
+    decline_revert: "Decline & remove from blocklist",
+    decline_confirm: "Decline this decision and remove its entries from the blocklist?",
+    decline_done: "Declined — {n} blocklist entr(y/ies) removed.",
+    decline_pattern_reset: "learned pattern reset",
 };

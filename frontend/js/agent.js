@@ -29,7 +29,7 @@ async function updateAgentStats() {
         document.getElementById('aTotal').textContent = (d.total || 0).toLocaleString('de-DE');
         document.getElementById('aPending').textContent = (by.pending || 0).toLocaleString('de-DE');
         document.getElementById('aExecuted').textContent = (by.executed || 0).toLocaleString('de-DE');
-        document.getElementById('aRejected').textContent = ((by.rejected || 0) + (by.superseded || 0)).toLocaleString('de-DE');
+        document.getElementById('aRejected').textContent = ((by.rejected || 0) + (by.superseded || 0) + (by.declined || 0)).toLocaleString('de-DE');
         document.getElementById('aFailed').textContent = (by.failed || 0).toLocaleString('de-DE');
         const actorMix = d.by_actor || {};
         document.getElementById('aActorMix').textContent = `${actorMix.agent || 0} ${t('agent.actor_agent')} · ${actorMix.human || 0} ${t('agent.actor_human')}`;
@@ -94,9 +94,12 @@ async function updateAgentList() {
                 triage:        '<span class="severity-badge severity-medium" title="OSINT/Manual-Triage">Triage</span>',
                 event:         '<span class="severity-badge severity-critical" title="Sophos Central Event">Event</span>',
             })[d.source_type] || '<span class="severity-badge severity-medium" title="Sophos Alert">Alert</span>';
-            const actor = d.decided_by === 'human'
+            const autoBadge = (d.action_args || {}).auto_approved
+                ? ` <span class="severity-badge severity-low" title="${escapeHtml(t('agent.auto_approved_title'))}">🤖</span>`
+                : '';
+            const actor = (d.decided_by === 'human'
                 ? `<span class="severity-badge severity-low">${t('agent.actor_human')}</span>`
-                : `<span class="severity-badge severity-medium">${t('agent.actor_agent')}</span> ${sourceBadge}`;
+                : `<span class="severity-badge severity-medium">${t('agent.actor_agent')}</span> ${sourceBadge}`) + autoBadge;
             const actionBadge = `<span class="severity-badge severity-${actionToSeverity(d.action)}">${escapeHtml(d.action)}</span>`;
             // Inline OSINT button: stop propagation so clicking 🔍 doesn't
             // also fire the row-level showAgentDetail(d.id).
@@ -358,14 +361,40 @@ function renderAgentDetail(d) {
         ? `<div class="detail-section"><h4>${t('agent.chain_history')}</h4><ul style="padding-left:1.2rem">${d.chain.map(c => `<li><a href="#" onclick="event.preventDefault();showAgentDetail(${c.id})">#${c.id}</a> · ${escapeHtml(c.action)} · ${escapeHtml(c.status)} · ${escapeHtml(c.decided_by)}</li>`).join('')}</ul></div>`
         : '';
 
+    // Auto-approved provenance + post-hoc decline (revert the block).
+    const auto = (d.action_args || {}).auto_approved;
+    const autoBlock = auto
+        ? `<div class="detail-section"><h4>🤖 ${t('agent.auto_approved_title')}</h4><div class="detail-description">${t('agent.auto_approved_desc', {net: auto.net, t: auto.threshold})}</div></div>`
+        : '';
+
+    const BLOCK_ACTIONS = ['block_ip', 'block_ips', 'block_subnet', 'block_domain', 'block_url'];
+    const declinePanel = (d.status === 'executed' && BLOCK_ACTIONS.includes(d.action))
+        ? `
+        <div class="detail-section">
+            <h4>${t('agent.decline_title')}</h4>
+            <p class="admin-hint">${auto ? t('agent.decline_hint_auto') : t('agent.decline_hint')}</p>
+            <label class="admin-hint" style="display:block;margin-bottom:.3rem">${t('agent.comment_saved')}</label>
+            <textarea id="dcComment" class="form-control form-control-sm" rows="2" placeholder="${t('agent.comment_placeholder')}"></textarea>
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="dcReset">
+                <label class="form-check-label admin-hint" for="dcReset">${t('agent.decline_reset')}</label>
+            </div>
+            <div class="filter-row mt-2">
+                <button class="block-link" onclick="declineDecision(${d.id})">↩ ${t('agent.decline_revert')}</button>
+            </div>
+        </div>`
+        : '';
+
     return `
         <dl class="detail-grid">${fieldsHtml}</dl>
         ${reasoningBlock}
         ${humanCommentBlock}
+        ${autoBlock}
         ${ruleBlock}
         ${alertHtml}
         ${chainBlock}
         ${actionPanel}
+        ${declinePanel}
     `;
 }
 
@@ -395,6 +424,31 @@ async function rejectDecision(id) {
             body: JSON.stringify({comment}),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        closeAgentDetail();
+        await refreshAgentPage();
+    } catch (err) { alert(t('agent.error') + ': ' + err.message); }
+}
+
+async function declineDecision(id) {
+    const comment = document.getElementById('dcComment')?.value || null;
+    const reset = !!document.getElementById('dcReset')?.checked;
+    if (!confirm(t('agent.decline_confirm'))) return;
+    try {
+        const r = await fetch(`/api/agent/decisions/${id}/decline`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reset_pattern: reset, comment}),
+        });
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        const d = await r.json();
+        const rev = d.reverted || {};
+        const n = (rev.removed_ips || []).length + (rev.removed_domain ? 1 : 0) + (rev.removed_url ? 1 : 0);
+        let msg = t('agent.decline_done', {n});
+        if (d.pattern_reset) msg += ' · ' + t('agent.decline_pattern_reset');
+        alert(msg);
         closeAgentDetail();
         await refreshAgentPage();
     } catch (err) { alert(t('agent.error') + ': ' + err.message); }

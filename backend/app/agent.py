@@ -1612,6 +1612,95 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
     return {"status": "executed", "result": result}
 
 
+async def revert_decision(decision_id: int) -> dict[str, Any]:
+    """Undo the blocklist effect of an executed decision — used when a human
+    declines an auto-approved (or otherwise executed) block after the fact.
+    Removes the IP(s)/domain/URL this decision put on the blocklist. Acknowledge
+    / no_action have nothing to revert. Idempotent: already-absent entries are
+    simply skipped."""
+    async with async_session() as db:
+        rec: AgentDecision | None = await db.get(AgentDecision, decision_id)
+        if rec is None:
+            raise ValueError(f"decision {decision_id} not found")
+
+        args = rec.action_args or {}
+        removed_ips: list[str] = []
+        removed_domain: str | None = None
+        removed_url: str | None = None
+
+        async def _del_ips(ips: list[str]) -> None:
+            uniq = sorted({str(i).strip() for i in ips if str(i).strip()})
+            if not uniq:
+                return
+            rows = (await db.execute(select(BlockedIp).where(BlockedIp.ip.in_(uniq)))).scalars().all()
+            for row in rows:
+                await db.delete(row)
+                removed_ips.append(row.ip)
+
+        if rec.action == "block_ip":
+            ip = args.get("target_ip")
+            if not ip:
+                if rec.source_type == "waf":
+                    ip = rec.source_ip
+                elif rec.alert_id:
+                    a = await db.get(Alert, rec.alert_id)
+                    ip = a.source_ip if a else None
+            if ip:
+                await _del_ips([ip])
+
+        elif rec.action == "block_ips":
+            await _del_ips(args.get("target_ips") or [])
+
+        elif rec.action == "block_subnet":
+            cidr = args.get("target_subnet")
+            if cidr:
+                try:
+                    network = ipaddress.ip_network(cidr, strict=False)
+                    await _del_ips([str(a) for a in network.hosts()])
+                except ValueError:
+                    pass
+
+        elif rec.action == "block_domain":
+            domain = str(args.get("target_domain") or "").strip().lower()
+            if domain:
+                row = (await db.execute(select(BlockedDomain).where(BlockedDomain.domain == domain))).scalar_one_or_none()
+                if row is not None:
+                    await db.delete(row)
+                    removed_domain = domain
+
+        elif rec.action == "block_url":
+            url = str(args.get("target_url") or "").strip()
+            if url:
+                row = (await db.execute(select(BlockedUrl).where(BlockedUrl.url == url))).scalar_one_or_none()
+                if row is not None:
+                    await db.delete(row)
+                    removed_url = url
+
+        await db.commit()
+
+    return {"removed_ips": removed_ips, "removed_domain": removed_domain,
+            "removed_url": removed_url, "action": rec.action}
+
+
+async def forget_pattern_for(decision_id: int) -> bool:
+    """Delete the learned approval pattern matching a decision's signature
+    (full reset of its statistics). Returns True if a pattern was removed."""
+    async with async_session() as db:
+        rec = await db.get(AgentDecision, decision_id)
+    if rec is None:
+        return False
+    signature, _rule = await _decision_signature(rec)
+    async with async_session() as db:
+        pat = (await db.execute(
+            select(AgentApprovalPattern).where(AgentApprovalPattern.signature == signature)
+        )).scalar_one_or_none()
+        if pat is None:
+            return False
+        await db.delete(pat)
+        await db.commit()
+    return True
+
+
 # --- WAF loop (rule-based, triggered per new 4xx/5xx WAF event) ---
 
 

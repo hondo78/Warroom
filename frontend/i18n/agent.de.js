@@ -163,4 +163,16 @@ window.I18N.de.agent = {
     running: "… läuft",
     bulk_executed: "{n} ausgeführt",
     bulk_failed: ", {n} fehlgeschlagen (siehe Konsole)",
+
+    // Auto-Freigabe-Herkunft + nachträgliches Declinen
+    auto_approved_title: "Auto-freigegeben (gelerntes Muster)",
+    auto_approved_desc: "Automatisch ausgeführt, weil das Muster dieser Entscheidung netto {net} ≥ Schwelle {t} gelernte Freigaben hatte — kein Mensch wurde gefragt.",
+    decline_title: "Declinen & rückgängig machen",
+    decline_hint: "Entfernt die IP(s)/Domain/URL, die diese Entscheidung auf die Blocklist gesetzt hat, und markiert sie als abgelehnt. Zählt als eine Ablehnung (netto −1) für das gelernte Muster.",
+    decline_hint_auto: "Dies wurde auto-freigegeben. Declinen entfernt die IP(s)/Domain/URL von der Blocklist und zählt als eine Ablehnung (netto −1), damit nicht sofort erneut auto-freigegeben wird.",
+    decline_reset: "Dieses gelernte Muster außerdem komplett zurücksetzen (alle Freigaben vergessen)",
+    decline_revert: "Declinen & von Blocklist entfernen",
+    decline_confirm: "Diese Entscheidung declinen und ihre Einträge von der Blocklist entfernen?",
+    decline_done: "Declined — {n} Blocklist-Eintrag/-Einträge entfernt.",
+    decline_pattern_reset: "Gelerntes Muster zurückgesetzt",
 };
