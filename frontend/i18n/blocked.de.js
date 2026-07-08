@@ -8,6 +8,22 @@ window.I18N.de.blocked = {
     blocked_urls: "Geblockte URLs",
     last_block: "Letzter Block",
     tab_whitelist: "Whitelist",
+    tab_watchlist: "Watchlist",
+
+    // watchlist + monitoring
+    hint_watchlist: "Die Watchlist beobachtet IPs, ohne sie zu blocken. Markiere einen Eintrag mit <i class=\"bi bi-binoculars\"></i> <strong>Überwachen</strong>, damit ausgewertet wird, welche deiner Hosts wann mit dieser IP reden — bei neuen Verbindungen erfolgt eine Benachrichtigung (Telegram/Teams). Auswertung siehe Seite <a href=\"/monitored.html\">Überwachung</a>.",
+    watchlist_see_monitoring: "Überwachung",
+    ph_watchlist_ip: "IP-Adresse (z.B. 203.0.113.9)",
+    btn_watchlist_ip: "Beobachten",
+    filter_watchlist_ip: "Liste filtern (IP, Kommentar…)",
+    empty_watchlist_ips: "Keine Watchlist-Einträge. IP oben hinzufügen, um sie zu beobachten.",
+    err_watchlist_failed: "Watchlist fehlgeschlagen: ",
+    confirm_watchlist_remove: "IP {ip} von der Watchlist entfernen?",
+    col_monitor: "Überwachen",
+    monitoring_on: "Aktiv",
+    monitor_off: "Aus",
+    monitor_title: "Für Verbindungsüberwachung markieren (welche Hosts mit dieser IP reden)",
+    err_monitor_failed: "Überwachung umschalten fehlgeschlagen: ",
 
     hint_ip: "Die Liste wird live unter <code id=\"iocFeedUrlIp\">/ioc_IP</code> als TXT bereitgestellt (Header <code>X-API-Key</code> erforderlich).",
     hint_domain: "Die Liste wird live unter <code id=\"iocFeedUrlDomain\">/ioc_domain</code> als TXT bereitgestellt. Nur reine Hostnamen — Wildcards <code>*.domain.tld</code> erlaubt. URLs gehören in den URL-Tab.",

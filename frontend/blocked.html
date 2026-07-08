@@ -40,6 +40,7 @@
                     <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
                     <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
                     <li class="nav-item"><a href="/blocked.html" class="nav-link active"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/monitored.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>Überwachung</p></a></li>
                     <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
                     <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
                     <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
@@ -117,6 +118,11 @@
                                 </button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-tab="watchlist" role="tab" onclick="switchBlockedTab('watchlist')">
+                                    <i class="bi bi-binoculars"></i> <span data-i18n="blocked.tab_watchlist">Watchlist</span> <span class="badge bg-info ms-1" id="tabCountWatchlist">0</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" data-tab="whitelist" role="tab" onclick="switchBlockedTab('whitelist')">
                                     <i class="bi bi-shield-check"></i> <span data-i18n="blocked.tab_whitelist">Whitelist</span> <span class="badge bg-success ms-1" id="tabCountWhitelist">0</span>
                                 </button>
@@ -141,7 +147,7 @@
                             </div>
                             <div class="table-scroll">
                                 <table class="table table-sm table-hover align-middle">
-                                    <thead><tr><th>IP</th><th data-i18n="blocked.col_comment">Kommentar</th><th data-i18n="blocked.col_blocked">Geblockt</th><th data-i18n="common.action">Aktion</th></tr></thead>
+                                    <thead><tr><th>IP</th><th data-i18n="blocked.col_comment">Kommentar</th><th data-i18n="blocked.col_blocked">Geblockt</th><th data-i18n="blocked.col_monitor">Überwachen</th><th data-i18n="common.action">Aktion</th></tr></thead>
                                     <tbody id="blockedIpsTable"></tbody>
                                 </table>
                             </div>
@@ -165,6 +171,30 @@
                                 <table class="table table-sm table-hover align-middle">
                                     <thead><tr><th>Domain</th><th data-i18n="blocked.col_comment">Kommentar</th><th data-i18n="blocked.col_blocked">Geblockt</th><th data-i18n="common.action">Aktion</th></tr></thead>
                                     <tbody id="blockedDomainsTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Watchlist Pane -->
+                        <div class="blocked-pane" data-pane="watchlist">
+                            <p class="admin-hint" data-i18n-html="blocked.hint_watchlist">
+                                Die Watchlist beobachtet IPs, ohne sie zu blocken. Markiere einen Eintrag mit
+                                <i class="bi bi-binoculars"></i> <strong>Überwachen</strong>, damit ausgewertet wird,
+                                welche deiner Hosts wann mit dieser IP reden — bei neuen Verbindungen erfolgt eine
+                                Benachrichtigung (Telegram/Teams). Auswertung siehe Seite <a href="/monitored.html" data-i18n="blocked.watchlist_see_monitoring">Überwachung</a>.
+                            </p>
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-5"><input type="text" id="watchlistIpInput" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_watchlist_ip" placeholder="IP-Adresse (z.B. 203.0.113.9)"></div>
+                                <div class="col-md-5"><input type="text" id="watchlistCommentInput" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_comment" placeholder="Kommentar (optional)"></div>
+                                <div class="col-md-2 d-grid"><button class="btn btn-info btn-sm" onclick="watchlistAdd()" data-i18n="blocked.btn_watchlist_ip">Beobachten</button></div>
+                            </div>
+                            <div class="mb-2">
+                                <input type="text" data-filter-for="watchlistTable" class="form-control form-control-sm" data-i18n-placeholder="blocked.filter_watchlist_ip" placeholder="Liste filtern (IP, Kommentar…)">
+                            </div>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr><th>IP</th><th data-i18n="blocked.col_comment">Kommentar</th><th data-i18n="blocked.col_added">Hinzugefügt</th><th data-i18n="blocked.col_monitor">Überwachen</th><th data-i18n="common.action">Aktion</th></tr></thead>
+                                    <tbody id="watchlistTable"></tbody>
                                 </table>
                             </div>
                         </div>

@@ -19,7 +19,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -156,6 +156,14 @@ async def lifespan(app: FastAPI):
         sync_mdr_threat_feed, "interval",
         seconds=max(30, settings.firewall_mdr_feed_sync_interval_seconds),
         id="firewall_mdr_feed_sync",
+    )
+    # Connection monitoring for specially-flagged blocklist / watchlist IPs —
+    # tracks which internal hosts talk to them and alerts on new sessions.
+    from app.ip_monitor import monitor_scan
+    scheduler.add_job(
+        monitor_scan, "interval",
+        seconds=max(15, settings.ip_monitor_interval_seconds),
+        id="ip_monitor_scan",
     )
     scheduler.start()
     # Run initial collection after short delay
@@ -1311,6 +1319,7 @@ async def list_blocked_ips(db: AsyncSession = Depends(get_db)):
                 "ip": b.ip,
                 "comment": b.comment,
                 "blocked_at": b.blocked_at.isoformat() if b.blocked_at else None,
+                "monitored": bool(b.monitored),
             }
             for b in rows
         ],
@@ -1866,6 +1875,200 @@ async def remove_whitelist(ip: str, db: AsyncSession = Depends(get_db)):
     await db.delete(rec)
     await db.commit()
     return {"ok": True}
+
+
+# --- Watchlist (observe-only IPs) ---
+
+class WatchlistIn(BaseModel):
+    ip: str = Field(..., min_length=7, max_length=45)
+    comment: str | None = Field(None, max_length=500)
+
+
+@app.get("/api/firewall/watchlist")
+async def list_watchlist(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(
+        select(WatchlistIp).order_by(WatchlistIp.added_at.desc())
+    )).scalars().all()
+    return {"items": [
+        {
+            "ip": w.ip,
+            "comment": w.comment,
+            "monitored": bool(w.monitored),
+            "added_at": w.added_at.isoformat() if w.added_at else None,
+        }
+        for w in rows
+    ]}
+
+
+@app.post("/api/firewall/watchlist")
+async def add_watchlist(body: WatchlistIn, db: AsyncSession = Depends(get_db)):
+    import ipaddress
+    try:
+        ipaddress.ip_address(body.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+    existing = await db.get(WatchlistIp, body.ip)
+    if existing is None:
+        db.add(WatchlistIp(ip=body.ip, comment=body.comment))
+    elif body.comment is not None:
+        existing.comment = body.comment
+    await db.commit()
+    return {"ok": True, "ip": body.ip}
+
+
+@app.delete("/api/firewall/watchlist/{ip}")
+async def remove_watchlist(ip: str, db: AsyncSession = Depends(get_db)):
+    rec = await db.get(WatchlistIp, ip)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="not in watchlist")
+    await db.delete(rec)
+    await db.commit()
+    return {"ok": True}
+
+
+# --- Monitoring flag (special mark on a blocklist / watchlist IP) ---
+
+class MonitorToggleIn(BaseModel):
+    ip: str = Field(..., min_length=7, max_length=45)
+    monitored: bool = True
+
+
+@app.post("/api/firewall/monitor")
+async def set_monitor_flag(body: MonitorToggleIn, db: AsyncSession = Depends(get_db)):
+    """Flag / unflag an IP for connection monitoring. Applies to whichever list
+    the IP is on (blocklist and/or watchlist)."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(body.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+
+    touched: list[str] = []
+    bl = await db.get(BlockedIp, body.ip)
+    if bl is not None:
+        bl.monitored = body.monitored
+        touched.append("blocked")
+    wl = await db.get(WatchlistIp, body.ip)
+    if wl is not None:
+        wl.monitored = body.monitored
+        touched.append("watchlist")
+
+    if not touched:
+        raise HTTPException(status_code=404, detail="IP is not on the blocklist or watchlist")
+    await db.commit()
+    return {"ok": True, "ip": body.ip, "monitored": body.monitored, "lists": touched}
+
+
+# --- Monitoring analysis (which hosts talk to monitored IPs, and when) ---
+
+@app.get("/api/firewall/monitored")
+async def list_monitored_ips(db: AsyncSession = Depends(get_db)):
+    """Every IP flagged for monitoring (from either list) with a connection
+    summary: how many internal hosts talk to it and when it was last seen."""
+    lists: dict[str, set[str]] = {}
+    comments: dict[str, str] = {}
+    for ip, comment in (await db.execute(
+        select(BlockedIp.ip, BlockedIp.comment).where(BlockedIp.monitored.is_(True))
+    )).all():
+        lists.setdefault(ip, set()).add("blocked")
+        comments.setdefault(ip, comment)
+    for ip, comment in (await db.execute(
+        select(WatchlistIp.ip, WatchlistIp.comment).where(WatchlistIp.monitored.is_(True))
+    )).all():
+        lists.setdefault(ip, set()).add("watchlist")
+        comments.setdefault(ip, comment)
+
+    ips = list(lists.keys())
+    if not ips:
+        return {"items": [], "monitor_enabled": settings.ip_monitor_enabled}
+
+    summary = {r[0]: r for r in (await db.execute(text("""
+        SELECT monitored_ip, COUNT(DISTINCT host_ip) AS hosts, MAX(last_seen) AS last_seen
+        FROM monitored_connections WHERE monitored_ip = ANY(:ips) GROUP BY monitored_ip
+    """), {"ips": ips})).all()}
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent = {r[0]: r[1] for r in (await db.execute(text("""
+        SELECT monitored_ip, COUNT(*) FROM monitored_events
+        WHERE monitored_ip = ANY(:ips) AND detected_at >= :since GROUP BY monitored_ip
+    """), {"ips": ips, "since": day_ago})).all()}
+    geo = {r[0]: r[1] for r in (await db.execute(
+        text("SELECT ip, country FROM geoip_cache WHERE ip = ANY(:ips)"), {"ips": ips}
+    )).all()}
+
+    items = []
+    for ip in ips:
+        s = summary.get(ip)
+        items.append({
+            "ip": ip,
+            "lists": sorted(lists[ip]),
+            "comment": comments.get(ip),
+            "country": geo.get(ip),
+            "host_count": int(s[1]) if s else 0,
+            "last_activity": s[2].isoformat() if s and s[2] else None,
+            "new_events_24h": int(recent.get(ip, 0)),
+        })
+    items.sort(key=lambda x: (x["new_events_24h"], x["host_count"]), reverse=True)
+    return {"items": items, "monitor_enabled": settings.ip_monitor_enabled}
+
+
+@app.get("/api/firewall/monitored/events")
+async def list_monitored_events(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(MonitoredEvent).order_by(MonitoredEvent.detected_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"events": [
+        {
+            "id": e.id,
+            "monitored_ip": e.monitored_ip,
+            "host": e.host_ip,
+            "direction": e.direction,
+            "event_type": e.event_type,
+            "port": e.dst_port,
+            "protocol": _PROTO_NAMES.get(e.protocol or 0, str(e.protocol)) if e.protocol is not None else None,
+            "country": e.country,
+            "source_list": e.source_list,
+            "detected_at": e.detected_at.isoformat() if e.detected_at else None,
+            "notified": bool(e.notified),
+            "notify_error": e.notify_error,
+        }
+        for e in rows
+    ]}
+
+
+@app.get("/api/firewall/monitored/{ip}/connections")
+async def monitored_ip_connections(ip: str, db: AsyncSession = Depends(get_db)):
+    """The internal hosts talking to one monitored IP, from the persistent
+    baseline (survives NetFlow's 30-day window)."""
+    rows = (await db.execute(
+        select(MonitoredConnection)
+        .where(MonitoredConnection.monitored_ip == ip)
+        .order_by(MonitoredConnection.last_seen.desc())
+    )).scalars().all()
+    return {"ip": ip, "connections": [
+        {
+            "host": c.host_ip,
+            "direction": c.direction,
+            "first_seen": c.first_seen.isoformat() if c.first_seen else None,
+            "last_seen": c.last_seen.isoformat() if c.last_seen else None,
+            "flows": int(c.flows or 0),
+            "bytes": int(c.bytes or 0),
+            "port": c.dst_port,
+            "protocol": _PROTO_NAMES.get(c.protocol or 0, str(c.protocol)) if c.protocol is not None else None,
+            "country": c.country,
+            "notify_count": int(c.notify_count or 0),
+        }
+        for c in rows
+    ]}
+
+
+@app.post("/api/firewall/monitored/scan")
+async def trigger_monitor_scan():
+    """Run a monitoring scan immediately (also used by the UI refresh button)."""
+    from app.ip_monitor import monitor_scan
+    return await monitor_scan()
 
 
 _AUTO_SOURCES = {"firewall_location", "firewall_log", "netflow", "sophos"}

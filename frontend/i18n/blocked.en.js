@@ -8,6 +8,22 @@ window.I18N.en.blocked = {
     blocked_urls: "Blocked URLs",
     last_block: "Last Block",
     tab_whitelist: "Whitelist",
+    tab_watchlist: "Watchlist",
+
+    // watchlist + monitoring
+    hint_watchlist: "The watchlist observes IPs without blocking them. Flag an entry with <i class=\"bi bi-binoculars\"></i> <strong>Monitor</strong> to analyse which of your hosts talk to this IP and when — new connections trigger a notification (Telegram/Teams). See the <a href=\"/monitored.html\">Monitoring</a> page for the analysis.",
+    watchlist_see_monitoring: "Monitoring",
+    ph_watchlist_ip: "IP address (e.g. 203.0.113.9)",
+    btn_watchlist_ip: "Watch",
+    filter_watchlist_ip: "Filter list (IP, comment…)",
+    empty_watchlist_ips: "No watchlist entries. Add an IP above to observe it.",
+    err_watchlist_failed: "Watchlist failed: ",
+    confirm_watchlist_remove: "Remove IP {ip} from the watchlist?",
+    col_monitor: "Monitor",
+    monitoring_on: "On",
+    monitor_off: "Off",
+    monitor_title: "Flag for connection monitoring (which hosts talk to this IP)",
+    err_monitor_failed: "Toggling monitoring failed: ",
 
     hint_ip: "The list is served live as TXT at <code id=\"iocFeedUrlIp\">/ioc_IP</code> (header <code>X-API-Key</code> required).",
     hint_domain: "The list is served live as TXT at <code id=\"iocFeedUrlDomain\">/ioc_domain</code>. Hostnames only — wildcards <code>*.domain.tld</code> allowed. URLs belong in the URL tab.",

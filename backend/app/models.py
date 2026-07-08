@@ -212,6 +212,64 @@ class BlockedIp(Base):
     ip = Column(String(45), primary_key=True)
     comment = Column(Text)
     blocked_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Specially flagged for connection monitoring — the monitor job tracks which
+    # internal hosts talk to this IP and alerts on new sessions.
+    monitored = Column(Boolean, nullable=False, default=False)
+
+
+class WatchlistIp(Base):
+    """IPs we want to observe but NOT block. Like the blocklist, an entry can be
+    flagged `monitored` to have the monitor job track host connections to it."""
+    __tablename__ = "watchlist_ips"
+
+    ip = Column(String(45), primary_key=True)
+    comment = Column(Text)
+    monitored = Column(Boolean, nullable=False, default=False)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MonitoredConnection(Base):
+    """Persistent baseline of (internal host ↔ monitored IP) pairs. NetFlow only
+    keeps ~30 days, so this table is the long-lived memory of which host talks to
+    which monitored IP, in which direction, and when — the basis for detecting
+    new sessions."""
+    __tablename__ = "monitored_connections"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    monitored_ip = Column(String(45), nullable=False)
+    host_ip = Column(String(45), nullable=False)
+    # 'outbound' = host → monitored IP, 'inbound' = monitored IP → host
+    direction = Column(String(10), nullable=False)
+    first_seen = Column(DateTime(timezone=True))
+    last_seen = Column(DateTime(timezone=True))
+    flows = Column(BigInteger, nullable=False, default=0)
+    bytes = Column(BigInteger, nullable=False, default=0)
+    dst_port = Column(Integer)
+    protocol = Column(Integer)
+    country = Column(String(100))
+    last_notified_at = Column(DateTime(timezone=True))
+    notify_count = Column(Integer, nullable=False, default=0)
+
+
+class MonitoredEvent(Base):
+    """Append-only log of noteworthy monitor events (a new host↔IP pair, or a
+    known pair resurfacing after a quiet gap). Powers the timeline + drives the
+    Telegram/Teams notification."""
+    __tablename__ = "monitored_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    monitored_ip = Column(String(45), nullable=False)
+    host_ip = Column(String(45), nullable=False)
+    direction = Column(String(10), nullable=False)
+    # 'new_pair' | 'reappeared'
+    event_type = Column(String(20), nullable=False)
+    dst_port = Column(Integer)
+    protocol = Column(Integer)
+    country = Column(String(100))
+    source_list = Column(String(20))   # 'blocked' | 'watchlist' | 'both'
+    detected_at = Column(DateTime(timezone=True), server_default=func.now())
+    notified = Column(Boolean, nullable=False, default=False)
+    notify_error = Column(Text)
 
 
 class BlockedDomain(Base):

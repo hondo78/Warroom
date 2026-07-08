@@ -50,6 +50,7 @@
         '/chat.html': 'nav.chat',
         '/netflow.html': 'nav.netflow',
         '/blocked.html': 'nav.blocklist',
+        '/monitored.html': 'nav.monitoring',
         '/firewalls.html': 'nav.firewalls',
         '/firewall-anomalies.html': 'nav.fw_anomalies',
         '/endpoints.html': 'nav.endpoints',

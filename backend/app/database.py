@@ -295,6 +295,61 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_anomaly_verdicts_updated ON anomaly_verdicts(updated_at DESC)",
+    # --- IP monitoring: watchlist + specially-flagged connection tracking ---
+    # Observe-only list (never blocked). Entries can be flagged for monitoring.
+    """
+    CREATE TABLE IF NOT EXISTS watchlist_ips (
+        ip VARCHAR(45) PRIMARY KEY,
+        comment TEXT,
+        monitored BOOLEAN NOT NULL DEFAULT FALSE,
+        added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_watchlist_ips_added ON watchlist_ips(added_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_watchlist_ips_monitored ON watchlist_ips(monitored) WHERE monitored",
+    # 'monitored' flag on the blocklist (additive, idempotent).
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FALSE",
+    "CREATE INDEX IF NOT EXISTS idx_blocked_ips_monitored ON blocked_ips(monitored) WHERE monitored",
+    # Persistent baseline of host↔monitored-IP pairs (NetFlow only keeps ~30d).
+    """
+    CREATE TABLE IF NOT EXISTS monitored_connections (
+        id BIGSERIAL PRIMARY KEY,
+        monitored_ip VARCHAR(45) NOT NULL,
+        host_ip VARCHAR(45) NOT NULL,
+        direction VARCHAR(10) NOT NULL,
+        first_seen TIMESTAMP WITH TIME ZONE,
+        last_seen TIMESTAMP WITH TIME ZONE,
+        flows BIGINT NOT NULL DEFAULT 0,
+        bytes BIGINT NOT NULL DEFAULT 0,
+        dst_port INTEGER,
+        protocol INTEGER,
+        country VARCHAR(100),
+        last_notified_at TIMESTAMP WITH TIME ZONE,
+        notify_count INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (monitored_ip, host_ip, direction)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moncon_ip ON monitored_connections(monitored_ip)",
+    "CREATE INDEX IF NOT EXISTS idx_moncon_last_seen ON monitored_connections(last_seen DESC)",
+    # Append-only event log (new pair / reappeared) for the timeline + alerts.
+    """
+    CREATE TABLE IF NOT EXISTS monitored_events (
+        id BIGSERIAL PRIMARY KEY,
+        monitored_ip VARCHAR(45) NOT NULL,
+        host_ip VARCHAR(45) NOT NULL,
+        direction VARCHAR(10) NOT NULL,
+        event_type VARCHAR(20) NOT NULL,
+        dst_port INTEGER,
+        protocol INTEGER,
+        country VARCHAR(100),
+        source_list VARCHAR(20),
+        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        notified BOOLEAN NOT NULL DEFAULT FALSE,
+        notify_error TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_monevent_detected ON monitored_events(detected_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_monevent_ip ON monitored_events(monitored_ip)",
 ]
 
 

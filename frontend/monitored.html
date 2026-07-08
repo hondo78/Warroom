@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Überwachung</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="monitored">
+<div class="app-wrapper">
+
+    <!-- Topbar -->
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <button class="btn btn-outline-primary btn-sm" onclick="scanNow(this)"><i class="bi bi-radar"></i> <span data-i18n="monitored.scan_now">Jetzt scannen</span></button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshMonitored()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Überwachung</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/monitored.html" class="nav-link active"><i class="nav-icon bi bi-binoculars"></i><p>Überwachung</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
+                    <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0" data-i18n="monitored.title">Überwachung — Verbindungen zu markierten IPs</h3>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <p class="admin-hint" data-i18n-html="monitored.intro">
+                    Diese Seite wertet die auf der <a href="/blocked.html">Blocklist / Watchlist</a> mit
+                    <i class="bi bi-binoculars"></i> <strong>Überwachen</strong> markierten IPs aus:
+                    welche internen Hosts wann mit ihnen reden. Taucht eine <strong>neue Verbindung</strong>
+                    auf, wird über Telegram/Teams benachrichtigt.
+                </p>
+                <div id="monitorDisabledWarn" class="alert alert-warning py-2" style="display:none" data-i18n="monitored.disabled_warn">
+                    Die Überwachung ist derzeit deaktiviert (ip_monitor_enabled=false).
+                </div>
+
+                <!-- Stat tiles -->
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-info">
+                            <div class="inner"><h3 id="mIpCount">-</h3><p data-i18n="monitored.stat_ips">Überwachte IPs</p></div>
+                            <span class="icon"><i class="bi bi-binoculars"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-primary">
+                            <div class="inner"><h3 id="mHostCount">-</h3><p data-i18n="monitored.stat_hosts">Host-Verbindungen</p></div>
+                            <span class="icon"><i class="bi bi-hdd-network"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-danger">
+                            <div class="inner"><h3 id="mNew24h">-</h3><p data-i18n="monitored.stat_new24h">Neue Verbindungen (24h)</p></div>
+                            <span class="icon"><i class="bi bi-bell"></i></span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-secondary">
+                            <div class="inner"><h3 id="mLastEvent" style="font-size:1rem">-</h3><p data-i18n="monitored.stat_last_event">Letztes Ereignis</p></div>
+                            <span class="icon"><i class="bi bi-clock-history"></i></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- New-connection events timeline -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="monitored.events_title">Neue Verbindungen (Ereignis-Verlauf)</h3></div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <input type="text" data-filter-for="monEventsTable" class="form-control form-control-sm" data-i18n-placeholder="monitored.filter_events" placeholder="Filter (Host, IP, Land…)">
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.time">Zeit</th><th data-i18n="monitored.col_type">Typ</th><th data-i18n="monitored.col_host">Host</th>
+                                    <th data-i18n="monitored.col_direction">Richtung</th><th data-i18n="monitored.col_ip">Überwachte IP</th>
+                                    <th data-i18n="monitored.col_portproto">Port/Proto</th><th data-i18n="common.country">Land</th><th data-i18n="monitored.col_notified">Benachrichtigt</th>
+                                </tr></thead>
+                                <tbody id="monEventsTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Monitored IPs -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="monitored.ips_title">Überwachte IPs</h3></div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <input type="text" data-filter-for="monIpsTable" class="form-control form-control-sm" data-i18n-placeholder="monitored.filter_ips" placeholder="Filter (IP, Kommentar, Land…)">
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="monitored.col_ip">Überwachte IP</th><th data-i18n="monitored.col_lists">Listen</th><th data-i18n="blocked.col_comment">Kommentar</th>
+                                    <th data-i18n="common.country">Land</th><th data-i18n="monitored.col_hosts">Hosts</th><th data-i18n="monitored.col_last_activity">Letzte Aktivität</th>
+                                    <th data-i18n="monitored.col_new24h">Neu (24h)</th><th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="monIpsTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Connections detail modal -->
+<div class="modal-overlay" id="connModal">
+    <div class="modal alert-detail-modal" style="max-width:920px">
+        <div class="alert-detail-header">
+            <h3 id="connModalTitle" data-i18n="monitored.conn_title">Verbindungen</h3>
+            <button class="modal-close" onclick="closeConnModal()" title="Schliessen" data-i18n-title="common.close">×</button>
+        </div>
+        <div id="connModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
+        <div class="modal-actions">
+            <button onclick="closeConnModal()" data-i18n="common.close">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/blocked.de.js"></script>
+    <script src="/i18n/blocked.en.js"></script>
+    <script src="/i18n/monitored.de.js"></script>
+    <script src="/i18n/monitored.en.js"></script>
+    <script src="/js/i18n.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/monitored.js"></script>
+</body>
+</html>

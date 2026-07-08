@@ -54,8 +54,88 @@ async function refreshBlocked() {
         updateBlockedIpsTable(),
         updateBlockedDomainsTable(),
         updateBlockedUrlsTable(),
+        updateWatchlistTable(),
         updateWhitelistTable(),
     ]);
+}
+
+// Monitor toggle button shared by the blocklist-IP and watchlist rows. Clicking
+// flips the `monitored` flag; monitored IPs are analysed on the Überwachung page.
+function monitorToggleCell(ip, monitored) {
+    const on = !!monitored;
+    const cls = on ? 'btn-info' : 'btn-outline-secondary';
+    const label = on ? t('blocked.monitoring_on') : t('blocked.monitor_off');
+    return `<button class="btn btn-sm ${cls} py-0" style="font-size:.72rem" title="${escapeAttr(t('blocked.monitor_title'))}" onclick="toggleMonitor('${escapeAttr(ip)}', ${on ? 'false' : 'true'}, this)"><i class="bi bi-binoculars"></i> ${label}</button>`;
+}
+
+async function toggleMonitor(ip, monitored, btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/monitor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, monitored }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        refreshBlocked();
+    } catch (err) {
+        alert(t('blocked.err_monitor_failed') + err.message);
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function updateWatchlistTable() {
+    try {
+        const resp = await fetch('/api/firewall/watchlist');
+        const items = (await resp.json()).items || [];
+        setCount('tabCountWatchlist', items.length);
+        const tbody = document.getElementById('watchlistTable');
+        if (!tbody) return;
+        if (!items.length) {
+            tbody.innerHTML = emptyRow(5, t('blocked.empty_watchlist_ips'));
+            return;
+        }
+        tbody.innerHTML = items.map(w => `
+            <tr>
+                <td><code>${escapeHtml(w.ip)}</code>${typeof osintButton === 'function' ? osintButton(w.ip, 'osint-btn', 'ip') : ''}</td>
+                <td>${escapeHtml(w.comment || '-')}</td>
+                <td>${formatTime(w.added_at)}</td>
+                <td>${monitorToggleCell(w.ip, w.monitored)}</td>
+                <td><button class="restore-btn" onclick="watchlistRemove('${escapeAttr(w.ip)}', this)">${t('blocked.btn_remove')}</button></td>
+            </tr>`).join('');
+    } catch (err) {
+        console.error('Watchlist update failed:', err);
+    }
+}
+
+async function watchlistAdd() {
+    const ip = document.getElementById('watchlistIpInput').value.trim();
+    const comment = document.getElementById('watchlistCommentInput').value.trim();
+    if (!ip) return;
+    try {
+        const r = await fetch('/api/firewall/watchlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, comment }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        document.getElementById('watchlistIpInput').value = '';
+        document.getElementById('watchlistCommentInput').value = '';
+        await updateWatchlistTable();
+        switchBlockedTab('watchlist');
+    } catch (err) { alert(t('blocked.err_watchlist_failed') + err.message); }
+}
+
+async function watchlistRemove(ip, btn) {
+    if (!confirm(t('blocked.confirm_watchlist_remove', { ip }))) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/firewall/watchlist/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        await updateWatchlistTable();
+    } catch (err) { alert(t('blocked.err_watchlist_failed') + err.message); if (btn) btn.disabled = false; }
 }
 
 async function updateWhitelistTable() {
@@ -154,7 +234,7 @@ async function updateBlockedIpsTable() {
 
         const tbody = document.getElementById('blockedIpsTable');
         if (!items.length) {
-            tbody.innerHTML = emptyRow(4, t('blocked.empty_ips'));
+            tbody.innerHTML = emptyRow(5, t('blocked.empty_ips'));
             return;
         }
         tbody.innerHTML = items.map(b => `
@@ -162,6 +242,7 @@ async function updateBlockedIpsTable() {
                 <td><code>${escapeHtml(b.ip)}</code>${typeof osintButton === 'function' ? osintButton(b.ip, 'osint-btn', 'ip') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
+                <td>${monitorToggleCell(b.ip, b.monitored)}</td>
                 <td><button class="restore-btn" onclick="unblockIp('${escapeAttr(b.ip)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');
     } catch (err) {

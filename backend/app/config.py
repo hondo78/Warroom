@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     # Incoming-webhook URL for outbound notifications (Warroom → Teams), optional.
     teams_incoming_webhook: str = ""
 
+    # --- IP connection monitoring ---
+    # Background job tracks which internal hosts talk to specially-flagged
+    # ("monitored") blocklist / watchlist IPs and alerts on new sessions.
+    ip_monitor_enabled: bool = True
+    ip_monitor_interval_seconds: int = 60        # scan cadence (NetFlow is 60s-bucketed)
+    ip_monitor_lookback_minutes: int = 10        # how far back each scan aggregates
+    ip_monitor_session_gap_hours: int = 24       # quiet gap after which a known pair re-alerts
+    ip_monitor_max_alerts_per_scan: int = 20     # safety cap so a burst can't flood the channels
+
     maxmind_license_key: str = ""
     abuseipdb_api_key: str = ""
     virustotal_api_key: str = ""
