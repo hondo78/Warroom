@@ -29,8 +29,8 @@ from app import waf_path_cache
 from app.config import settings
 from app.database import async_session
 from app.models import (
-    AgentApprovalPattern, AgentDecision, Alert, BlockedDomain, BlockedIp,
-    BlockedUrl, Event, FirewallLog, WhitelistedIp,
+    AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, BlockedDomain,
+    BlockedIp, BlockedUrl, Event, FirewallLog, WhitelistedIp,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ _SOURCE_LABELS: dict[str, str] = {
     "failed_login": "Login",
     "triage": "Triage",
     "event": "Event",
+    "anomaly": "Anomaly",
 }
 
 
@@ -910,6 +911,84 @@ OUTPUT (strict JSON, no ```-fence, no additional text). EXAMPLE:
 """
 
 
+DEFAULT_ANOMALY_PROMPT = """Du bist ein Netzwerk-Anomalie-Analyst für Warroom.
+
+INPUT (JSON, vom System gestellt):
+  - source_ip       — auffällige öffentliche IP aus der NetFlow-Anomalie-Analyse
+                      (Isolation Forest über Volumen / Ziel-Ports / Nachtaktivität).
+  - context         — Anomalie-Merkmale: anomaly_score (0–1), drivers (treibende
+                      Dimensionen), bytes, flows, distinct_dst_ports,
+                      distinct_dst_ips, night_ratio, country, window_hours.
+  - osint           — OSINT-Lookup (abuseipdb, virustotal, shodan, greynoise,
+                      intelix, ipinfo). Felder können fehlen, wenn ein Provider
+                      keinen Key hat.
+  - allowed_actions — erlaubte Werte für `action`
+
+ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift):
+1. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER intelix.score >= 70
+   ODER intelix.category ∈ {Malicious, High Risk, Bad, botnet})   → block_ip.
+2. abuseipdb.abuse_score >= 75 ODER virustotal.malicious >= 2
+   ODER greynoise.classification = "malicious"                    → block_ip.
+3. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern      → block_ip.
+4. Sonst                                                          → no_action.
+
+Die Anomalie selbst (hoher Score) ist KEIN Block-Grund — nur OSINT-Belege zählen.
+Gib KEINE confidence aus.
+
+REASONING-PFLICHT — nenne im reasoning immer:
+  a) die konkreten Schädlichkeits-Indikatoren (Provider + Werte); bei no_action,
+     warum die IP unauffällig ist (z. B. bekannter Cloud-/CDN-/Update-Dienst),
+  b) den FQDN bzw. die Domain der IP, falls OSINT welche liefert
+     (abuseipdb.domain, abuseipdb.hostnames, shodan.hostnames, ipinfo.hostname).
+
+AUSGABE (strikt JSON, kein ```-Fence, kein zusätzlicher Text). BEISPIEL:
+{
+  "action": "block_ip",
+  "args": {"target_ip": "203.0.113.45"},
+  "reasoning": "AbuseIPDB-Score 92, VirusTotal 5x malicious. FQDN: scanner.evil-host.net. Portscan-Verhalten (drivers: ports, 480 Ziel-Ports)."
+}
+"""
+
+
+DEFAULT_ANOMALY_PROMPT_EN = """You are a network anomaly analyst for Warroom.
+
+INPUT (JSON, provided by the system):
+  - source_ip       — conspicuous public IP from the NetFlow anomaly analysis
+                      (Isolation Forest over volume / destination ports / night activity).
+  - context         — anomaly features: anomaly_score (0–1), drivers (driving
+                      dimensions), bytes, flows, distinct_dst_ports,
+                      distinct_dst_ips, night_ratio, country, window_hours.
+  - osint           — OSINT lookup (abuseipdb, virustotal, shodan, greynoise,
+                      intelix, ipinfo). Fields may be missing if a provider
+                      has no key.
+  - allowed_actions — permitted values for `action`
+
+DECISION RULES (check in order, first match wins):
+1. OSINT Sophos Intelix hit (security_category set OR intelix.score >= 70
+   OR intelix.category ∈ {Malicious, High Risk, Bad, botnet})     → block_ip.
+2. abuseipdb.abuse_score >= 75 OR virustotal.malicious >= 2
+   OR greynoise.classification = "malicious"                      → block_ip.
+3. SHODAN VULNS: shodan.vulns contains MORE THAN 2 CVE numbers    → block_ip.
+4. Otherwise                                                      → no_action.
+
+The anomaly itself (high score) is NOT a reason to block — only OSINT evidence
+counts. Gib KEINE confidence aus.
+
+REASONING REQUIREMENTS — always name in the reasoning:
+  a) the concrete maliciousness indicators (provider + values); for no_action,
+     why the IP is unremarkable (e.g. a known cloud/CDN/update service),
+  b) the FQDN or domain of the IP if OSINT provides one
+     (abuseipdb.domain, abuseipdb.hostnames, shodan.hostnames, ipinfo.hostname).
+
+OUTPUT (strict JSON, no ```-fence, no additional text). EXAMPLE:
+{
+  "action": "block_ip",
+  "args": {"target_ip": "203.0.113.45"},
+  "reasoning": "AbuseIPDB score 92, VirusTotal 5x malicious. FQDN: scanner.evil-host.net. Port-scan behaviour (drivers: ports, 480 destination ports)."
+}
+"""
+
+
 # Mapping source_type → (setting_attr, default_prompt) für den Lookup.
 # _RULE_PROMPTS is the German map; _RULE_PROMPTS_EN holds the English twin
 # defaults. _prompt_for() picks the right-language default per _agent_lang(),
@@ -922,6 +1001,7 @@ _RULE_PROMPTS = {
     "failed_login_distributed": ("agent_failed_login_distributed_system_prompt", DEFAULT_DISTRIBUTED_LOGIN_PROMPT),
     "failed_login_user": ("agent_failed_login_user_system_prompt", DEFAULT_USER_LOGIN_PROMPT),
     "triage":       ("agent_triage_system_prompt", DEFAULT_TRIAGE_PROMPT),
+    "anomaly":      ("agent_anomaly_system_prompt", DEFAULT_ANOMALY_PROMPT),
 }
 
 _RULE_PROMPTS_EN = {
@@ -932,6 +1012,7 @@ _RULE_PROMPTS_EN = {
     "failed_login_distributed": DEFAULT_DISTRIBUTED_LOGIN_PROMPT_EN,
     "failed_login_user": DEFAULT_USER_LOGIN_PROMPT_EN,
     "triage":       DEFAULT_TRIAGE_PROMPT_EN,
+    "anomaly":      DEFAULT_ANOMALY_PROMPT_EN,
 }
 
 
@@ -1873,7 +1954,7 @@ async def _store_rule_decision(
 async def _llm_decide_rule(
     source_type: str, ip: str | None, context: dict,
     extra_args: dict | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     """LLM-based replacement for the old rule ladder.
 
     Pulls OSINT for the IP, builds a JSON payload, calls the LLM with the
@@ -1885,10 +1966,15 @@ async def _llm_decide_rule(
     isn't applicable). ``extra_args`` is merged into the decision's args
     field — used e.g. to inject target_subnet for the subnet-brute-force
     path so the LLM doesn't have to fabricate it.
+
+    Returns ``{"id", "action", "reasoning", "osint"}`` for the persisted
+    decision, or None when no decision was stored (LLM failure / invalid
+    action). Callers that don't care simply ignore the return value; the
+    anomaly sweep uses it to derive the verdict + comment.
     """
     if source_type not in _RULE_PROMPTS:
         logger.warning(f"agent: no prompt defined for source_type={source_type!r}")
-        return
+        return None
 
     # 1) OSINT enrichment — only for public IPs. Private/None → empty dict;
     #    the LLM still gets a decision-shaped payload but with no OSINT signals.
@@ -1932,7 +2018,7 @@ async def _llm_decide_rule(
         )
     except Exception as e:
         logger.warning(f"agent[{source_type}]: LLM call failed for ip={ip}: {e}")
-        return
+        return None
 
     # 3b) Per-source action validation: the LLM might hallucinate an action
     #     that the prompt didn't actually allow (e.g. block_subnet for WAF).
@@ -1944,7 +2030,7 @@ async def _llm_decide_rule(
             f"agent[{source_type}]: LLM emitted action={decision['action']!r} "
             f"not in allowed_actions={sorted(allowed)} for ip={ip}; dropping"
         )
-        return
+        return None
 
     # 4) Action-arg merging:
     #    - extra_args (e.g. target_subnet) overrides whatever the LLM emitted
@@ -1954,7 +2040,7 @@ async def _llm_decide_rule(
         action_args["target_ip"] = ip
 
     # 5) Persist via the shared helper (handles auto-execute)
-    await _store_rule_decision(
+    decision_id = await _store_rule_decision(
         source_type=source_type, ip=ip,
         action=decision["action"],
         reasoning=decision.get("reasoning") or "",
@@ -1965,6 +2051,12 @@ async def _llm_decide_rule(
             "osint_summary": _osint_summary(osint),
         },
     )
+    return {
+        "id": decision_id,
+        "action": decision["action"],
+        "reasoning": decision.get("reasoning") or "",
+        "osint": osint,
+    }
 
 
 async def triage_value(
@@ -2161,6 +2253,196 @@ async def agent_ips_loop(window_minutes: int | None = None, force: bool = False)
             "country": country, "city": city,
         }
         await _llm_decide_rule(source_type="ips", ip=ip, context=context)
+
+
+# --- FW-anomaly loop (Isolation Forest over NetFlow → OSINT triage + verdict) ---
+#
+# Mirrors the FW-Anomalies dashboard's global source scope with the default
+# volume/ports/night dimension trio, then per anomalous IP:
+#   * public IP  → OSINT + LLM (source_type='anomaly'). A block_ip decision goes
+#     through the normal approval pipeline; the verdict 'malicious' is written
+#     immediately. no_action → verdict 'suspicious' (gray area, per policy every
+#     non-malicious anomaly starts as suspicious until an analyst clears it).
+#   * private IP → verdict 'suspicious' without OSINT/LLM (internal hosts are
+#     never blocked; the analyst reviews manually).
+# Human verdicts are never overwritten; agent verdicts refresh at most every 24h.
+
+
+def _osint_fqdns(osint: dict[str, Any]) -> list[str]:
+    """Collect the FQDN/domain hints the OSINT providers returned for an IP."""
+    names: list[str] = []
+    ab = osint.get("abuseipdb") or {}
+    if ab.get("domain"):
+        names.append(str(ab["domain"]))
+    names += [str(h) for h in (ab.get("hostnames") or [])[:3]]
+    names += [str(h) for h in ((osint.get("shodan") or {}).get("hostnames") or [])[:3]]
+    ipinfo = osint.get("ipinfo") or {}
+    if ipinfo.get("hostname"):
+        names.append(str(ipinfo["hostname"]))
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        k = n.lower().strip()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(n.strip())
+    return out
+
+
+async def _set_agent_verdict(ip: str, verdict: str, comment: str) -> bool:
+    """Write an agent verdict on the FW-anomaly page unless a human verdict
+    exists — human assessments always win over the agent."""
+    async with async_session() as db:
+        row = await db.get(AnomalyVerdict, ip)
+        if row is not None and (row.created_by or "human") != "agent":
+            return False
+        now = datetime.now(timezone.utc)
+        if row is None:
+            db.add(AnomalyVerdict(ip=ip, verdict=verdict, comment=comment[:1000],
+                                  created_by="agent", updated_at=now))
+        else:
+            row.verdict = verdict
+            row.comment = comment[:1000]
+            row.updated_at = now
+        await db.commit()
+    return True
+
+
+async def agent_anomaly_loop(force: bool = False, no_cap: bool = False) -> None:
+    """OSINT-backed triage of the NetFlow anomaly analysis (see block comment).
+
+    ``no_cap=True`` (the dashboard's "analyse all unrated" button) lifts the
+    per-sweep IP cap so every not-yet-verdicted anomaly gets processed in one
+    run — bounded by a hard safety limit of 100 LLM/OSINT calls."""
+    if (not settings.agent_enabled or not settings.agent_anomaly_enabled) and not force:
+        return
+
+    import math
+
+    hours = max(1, int(settings.agent_anomaly_hours or 24))
+    min_flows = max(1, int(settings.agent_anomaly_min_flows or 5))
+    cap = 100 if no_cap else max(1, int(settings.agent_anomaly_max_ips or 10))
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+
+    # 1) Per-source-IP NetFlow aggregation (same shape as the dashboard query).
+    async with async_session() as db:
+        rows = (await db.execute(text("""
+            SELECT n.src_ip AS entity,
+                   SUM(n.bytes)   AS bytes,
+                   SUM(n.flows)   AS flows,
+                   COUNT(DISTINCT n.dst_port) AS dports,
+                   COUNT(DISTINCT n.dst_ip)   AS dips,
+                   SUM(CASE WHEN EXTRACT(hour FROM n.bucket_start) < 6 THEN n.flows ELSE 0 END) AS night_flows,
+                   MAX(g.country) AS country
+            FROM netflow_buckets n
+            LEFT JOIN geoip_cache g ON g.ip = n.src_ip
+            WHERE n.bucket_start >= :since AND n.src_ip IS NOT NULL
+            GROUP BY n.src_ip
+            HAVING SUM(n.flows) >= :min_flows
+            ORDER BY SUM(n.bytes) DESC
+            LIMIT 4000
+        """), {"since": since, "min_flows": min_flows})).all()
+
+    if len(rows) < 10:
+        logger.info(f"agent[anomaly]: only {len(rows)} IPs in window — skipping")
+        return
+
+    items: list[dict[str, Any]] = []
+    for entity, byts, flows, dports, dips, night_flows, country in rows:
+        flows = int(flows or 0) or 1
+        night_ratio = int(night_flows or 0) / flows
+        items.append({
+            "ip": entity, "country": country,
+            "bytes": int(byts or 0), "flows": flows,
+            "dports": int(dports or 0), "dips": int(dips or 0),
+            "night_ratio": round(night_ratio, 3),
+            "f_volume": math.log1p(int(byts or 0)),
+            "f_ports": math.log1p(int(dports or 0)),
+            "f_night": night_ratio,
+        })
+
+    from app import anomaly as anomaly_mod
+    feature_keys = ["f_volume", "f_ports", "f_night"]
+    dim_keys = {k: k[2:] for k in feature_keys}
+    result = await asyncio.to_thread(
+        lambda: anomaly_mod.attribute_drivers(
+            anomaly_mod.score_items(items, feature_keys), feature_keys, dim_keys)
+    )
+    anomalies = [it for it in result["items"] if it.get("is_anomaly")]
+    if not anomalies:
+        logger.info("agent[anomaly]: no anomalies above threshold")
+        return
+
+    # 2) Skip IPs a human already judged, and agent verdicts refreshed <24h ago.
+    ips_all = [it["ip"] for it in anomalies]
+    async with async_session() as db:
+        vrows = (await db.execute(
+            select(AnomalyVerdict.ip, AnomalyVerdict.created_by, AnomalyVerdict.updated_at)
+            .where(AnomalyVerdict.ip.in_(ips_all))
+        )).all()
+    human_verdicts = {r[0] for r in vrows if (r[1] or "human") != "agent"}
+    fresh_agent = {r[0] for r in vrows
+                   if (r[1] or "human") == "agent"
+                   and r[2] is not None and (now - r[2]) < timedelta(hours=24)}
+
+    public: list[dict[str, Any]] = []
+    internal: list[dict[str, Any]] = []
+    for it in anomalies:
+        if it["ip"] in human_verdicts or it["ip"] in fresh_agent:
+            continue
+        (public if _is_public_ip(it["ip"]) else internal).append(it)
+
+    # 3) Internal anomalies → suspicious for manual review, no OSINT/LLM/block.
+    lang = _agent_lang()
+    for it in internal:
+        drivers = ", ".join(d.get("dim", "?") for d in (it.get("drivers") or [])) or "-"
+        if lang == "de":
+            comment = (f"agent[Anomaly]: Interne IP mit auffälligem NetFlow-Verhalten "
+                       f"(Score {it['score']:.3f}, Treiber: {drivers}) — manuelle Prüfung erforderlich.")
+        else:
+            comment = (f"agent[Anomaly]: Internal IP with anomalous NetFlow behaviour "
+                       f"(score {it['score']:.3f}, drivers: {drivers}) — manual review required.")
+        await _set_agent_verdict(it["ip"], "suspicious", comment)
+
+    if not public:
+        logger.info(f"agent[anomaly]: {len(internal)} internal anomalies marked, no public candidates")
+        return
+
+    # 4) Public anomalies → cooldown/whitelist filter → per-sweep cap → LLM.
+    async with async_session() as db:
+        candidate_ips = await _filter_candidates(
+            db, [it["ip"] for it in public], "anomaly",
+            now - timedelta(hours=1), now - timedelta(hours=24),
+        )
+    by_ip = {it["ip"]: it for it in public}
+    todo = [by_ip[ip] for ip in candidate_ips if ip in by_ip][:cap]
+    if len(candidate_ips) > cap:
+        logger.info(f"agent[anomaly]: {len(candidate_ips)} candidates, capped to {cap} this sweep")
+    if not todo:
+        return
+    logger.info(f"agent[anomaly]: analysing {len(todo)} public anomalous IP(s)")
+
+    for it in todo:
+        ip = it["ip"]
+        context = {
+            "window_hours": hours,
+            "anomaly_score": round(float(it["score"]), 3),
+            "drivers": [d.get("dim") for d in (it.get("drivers") or [])],
+            "bytes": it["bytes"], "flows": it["flows"],
+            "distinct_dst_ports": it["dports"], "distinct_dst_ips": it["dips"],
+            "night_ratio": it["night_ratio"], "country": it["country"],
+        }
+        res = await _llm_decide_rule(source_type="anomaly", ip=ip, context=context)
+        if not res:
+            continue
+        # Verdict + comment: LLM reasoning (prompt mandates maliciousness info)
+        # plus the OSINT FQDN/domain appended deterministically.
+        fqdns = _osint_fqdns(res.get("osint") or {})
+        suffix = (" · FQDN: " + ", ".join(fqdns[:3])) if fqdns else ""
+        comment = f"agent[Anomaly]: {(res.get('reasoning') or '').strip()}{suffix}"
+        verdict = "malicious" if res["action"] == "block_ip" else "suspicious"
+        await _set_agent_verdict(ip, verdict, comment)
 
 
 # --- Failed-login loop (rule-based, brute-force detection) ---

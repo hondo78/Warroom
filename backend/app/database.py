@@ -295,6 +295,8 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_anomaly_verdicts_updated ON anomaly_verdicts(updated_at DESC)",
+    # Who set the verdict — the anomaly agent never overwrites human verdicts.
+    "ALTER TABLE anomaly_verdicts ADD COLUMN IF NOT EXISTS created_by VARCHAR(20) NOT NULL DEFAULT 'human'",
     # --- IP monitoring: watchlist + specially-flagged connection tracking ---
     # Observe-only list (never blocked). Entries can be flagged for monitoring.
     """

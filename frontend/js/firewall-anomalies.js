@@ -252,7 +252,7 @@ async function anomalyRefresh() {
         document.getElementById('anTopScore').textContent = top ? top.score.toFixed(3) : '—';
         document.getElementById('anTopIp').textContent = top ? top.ip : '—';
 
-        await loadVerdicts();
+        await Promise.all([loadVerdicts(), loadWatchlist()]);
         _anScatterData = d.scatter || [];
         renderScatter(_anScatterData);
         render3d(_anScatterData);
@@ -328,7 +328,7 @@ function _anRenderRows() {
             : '<span class="text-secondary">—</span>';
         return `<tr data-ip="${escapeAttr(it.ip)}" style="${baseBg}cursor:pointer" title="${escapeAttr(t('fwAnomalies.row_click_title'))}">
             <td>${scoreBadge(it.score)}${driverChips(it.drivers)}</td>
-            <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${osint}</td>
+            <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${watchlistBadge(it.ip)}${osint}</td>
             <td>${peer}</td>
             <td>${country}</td>
             <td>${fmtBytes(it.bytes)}</td>
@@ -496,6 +496,36 @@ function render3d(points) {
     }
 }
 
+// "AI analysis (unrated)" button: triggers the anomaly agent sweep without the
+// per-sweep cap, so every anomaly that has no verdict yet gets OSINT+LLM triage
+// (already-rated IPs are skipped server-side). The sweep runs in the background;
+// we poll the verdicts for a while so new 🤖 ratings appear as they are written.
+async function anomalyAiScan(btn) {
+    if (btn) btn.disabled = true;
+    const label = btn?.querySelector('span');
+    const orig = label?.textContent;
+    try {
+        const r = await fetch('/api/agent/anomaly-run-now?all=true', { method: 'POST' });
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        for (let i = 1; i <= 10; i++) {           // ~2.5 min of live updates
+            if (label) label.textContent = t('fwAnomalies.ai_scan_running');
+            await new Promise(res => setTimeout(res, 15000));
+            await loadVerdicts();
+            _anRenderRows();
+            renderScatter(_anScatterData);
+            render3d(_anScatterData);
+        }
+    } catch (err) {
+        alert(t('fwAnomalies.ai_scan_failed') + ': ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+        if (label && orig) label.textContent = orig;
+    }
+}
+
 async function anomBlockIp(ip, btn) {
     if (!ip || !confirm(t('fwAnomalies.block_confirm', { ip }))) return;
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
@@ -518,6 +548,24 @@ async function anomBlockIp(ip, btn) {
 // Anomalies have no stable id (recomputed each run), so a verdict is keyed by
 // the IP and persisted server-side. _anVerdicts mirrors that table for the
 // currently shown rows.
+
+// Watchlist membership for the shown rows — badge in the IP column + prefilled
+// state in the verdict modal. Loaded once per refresh, updated in place on add.
+let _anWatchlist = new Set();
+async function loadWatchlist() {
+    try {
+        const r = await fetch('/api/firewall/watchlist');
+        if (!r.ok) return;
+        const d = await r.json();
+        _anWatchlist = new Set((d.items || []).map(w => w.ip));
+    } catch (e) { /* keep the previous set on error */ }
+}
+
+function watchlistBadge(ip) {
+    if (!_anWatchlist.has(ip)) return '';
+    return ` <span class="badge text-bg-info" style="font-size:.62rem" title="${escapeAttr(t('fwAnomalies.on_watchlist'))}"><i class="bi bi-binoculars"></i></span>`;
+}
+
 async function loadVerdicts() {
     try {
         const r = await fetch('/api/firewall/anomaly-verdicts');
@@ -541,9 +589,12 @@ function verdictCell(ip) {
     const meta = v && AN_VERDICT_META[v.verdict];
     if (meta) {
         const label = t(meta.key);
+        // 🤖 = set by the anomaly agent (OSINT triage); a human save takes ownership.
+        const agent = v.created_by === 'agent' ? ' 🤖' : '';
         const note = v.comment ? ' 💬' : '';
-        const title = v.comment || t('fwAnomalies.verdict_edit');
-        return `<button class="badge ${meta.cls}" style="border:0;cursor:pointer" title="${escapeAttr(title)}" onclick="openVerdictModal('${escapeAttr(ip)}')">${escapeHtml(label)}${note}</button>`;
+        const title = (v.created_by === 'agent' ? t('fwAnomalies.verdict_by_agent') + ' — ' : '')
+            + (v.comment || t('fwAnomalies.verdict_edit'));
+        return `<button class="badge ${meta.cls}" style="border:0;cursor:pointer" title="${escapeAttr(title)}" onclick="openVerdictModal('${escapeAttr(ip)}')">${escapeHtml(label)}${agent}${note}</button>`;
     }
     return `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openVerdictModal('${escapeAttr(ip)}')">${t('fwAnomalies.verdict_set')}</button>`;
 }
@@ -568,6 +619,14 @@ function openVerdictModal(ip) {
     const meta = document.getElementById('verdictMeta');
     meta.textContent = v?.updated_at ? t('fwAnomalies.verdict_updated', { time: fmtTs(v.updated_at) }) : '';
     document.getElementById('verdictClearBtn').style.display = v ? '' : 'none';
+    // Watchlist option: an IP already on the watchlist shows as such instead of
+    // offering a redundant add (_anWatchlist is refreshed with every analysis).
+    const wlBox = document.getElementById('verdictWatchlist');
+    const wlState = document.getElementById('verdictWatchlistState');
+    const listed = _anWatchlist.has(ip);
+    wlBox.checked = listed;
+    wlBox.disabled = listed;
+    wlState.textContent = listed ? t('fwAnomalies.verdict_watchlist_already') : '';
     document.getElementById('verdictModal').classList.add('active');
 }
 
@@ -578,7 +637,27 @@ function closeVerdict() {
 async function saveVerdict() {
     const verdict = document.querySelector('input[name="verdictChoice"]:checked')?.value || '';
     if (!verdict) { alert(t('fwAnomalies.verdict_pick')); return; }
-    await _postVerdict(_verdictIp, verdict, document.getElementById('verdictComment').value);
+    const ip = _verdictIp;
+    const comment = document.getElementById('verdictComment').value;
+    const wlBox = document.getElementById('verdictWatchlist');
+    const wantWatchlist = wlBox.checked && !wlBox.disabled;   // disabled = already listed
+    const ok = await _postVerdict(ip, verdict, comment);
+    if (ok && wantWatchlist) {
+        try {
+            const r = await fetch('/api/firewall/watchlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip, comment: comment.trim() || t('fwAnomalies.verdict_watchlist_comment') }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+            _anWatchlist.add(ip);
+            _anRenderRows();   // show the watchlist badge immediately
+        } catch (err) {
+            // Verdict is already saved — only the watchlist add failed.
+            alert(t('fwAnomalies.verdict_watchlist_failed') + ': ' + err.message);
+        }
+    }
 }
 
 async function clearVerdict() {
@@ -586,7 +665,7 @@ async function clearVerdict() {
 }
 
 async function _postVerdict(ip, verdict, comment) {
-    if (!ip) return;
+    if (!ip) return false;
     try {
         const r = await fetch('/api/firewall/anomaly-verdict', {
             method: 'POST',
@@ -595,15 +674,17 @@ async function _postVerdict(ip, verdict, comment) {
         });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        if (verdict) _anVerdicts[ip] = { verdict: d.verdict, comment: d.comment, updated_at: d.updated_at };
+        if (verdict) _anVerdicts[ip] = { verdict: d.verdict, comment: d.comment, created_by: d.created_by || 'human', updated_at: d.updated_at };
         else delete _anVerdicts[ip];
         closeVerdict();
         _anRenderRows();
         // Recolour the charts so the new verdict shows without a full refresh.
         renderScatter(_anScatterData);
         render3d(_anScatterData);
+        return true;
     } catch (err) {
         alert(t('fwAnomalies.verdict_failed') + ': ' + err.message);
+        return false;
     }
 }
 

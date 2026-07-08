@@ -40,6 +40,7 @@
                     <option value="100">≥ 100 Flows</option>
                     <option value="1000">≥ 1000 Flows</option>
                 </select>
+                <button class="btn btn-outline-primary btn-sm" onclick="anomalyAiScan(this)" title="KI-Agent bewertet jetzt alle noch unbewerteten Anomalien (OSINT + LLM)" data-i18n-title="fwAnomalies.ai_scan_title"><i class="bi bi-robot"></i> <span data-i18n="fwAnomalies.ai_scan">KI-Analyse (unbewertete)</span></button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="anomalyRefresh()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
         </div>
@@ -242,6 +243,13 @@
             </div>
             <label class="form-label" style="font-size:.8rem" for="verdictComment" data-i18n="fwAnomalies.verdict_comment_label">Kommentar</label>
             <textarea id="verdictComment" class="form-control form-control-sm" rows="3" placeholder="Optionaler Kommentar…" data-i18n-placeholder="fwAnomalies.verdict_comment_ph"></textarea>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" id="verdictWatchlist">
+                <label class="form-check-label" style="font-size:.85rem" for="verdictWatchlist" data-i18n="fwAnomalies.verdict_watchlist">
+                    <i class="bi bi-binoculars"></i> Auf die Watchlist setzen (beobachten, nicht blocken)
+                </label>
+            </div>
+            <div id="verdictWatchlistState" class="text-secondary" style="font-size:.72rem"></div>
             <div id="verdictMeta" class="text-secondary" style="font-size:.72rem;margin-top:.4rem"></div>
         </div>
         <div class="modal-actions">

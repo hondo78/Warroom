@@ -78,7 +78,8 @@ async def lifespan(app: FastAPI):
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
-                           agent_failed_login_loop, agent_user_login_alert_loop)
+                           agent_anomaly_loop, agent_failed_login_loop,
+                           agent_user_login_alert_loop)
     scheduler.add_job(
         agent_loop, "interval",
         seconds=max(30, settings.agent_interval_seconds),
@@ -98,6 +99,12 @@ async def lifespan(app: FastAPI):
         agent_ips_loop, "interval",
         seconds=max(30, settings.agent_ips_interval_seconds),
         id="agent_ips_loop",
+    )
+    # FW-anomaly triage: Isolation Forest over NetFlow + OSINT/LLM verdicts.
+    scheduler.add_job(
+        agent_anomaly_loop, "interval",
+        seconds=max(60, settings.agent_anomaly_interval_seconds),
+        id="agent_anomaly_loop",
     )
     scheduler.add_job(
         agent_failed_login_loop, "interval",
@@ -2569,6 +2576,7 @@ async def list_anomaly_verdicts(db: AsyncSession = Depends(get_db)):
             v.ip: {
                 "verdict": v.verdict,
                 "comment": v.comment,
+                "created_by": v.created_by or "human",
                 "updated_at": v.updated_at.isoformat() if v.updated_at else None,
             }
             for v in rows
@@ -2603,15 +2611,19 @@ async def set_anomaly_verdict(body: AnomalyVerdictIn, db: AsyncSession = Depends
     comment = (body.comment or "").strip() or None
     now = datetime.now(timezone.utc)
     if existing is None:
-        db.add(AnomalyVerdict(ip=body.ip, verdict=verdict, comment=comment, updated_at=now))
+        db.add(AnomalyVerdict(ip=body.ip, verdict=verdict, comment=comment,
+                              created_by="human", updated_at=now))
     else:
         existing.verdict = verdict
         existing.comment = comment
+        # A human saving over an agent verdict takes ownership — the agent
+        # never touches human verdicts again.
+        existing.created_by = "human"
         existing.updated_at = now
     await db.commit()
 
     return {"ok": True, "ip": body.ip, "verdict": verdict, "comment": comment,
-            "updated_at": now.isoformat()}
+            "created_by": "human", "updated_at": now.isoformat()}
 
 
 @app.get("/api/ip/{ip}/connections")
@@ -4596,6 +4608,12 @@ class AdminSettingsIn(BaseModel):
     agent_ips_enabled: bool | None = None
     agent_ips_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_ips_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    agent_anomaly_enabled: bool | None = None
+    agent_anomaly_interval_seconds: int | None = Field(default=None, ge=60, le=86400)
+    agent_anomaly_hours: int | None = Field(default=None, ge=1, le=720)
+    agent_anomaly_min_flows: int | None = Field(default=None, ge=1, le=1000000)
+    agent_anomaly_max_ips: int | None = Field(default=None, ge=1, le=200)
+    agent_anomaly_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_failed_login_enabled: bool | None = None
     agent_failed_login_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
@@ -5231,6 +5249,22 @@ async def get_agent_workflow():
             "run_now": "/api/agent/ips-run-now",
         },
         {
+            "key": "anomaly", "label": "FW-Anomalien",
+            "trigger": "Isolation-Forest-Anomalien über NetFlow (Volumen/Ports/Nacht) → OSINT-Triage; nicht-schädliche Anomalien werden als 'Verdächtig' markiert",
+            "enabled_key": "agent_anomaly_enabled",
+            "enabled": settings.agent_anomaly_enabled,
+            "prompt_source": "anomaly", "prompt_key": "agent_anomaly_system_prompt",
+            "prompt_overridden": _set("agent_anomaly_system_prompt"),
+            "allowed_actions": ["block_ip", "no_action"],
+            "settings": [
+                {"key": "agent_anomaly_interval_seconds", "label": "Intervall (s)", "value": settings.agent_anomaly_interval_seconds, "type": "int", "min": 60, "max": 86400},
+                {"key": "agent_anomaly_hours", "label": "NetFlow-Fenster (h)", "value": settings.agent_anomaly_hours, "type": "int", "min": 1, "max": 720},
+                {"key": "agent_anomaly_min_flows", "label": "Min. Flows/IP", "value": settings.agent_anomaly_min_flows, "type": "int", "min": 1, "max": 1000000},
+                {"key": "agent_anomaly_max_ips", "label": "Max. IPs/Sweep", "value": settings.agent_anomaly_max_ips, "type": "int", "min": 1, "max": 200},
+            ],
+            "run_now": "/api/agent/anomaly-run-now",
+        },
+        {
             "key": "failed_login", "label": "Failed-Login (per IP)",
             "trigger": "Fehlgeschlagene Logins pro Quell-IP",
             "enabled_key": "agent_failed_login_enabled",
@@ -5317,6 +5351,21 @@ async def agent_ips_run_now(window_minutes: int = Query(default=60, ge=1, le=100
         kwargs={"window_minutes": window_minutes, "force": True},
     )
     return {"ok": True, "window_minutes": window_minutes}
+
+
+@app.post("/api/agent/anomaly-run-now")
+async def agent_anomaly_run_now(all: bool = Query(default=False)):
+    """Trigger an FW-anomaly agent sweep immediately. Runs even when the sweep
+    is otherwise disabled — admin-initiated. ``all=true`` lifts the per-sweep
+    IP cap so every not-yet-verdicted anomaly is processed in one run
+    (hard safety limit: 100)."""
+    from app.agent import agent_anomaly_loop
+    scheduler.add_job(
+        agent_anomaly_loop, "date",
+        id="agent_anomaly_manual", replace_existing=True,
+        kwargs={"force": True, "no_cap": bool(all)},
+    )
+    return {"ok": True, "all": bool(all)}
 
 
 @app.post("/api/agent/failed-login-run-now")

@@ -311,6 +311,8 @@ class AnomalyVerdict(Base):
     # 'malicious' (schädlich) | 'suspicious' (verdächtig) | 'benign' (unschädlich)
     verdict = Column(String(20), nullable=False)
     comment = Column(Text)
+    # 'human' | 'agent' — the anomaly agent never overwrites human verdicts.
+    created_by = Column(String(20), nullable=False, default="human")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

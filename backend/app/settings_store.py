@@ -86,6 +86,12 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_ips_enabled": bool,
     "agent_ips_threshold": int,
     "agent_ips_interval_seconds": int,
+    "agent_anomaly_enabled": bool,
+    "agent_anomaly_interval_seconds": int,
+    "agent_anomaly_hours": int,
+    "agent_anomaly_min_flows": int,
+    "agent_anomaly_max_ips": int,
+    "agent_anomaly_system_prompt": str,
     "agent_failed_login_enabled": bool,
     "agent_failed_login_threshold": int,
     "agent_failed_login_interval_seconds": int,
@@ -262,6 +268,7 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
         ("agent_waf_interval_seconds", "agent_waf_loop", "agent_waf_interval_seconds"),
         ("agent_ips_interval_seconds", "agent_ips_loop", "agent_ips_interval_seconds"),
         ("agent_failed_login_interval_seconds", "agent_failed_login_loop", "agent_failed_login_interval_seconds"),
+        ("agent_anomaly_interval_seconds", "agent_anomaly_loop", "agent_anomaly_interval_seconds"),
     ):
         if key in sane:
             try:

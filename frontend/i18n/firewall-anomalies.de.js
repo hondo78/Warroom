@@ -102,6 +102,16 @@ window.I18N.de.fwAnomalies = {
     verdict_updated: "Zuletzt aktualisiert: {time}",
     verdict_pick: "Bitte „Schädlich\", „Verdächtig\" oder „Unschädlich\" wählen.",
     verdict_failed: "Speichern fehlgeschlagen",
+    verdict_watchlist: "Auf die Watchlist setzen (beobachten, nicht blocken)",
+    verdict_watchlist_already: "Diese IP steht bereits auf der Watchlist.",
+    verdict_watchlist_comment: "FW-Anomalie-Bewertung",
+    verdict_watchlist_failed: "Watchlist-Eintrag fehlgeschlagen",
+    on_watchlist: "IP steht auf der Watchlist",
+    verdict_by_agent: "Vom KI-Agent bewertet (OSINT-Triage)",
+    ai_scan: "KI-Analyse (unbewertete)",
+    ai_scan_title: "KI-Agent bewertet jetzt alle noch unbewerteten Anomalien (OSINT + LLM)",
+    ai_scan_running: "KI-Analyse läuft…",
+    ai_scan_failed: "KI-Analyse konnte nicht gestartet werden",
 
     // block action
     block_confirm: "IP {ip} auf die Blocklist setzen?",

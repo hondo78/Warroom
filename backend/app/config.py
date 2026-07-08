@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     agent_waf_system_prompt: str = ""
     agent_ips_system_prompt: str = ""
     agent_failed_login_system_prompt: str = ""
+    agent_anomaly_system_prompt: str = ""
     # WAF loop — rule-based, fires on every new WAF row with a 4xx/5xx status
     agent_waf_enabled: bool = False
     agent_waf_threshold: int = 4       # 4+ failed requests in 24h -> block
@@ -160,6 +161,14 @@ class Settings(BaseSettings):
     agent_ips_enabled: bool = False
     agent_ips_threshold: int = 3       # 3+ IPS hits in 24h -> block
     agent_ips_interval_seconds: int = 60
+    # FW-anomaly loop — Isolation Forest over NetFlow (like the dashboard), then
+    # OSINT + LLM triage per anomalous public IP. Malicious → block via the
+    # approval pipeline + verdict 'malicious'; everything else → 'suspicious'.
+    agent_anomaly_enabled: bool = False
+    agent_anomaly_interval_seconds: int = 900   # analysis is heavier than log sweeps
+    agent_anomaly_hours: int = 24               # NetFlow window fed to the forest
+    agent_anomaly_min_flows: int = 5            # ignore IPs below this flow count
+    agent_anomaly_max_ips: int = 10             # OSINT/LLM cap per sweep
     # Central-Event loop — rule-based; analyses the Sophos Central *event* stream
     # (separate from alerts) filtered to security-relevant event_types. The
     # high-volume firewall ATP events are deliberately excluded (already covered

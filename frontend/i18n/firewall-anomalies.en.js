@@ -102,6 +102,16 @@ window.I18N.en.fwAnomalies = {
     verdict_updated: "Last updated: {time}",
     verdict_pick: "Please choose \"Malicious\", \"Suspicious\" or \"Harmless\".",
     verdict_failed: "Save failed",
+    verdict_watchlist: "Add to the watchlist (observe, don't block)",
+    verdict_watchlist_already: "This IP is already on the watchlist.",
+    verdict_watchlist_comment: "FW anomaly verdict",
+    verdict_watchlist_failed: "Watchlist add failed",
+    on_watchlist: "IP is on the watchlist",
+    verdict_by_agent: "Assessed by the AI agent (OSINT triage)",
+    ai_scan: "AI analysis (unrated)",
+    ai_scan_title: "The AI agent now assesses all not-yet-rated anomalies (OSINT + LLM)",
+    ai_scan_running: "AI analysis running…",
+    ai_scan_failed: "Could not start the AI analysis",
 
     // block action
     block_confirm: "Add IP {ip} to the blocklist?",
