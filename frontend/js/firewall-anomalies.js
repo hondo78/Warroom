@@ -21,9 +21,13 @@ let _anDims = AN_DEFAULT_DIMS.slice();
 
 let _anScatter = null;
 let _anItems = [];
+let _anScatterData = [];   // last scatter points, so charts can recolour on verdict change
 let _anVerdicts = {};   // ip -> { verdict, comment, updated_at }; analyst marks
 const _anSort = { key: 'score', dir: 'desc' };
-const AN_COLS = 12;
+const AN_COLS = 13;
+
+// Verdict → chart colour (matches the badge palette: danger / warning / success).
+function verdictOf(ip) { return _anVerdicts[ip]?.verdict || null; }
 
 // Number formatting follows the chosen UI language (thousands separators differ
 // between en/de). Language can't change without a reload, so resolve it once.
@@ -249,8 +253,9 @@ async function anomalyRefresh() {
         document.getElementById('anTopIp').textContent = top ? top.ip : '—';
 
         await loadVerdicts();
-        renderScatter(d.scatter || []);
-        render3d(d.scatter || []);
+        _anScatterData = d.scatter || [];
+        renderScatter(_anScatterData);
+        render3d(_anScatterData);
         renderTable(d.anomalies || []);
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
@@ -333,6 +338,7 @@ function _anRenderRows() {
             <td>${night}%</td>
             <td style="white-space:nowrap">${fmtTs(it.last_seen)}</td>
             <td>${verdictCell(it.ip)}</td>
+            <td>${verdictCommentCell(it.ip)}</td>
             <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">${t('fwAnomalies.block')}</button></td>
         </tr>`;
     }).join('');
@@ -364,15 +370,26 @@ function renderScatter(points) {
 
     const mk = p => ({ x: dimPlotVal(kx, valOf(p, kx)), y: dimPlotVal(ky, valOf(p, ky)),
                        r: radius(valOf(p, kz)), ip: p.ip, score: p.score,
-                       rawx: valOf(p, kx), rawy: valOf(p, ky), rawz: valOf(p, kz) });
-    const normal = [], anom = [];
-    for (const p of points) (p.anom ? anom : normal).push(mk(p));
-    const data = {
-        datasets: [
-            { label: t('fwAnomalies.legend_normal'), data: normal, backgroundColor: 'rgba(120,144,170,.40)' },
-            { label: t('fwAnomalies.legend_anomaly'), data: anom, backgroundColor: 'rgba(220,53,69,.75)' },
-        ],
-    };
+                       rawx: valOf(p, kx), rawy: valOf(p, ky), rawz: valOf(p, kz),
+                       verdict: verdictOf(p.ip), comment: _anVerdicts[p.ip]?.comment || '' });
+    // Group by verdict first (marked points get the badge colour), then fall
+    // back to the anomaly/normal split for unrated points.
+    const g = { malicious: [], suspicious: [], benign: [], anom: [], normal: [] };
+    for (const p of points) {
+        const v = verdictOf(p.ip);
+        if (v && g[v]) g[v].push(mk(p));
+        else (p.anom ? g.anom : g.normal).push(mk(p));
+    }
+    // Unrated first (drawn underneath), verdicted on top with a light border so
+    // "malicious" (solid red) stays distinct from an unrated anomaly.
+    const datasets = [
+        { label: t('fwAnomalies.legend_normal'),  data: g.normal, backgroundColor: 'rgba(120,144,170,.40)' },
+        { label: t('fwAnomalies.legend_anomaly'), data: g.anom,   backgroundColor: 'rgba(220,53,69,.55)' },
+        { label: t('fwAnomalies.verdict_malicious'),  data: g.malicious,  backgroundColor: AN_VERDICT_META.malicious.color,  borderColor: '#fff', borderWidth: 1 },
+        { label: t('fwAnomalies.verdict_suspicious'), data: g.suspicious, backgroundColor: AN_VERDICT_META.suspicious.color, borderColor: '#fff', borderWidth: 1 },
+        { label: t('fwAnomalies.verdict_benign'),     data: g.benign,     backgroundColor: AN_VERDICT_META.benign.color,     borderColor: '#fff', borderWidth: 1 },
+    ].filter(d => d.data.length);
+    const data = { datasets };
     const axisType = d => (d.axis === 'log' ? 'logarithmic' : 'linear');
     const opts = {
         responsive: true,
@@ -390,6 +407,12 @@ function renderScatter(points) {
                             + `${dx.label} ${fmtDimVal(kx, r.rawx)} · `
                             + `${dy.label} ${fmtDimVal(ky, r.rawy)} · `
                             + `${dz.label} ${fmtDimVal(kz, r.rawz)}`;
+                    },
+                    afterLabel: (c) => {
+                        const r = c.raw;
+                        if (!r.verdict) return '';
+                        const label = t(AN_VERDICT_META[r.verdict].key);
+                        return `${t('fwAnomalies.verdict_col')}: ${label}` + (r.comment ? ` — ${r.comment}` : '');
                     },
                 },
             },
@@ -411,27 +434,40 @@ function render3d(points) {
     const dx = AN_DIM_BY_KEY[kx], dy = AN_DIM_BY_KEY[ky], dz = AN_DIM_BY_KEY[kz];
     const valOf = (p, k) => (p.vals ? p.vals[k] : 0) || 0;
 
-    const hover = p => `<b>${p.ip}</b><br>${t('common.score')} ${p.score.toFixed(3)}`
-        + `<br>${dx.label} ${fmtDimVal(kx, valOf(p, kx))}`
-        + `<br>${dy.label} ${fmtDimVal(ky, valOf(p, ky))}`
-        + `<br>${dz.label} ${fmtDimVal(kz, valOf(p, kz))}`
-        + (p.country ? `<br>${t('common.country')} ${p.country}` : '');
-    const trace = (pts, name, color, size, isAnom) => ({
+    const hover = p => {
+        const v = _anVerdicts[p.ip];
+        let s = `<b>${p.ip}</b><br>${t('common.score')} ${p.score.toFixed(3)}`
+            + `<br>${dx.label} ${fmtDimVal(kx, valOf(p, kx))}`
+            + `<br>${dy.label} ${fmtDimVal(ky, valOf(p, ky))}`
+            + `<br>${dz.label} ${fmtDimVal(kz, valOf(p, kz))}`
+            + (p.country ? `<br>${t('common.country')} ${p.country}` : '');
+        if (v) s += `<br>${t('fwAnomalies.verdict_col')}: ${t(AN_VERDICT_META[v.verdict].key)}`
+            + (v.comment ? `<br>${escapeHtml(v.comment)}` : '');
+        return s;
+    };
+    const trace = (pts, name, color, size, opacity) => ({
         type: 'scatter3d', mode: 'markers', name,
         x: pts.map(p => dimPlotVal(kx, valOf(p, kx))),
         y: pts.map(p => dimPlotVal(ky, valOf(p, ky))),
         z: pts.map(p => dimPlotVal(kz, valOf(p, kz))),
         text: pts.map(hover),
         hoverinfo: 'text',
-        marker: { size, color, opacity: isAnom ? 0.95 : 0.5,
-                  line: { width: 0 } },
+        marker: { size, color, opacity, line: { width: 0 } },
     });
-    const norm = points.filter(p => !p.anom);
-    const anom = points.filter(p => p.anom);
+    // Verdict groups first (marked points), then unrated anomaly / normal.
+    const grp = { malicious: [], suspicious: [], benign: [], anom: [], normal: [] };
+    for (const p of points) {
+        const v = verdictOf(p.ip);
+        if (v && grp[v]) grp[v].push(p);
+        else (p.anom ? grp.anom : grp.normal).push(p);
+    }
     const data = [
-        trace(norm, t('fwAnomalies.legend_normal'), 'rgba(120,144,170,.55)', 3, false),
-        trace(anom, t('fwAnomalies.legend_anomaly'), 'rgba(220,53,69,.95)', 5, true),
-    ];
+        trace(grp.normal,     t('fwAnomalies.legend_normal'),     'rgba(120,144,170,.55)', 3, 0.5),
+        trace(grp.anom,       t('fwAnomalies.legend_anomaly'),    'rgba(220,53,69,.75)',   5, 0.85),
+        trace(grp.malicious,  t('fwAnomalies.verdict_malicious'), AN_VERDICT_META.malicious.color,  6, 1),
+        trace(grp.suspicious, t('fwAnomalies.verdict_suspicious'),AN_VERDICT_META.suspicious.color, 6, 1),
+        trace(grp.benign,     t('fwAnomalies.verdict_benign'),    AN_VERDICT_META.benign.color,     6, 1),
+    ].filter(tr => tr.x.length);
     const ax = (dim) => {
         const a = { title: { text: dim.label }, gridcolor: 'rgba(148,163,184,.25)',
                     zerolinecolor: 'rgba(148,163,184,.4)', color: '#cbd5e1' };
@@ -495,9 +531,9 @@ async function loadVerdicts() {
 // otherwise a neutral "assess" button. Both open the verdict modal.
 // Badge colour + label per verdict value (malicious / suspicious / benign).
 const AN_VERDICT_META = {
-    malicious:  { cls: 'text-bg-danger',  key: 'fwAnomalies.verdict_malicious' },
-    suspicious: { cls: 'text-bg-warning', key: 'fwAnomalies.verdict_suspicious' },
-    benign:     { cls: 'text-bg-success', key: 'fwAnomalies.verdict_benign' },
+    malicious:  { cls: 'text-bg-danger',  key: 'fwAnomalies.verdict_malicious',  color: '#dc3545' },
+    suspicious: { cls: 'text-bg-warning', key: 'fwAnomalies.verdict_suspicious', color: '#ffc107' },
+    benign:     { cls: 'text-bg-success', key: 'fwAnomalies.verdict_benign',     color: '#198754' },
 };
 
 function verdictCell(ip) {
@@ -510,6 +546,14 @@ function verdictCell(ip) {
         return `<button class="badge ${meta.cls}" style="border:0;cursor:pointer" title="${escapeAttr(title)}" onclick="openVerdictModal('${escapeAttr(ip)}')">${escapeHtml(label)}${note}</button>`;
     }
     return `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openVerdictModal('${escapeAttr(ip)}')">${t('fwAnomalies.verdict_set')}</button>`;
+}
+
+// The verdict's comment, truncated with the full text on hover.
+function verdictCommentCell(ip) {
+    const c = _anVerdicts[ip]?.comment;
+    if (!c) return '<span class="text-secondary">—</span>';
+    const short = c.length > 60 ? c.slice(0, 60) + '…' : c;
+    return `<span style="font-size:.8rem" title="${escapeAttr(c)}">${escapeHtml(short)}</span>`;
 }
 
 let _verdictIp = null;
@@ -555,6 +599,9 @@ async function _postVerdict(ip, verdict, comment) {
         else delete _anVerdicts[ip];
         closeVerdict();
         _anRenderRows();
+        // Recolour the charts so the new verdict shows without a full refresh.
+        renderScatter(_anScatterData);
+        render3d(_anScatterData);
     } catch (err) {
         alert(t('fwAnomalies.verdict_failed') + ': ' + err.message);
     }

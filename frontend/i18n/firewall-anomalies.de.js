@@ -89,6 +89,7 @@ window.I18N.de.fwAnomalies = {
 
     // analyst verdict (schädlich / unschädlich)
     verdict_col: "Bewertung",
+    verdict_comment_col: "Kommentar",
     verdict_set: "Bewerten",
     verdict_malicious: "Schädlich",
     verdict_suspicious: "Verdächtig",
