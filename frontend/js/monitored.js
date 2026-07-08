@@ -10,7 +10,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('connModal').addEventListener('click', e => {
         if (e.target.id === 'connModal') closeConnModal();
     });
+    // Delegated clicks: IP chips filter by exact IP, details buttons open the
+    // connections modal. Reading the value from data-* (not an inline onclick)
+    // keeps API-supplied strings out of any JS-string context.
+    document.addEventListener('click', e => {
+        const chip = e.target.closest('.mon-ip-filter');
+        if (chip) {
+            // Don't hijack a text-selection drag ending on the chip (copying the IP).
+            if (String(window.getSelection() || '').length) return;
+            filterByIp(chip.dataset.ip);
+            return;
+        }
+        const btn = e.target.closest('button[data-conn-ip]');
+        if (btn) openConnModal(btn.dataset.connIp);
+    });
 });
+
+// A query that is a complete IP address filters by exact match against the
+// row's IPs (data-ips: monitored IP and, for events, the host) — so clicking
+// 1.2.3.4 doesn't also keep 11.2.3.45 or rows merely mentioning the IP in a
+// comment. Free text keeps the usual substring semantics.
+function isFullIp(q) {
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(q) || (q.includes(':') && /^[0-9a-f:]+$/i.test(q));
+}
 
 function initFilters() {
     document.querySelectorAll('input[data-filter-for]').forEach(input => {
@@ -18,13 +40,38 @@ function initFilters() {
         if (!tbody) return;
         const apply = () => {
             const q = input.value.toLowerCase().trim();
+            const exact = q && isFullIp(q);
             tbody.querySelectorAll(':scope > tr').forEach(tr => {
-                tr.style.display = (!q || tr.textContent.toLowerCase().includes(q)) ? '' : 'none';
+                let show;
+                if (!q) show = true;
+                else if (exact) show = (tr.dataset.ips || '').toLowerCase().split(',').includes(q);
+                else show = tr.textContent.toLowerCase().includes(q);
+                tr.style.display = show ? '' : 'none';
             });
         };
         input.addEventListener('input', apply);
         new MutationObserver(apply).observe(tbody, { childList: true });
     });
+}
+
+// A monitored IP rendered as a clickable chip that filters both tables by
+// exactly this IP. No inline onclick: the IP travels via data-ip and a
+// delegated listener, so untrusted values never reach a JS-string context.
+let _ipLinkTitle;   // constant per page load — computed once, not per row
+function ipLink(ip) {
+    if (_ipLinkTitle === undefined) _ipLinkTitle = escapeAttr(t('monitored.filter_by_ip_title'));
+    return `<code class="mon-ip-filter" data-ip="${escapeAttr(ip)}" title="${_ipLinkTitle}">${escapeHtml(ip)}</code>`;
+}
+
+// Focus the page on one monitored IP: fill both filter inputs and apply, so the
+// event timeline and the IP list narrow to that address.
+function filterByIp(ip) {
+    document.querySelectorAll('input[data-filter-for]').forEach(inp => {
+        inp.value = ip;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    document.getElementById('monEventsTable')?.closest('.card')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function fmtTime(iso) {
@@ -90,15 +137,15 @@ function renderIps(items) {
         const newBadge = m.new_events_24h
             ? `<span class="badge text-bg-danger">${m.new_events_24h}</span>`
             : '<span class="text-secondary">0</span>';
-        return `<tr>
-            <td><code>${escapeHtml(m.ip)}</code>${osint}</td>
+        return `<tr data-ips="${escapeAttr(m.ip)}">
+            <td>${ipLink(m.ip)}${osint}</td>
             <td>${lists}</td>
             <td>${escapeHtml(m.comment || '-')}</td>
             <td>${escapeHtml(m.country || '-')}</td>
             <td>${(m.host_count || 0).toLocaleString(MON_LOCALE)}</td>
             <td style="white-space:nowrap">${fmtTime(m.last_activity)}</td>
             <td>${newBadge}</td>
-            <td><button class="btn btn-sm btn-outline-primary py-0" style="font-size:.72rem" onclick="openConnModal('${escapeAttr(m.ip)}')"><i class="bi bi-hdd-network"></i> ${t('monitored.btn_details')}</button></td>
+            <td><button class="btn btn-sm btn-outline-primary py-0" style="font-size:.72rem" data-conn-ip="${escapeAttr(m.ip)}"><i class="bi bi-hdd-network"></i> ${t('monitored.btn_details')}</button></td>
         </tr>`;
     }).join('');
 }
@@ -121,12 +168,12 @@ function renderEvents(events) {
             ? `<span class="badge text-bg-success" title="${escapeAttr(e.source_list || '')}">✓</span>`
             : `<span class="badge text-bg-secondary" title="${escapeAttr(e.notify_error || t('monitored.not_sent'))}">–</span>`;
         const portProto = e.port != null ? `${e.port}/${escapeHtml(e.protocol || '?')}` : escapeHtml(e.protocol || '-');
-        return `<tr>
+        return `<tr data-ips="${escapeAttr([e.monitored_ip, e.host].filter(Boolean).join(','))}">
             <td style="white-space:nowrap">${fmtTime(e.detected_at)}</td>
             <td>${typeBadge}</td>
             <td><code>${escapeHtml(e.host)}</code></td>
             <td>${dirBadge(e.direction)}</td>
-            <td><code>${escapeHtml(e.monitored_ip)}</code></td>
+            <td>${ipLink(e.monitored_ip)}</td>
             <td>${portProto}</td>
             <td>${escapeHtml(e.country || '-')}</td>
             <td>${notif}</td>

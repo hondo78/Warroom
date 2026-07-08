@@ -1455,3 +1455,9 @@ tr.alert-row:hover td {
     background: var(--accent-blue);
     border-color: var(--accent-blue);
 }
+
+/* Monitoring page: clickable IP chip that filters both tables by that IP */
+.mon-ip-filter {
+    cursor: pointer;
+    text-decoration: underline dotted;
+}

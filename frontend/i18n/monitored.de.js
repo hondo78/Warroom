@@ -30,6 +30,7 @@ window.I18N.de.monitored = {
 
     ips_title: "Überwachte IPs",
     filter_ips: "Filter (IP, Kommentar, Land…)",
+    filter_by_ip_title: "Nach dieser IP filtern",
     empty_ips: "Keine IP zur Überwachung markiert. Auf der Blocklist/Watchlist mit „Überwachen\" markieren.",
     col_lists: "Listen",
     col_hosts: "Hosts",

@@ -30,6 +30,7 @@ window.I18N.en.monitored = {
 
     ips_title: "Monitored IPs",
     filter_ips: "Filter (IP, comment, country…)",
+    filter_by_ip_title: "Filter by this IP",
     empty_ips: "No IP flagged for monitoring. Flag one with \"Monitor\" on the blocklist/watchlist.",
     col_lists: "Lists",
     col_hosts: "Hosts",
