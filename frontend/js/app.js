@@ -70,6 +70,7 @@ async function refreshAll() {
         updateFailedLogins(),
         updateWafWidget(),
         updateIpsWidget(),
+        updateBlockedOutbound(),
         updateAgentDecisions(),
     ]);
 }
@@ -255,6 +256,83 @@ async function updateIpsWidget() {
         }).join('');
     } catch (err) {
         console.error('IPS widget update failed:', err);
+    }
+}
+
+async function updateBlockedOutbound() {
+    try {
+        const days = parseInt(document.getElementById('blockedOutboundDays')?.value || '7', 10);
+        const [statsResp, recentResp] = await Promise.all([
+            fetch(`/api/firewall-logs/blocked-outbound/stats?days=${days}`),
+            fetch(`/api/firewall-logs/blocked-outbound/recent?days=${days}&limit=300`),
+        ]);
+        const stats = await statsResp.json();
+        const items = await recentResp.json();
+
+        // Header count badge
+        const countEl = document.getElementById('blockedOutboundCount');
+        if (countEl) countEl.textContent = (stats.total || 0).toLocaleString('de-DE');
+
+        // Summary block (24h / unique dests / unique sources / top lists)
+        const sumEl = document.getElementById('blockedOutboundSummary');
+        if (sumEl) {
+            const block = (title, entries, fmt) => {
+                if (!entries || !entries.length) return '';
+                return `<div class="waf-sum-block"><span class="waf-sum-title">${title}</span>${entries.map(fmt).join('')}</div>`;
+            };
+            const facts = [
+                t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')}),
+                t('dash.bo_unique_dests', {n: (stats.unique_dests || 0).toLocaleString('de-DE')}),
+                t('dash.bo_unique_sources', {n: (stats.unique_sources || 0).toLocaleString('de-DE')}),
+            ];
+            sumEl.innerHTML = [
+                `<div class="waf-sum-block"><span class="waf-sum-title">${t('dash.bo_summary')}</span>${
+                    facts.map(f => `<span class="waf-pill">${escapeHtml(f)}</span>`).join('')}</div>`,
+                block(t('dash.bo_top_destinations'), stats.top_destinations, d =>
+                    `<span class="waf-pill waf-pill-attack" title="${escapeHtml([d.country, d.city, d.comment].filter(Boolean).join(' · '))}">${escapeHtml(d.ip)} <em>${d.count}</em></span>`),
+                block(t('dash.bo_top_sources'), stats.top_sources, s =>
+                    `<span class="waf-pill" title="${t('dash.bo_source_hint', {n: s.destinations})}">${escapeHtml(s.ip)} <em>${s.count}</em></span>`),
+            ].join('');
+        }
+
+        const tbody = document.getElementById('blockedOutboundTable');
+        if (!tbody) return;
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('dash.blocked_outbound_empty')}</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = items.map(l => {
+            const srcCell = l.source_ip
+                ? `<code>${escapeHtml(l.source_ip)}${l.source_port ? ':' + l.source_port : ''}</code>${isPublicIpClient(l.source_ip) ? osintButton(l.source_ip) : ''}`
+                : '-';
+            const dstCell = l.destination_ip
+                ? `<code>${escapeHtml(l.destination_ip)}${l.destination_port ? ':' + l.destination_port : ''}</code> <span class="blocked-badge" title="${t('dash.bo_on_blocklist')}">BLOCKLIST</span>${osintButton(l.destination_ip)}`
+                : '-';
+            const reason = l.block_comment || '';
+            const reasonTitle = [reason, l.block_added_at ? t('dash.bo_listed_since', {time: formatTime(l.block_added_at)}) : '', l.threat || '']
+                .filter(Boolean).join(' · ');
+            const reasonCell = reason
+                ? `<code class="waf-url" title="${escapeHtml(reasonTitle)}" onclick="this.classList.toggle('expanded')">${escapeHtml(truncate(reason, 60))}</code>`
+                : '<span class="muted-cell">—</span>';
+            const action = l.action;
+            const actionCell = action
+                ? `<span class="waf-action waf-action-block">${escapeHtml(action)}</span>`
+                : `<span class="muted-cell" title="${t('dash.no_action_in_log')}">—</span>`;
+            return `
+            <tr>
+                <td>${formatTime(l.created_at)}</td>
+                <td>${severityBadge(l.severity)}</td>
+                <td>${srcCell}</td>
+                <td>${escapeHtml(l.firewall || '-')}</td>
+                <td>${dstCell}</td>
+                <td>${escapeHtml([l.country, l.city].filter(Boolean).join(', ') || '-')}</td>
+                <td>${escapeHtml(l.protocol || '-')}</td>
+                <td>${reasonCell}</td>
+                <td>${actionCell}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Blocked-outbound widget update failed:', err);
     }
 }
 

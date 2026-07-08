@@ -87,6 +87,21 @@ window.I18N.en.fwAnomalies = {
     analysis_failed: "Analysis failed",
     no_netflow_data: "No NetFlow data in the time window.",
 
+    // analyst verdict (malicious / harmless)
+    verdict_col: "Verdict",
+    verdict_set: "Assess",
+    verdict_malicious: "Malicious",
+    verdict_suspicious: "Suspicious",
+    verdict_benign: "Harmless",
+    verdict_title: "Assess anomaly",
+    verdict_edit: "Edit verdict",
+    verdict_comment_label: "Comment",
+    verdict_comment_ph: "Optional comment…",
+    verdict_clear: "Remove verdict",
+    verdict_updated: "Last updated: {time}",
+    verdict_pick: "Please choose \"Malicious\", \"Suspicious\" or \"Harmless\".",
+    verdict_failed: "Save failed",
+
     // block action
     block_confirm: "Add IP {ip} to the blocklist?",
     block_comment: "FW anomaly dashboard (Isolation Forest / NetFlow)",

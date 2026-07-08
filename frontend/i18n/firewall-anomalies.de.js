@@ -87,6 +87,21 @@ window.I18N.de.fwAnomalies = {
     analysis_failed: "Analyse fehlgeschlagen",
     no_netflow_data: "Keine NetFlow-Daten im Zeitfenster.",
 
+    // analyst verdict (schädlich / unschädlich)
+    verdict_col: "Bewertung",
+    verdict_set: "Bewerten",
+    verdict_malicious: "Schädlich",
+    verdict_suspicious: "Verdächtig",
+    verdict_benign: "Unschädlich",
+    verdict_title: "Anomalie bewerten",
+    verdict_edit: "Bewertung bearbeiten",
+    verdict_comment_label: "Kommentar",
+    verdict_comment_ph: "Optionaler Kommentar…",
+    verdict_clear: "Bewertung entfernen",
+    verdict_updated: "Zuletzt aktualisiert: {time}",
+    verdict_pick: "Bitte „Schädlich\", „Verdächtig\" oder „Unschädlich\" wählen.",
+    verdict_failed: "Speichern fehlgeschlagen",
+
     // block action
     block_confirm: "IP {ip} auf die Blocklist setzen?",
     block_comment: "FW-Anomalie-Dashboard (Isolation Forest / NetFlow)",

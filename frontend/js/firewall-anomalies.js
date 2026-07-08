@@ -21,8 +21,9 @@ let _anDims = AN_DEFAULT_DIMS.slice();
 
 let _anScatter = null;
 let _anItems = [];
+let _anVerdicts = {};   // ip -> { verdict, comment, updated_at }; analyst marks
 const _anSort = { key: 'score', dir: 'desc' };
-const AN_COLS = 11;
+const AN_COLS = 12;
 
 // Number formatting follows the chosen UI language (thousands separators differ
 // between en/de). Language can't change without a reload, so resolve it once.
@@ -60,6 +61,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('connModal').addEventListener('click', e => {
         if (e.target.id === 'connModal') closeConn();
+    });
+    document.getElementById('verdictModal').addEventListener('click', e => {
+        if (e.target.id === 'verdictModal') closeVerdict();
     });
     // Click a column header to sort; click again to flip direction.
     document.querySelectorAll('#anSortRow th[data-sort]').forEach(th => {
@@ -244,6 +248,7 @@ async function anomalyRefresh() {
         document.getElementById('anTopScore').textContent = top ? top.score.toFixed(3) : '—';
         document.getElementById('anTopIp').textContent = top ? top.ip : '—';
 
+        await loadVerdicts();
         renderScatter(d.scatter || []);
         render3d(d.scatter || []);
         renderTable(d.anomalies || []);
@@ -299,7 +304,13 @@ function _anRenderRows() {
     });
     tbody.innerHTML = items.map(it => {
         const osint = typeof osintButton === 'function' ? osintButton(it.ip, 'osint-btn', 'ip') : '';
-        const baseBg = it.is_anomaly ? 'background:rgba(220,53,69,.08);' : '';
+        // Verdict overrides the default anomaly tint: malicious → stronger red,
+        // suspicious → amber, benign → dimmed/neutral so triaged rows recede.
+        const verdict = _anVerdicts[it.ip];
+        let baseBg = it.is_anomaly ? 'background:rgba(220,53,69,.08);' : '';
+        if (verdict?.verdict === 'malicious') baseBg = 'background:rgba(220,53,69,.18);';
+        else if (verdict?.verdict === 'suspicious') baseBg = 'background:rgba(255,193,7,.14);';
+        else if (verdict?.verdict === 'benign') baseBg = 'background:rgba(120,144,170,.10);opacity:.7;';
         const night = Math.round((it.night_ratio || 0) * 100);
         const country = it.country
             ? `${escapeHtml(it.country)} <span class="text-secondary" style="font-size:.7rem" title="${escapeAttr(t('fwAnomalies.rarity_title'))}">r${(it.country_rarity ?? 0).toFixed(1)}</span>`
@@ -321,6 +332,7 @@ function _anRenderRows() {
             <td>${(it.distinct_dst_ips || 0).toLocaleString(AN_LOCALE)}</td>
             <td>${night}%</td>
             <td style="white-space:nowrap">${fmtTs(it.last_seen)}</td>
+            <td>${verdictCell(it.ip)}</td>
             <td><button class="block-link" onclick="anomBlockIp('${escapeAttr(it.ip)}', this)">${t('fwAnomalies.block')}</button></td>
         </tr>`;
     }).join('');
@@ -463,6 +475,88 @@ async function anomBlockIp(ip, btn) {
     } catch (err) {
         alert(t('fwAnomalies.block_failed') + ': ' + err.message);
         if (btn) { btn.disabled = false; btn.textContent = t('fwAnomalies.block'); }
+    }
+}
+
+// ---- Analyst verdict (schädlich / unschädlich + comment) ---------------------
+// Anomalies have no stable id (recomputed each run), so a verdict is keyed by
+// the IP and persisted server-side. _anVerdicts mirrors that table for the
+// currently shown rows.
+async function loadVerdicts() {
+    try {
+        const r = await fetch('/api/firewall/anomaly-verdicts');
+        if (!r.ok) return;
+        const d = await r.json();
+        _anVerdicts = d.verdicts || {};
+    } catch (e) { /* keep the previous map on error */ }
+}
+
+// Render the verdict cell: a coloured badge when marked (comment on hover),
+// otherwise a neutral "assess" button. Both open the verdict modal.
+// Badge colour + label per verdict value (malicious / suspicious / benign).
+const AN_VERDICT_META = {
+    malicious:  { cls: 'text-bg-danger',  key: 'fwAnomalies.verdict_malicious' },
+    suspicious: { cls: 'text-bg-warning', key: 'fwAnomalies.verdict_suspicious' },
+    benign:     { cls: 'text-bg-success', key: 'fwAnomalies.verdict_benign' },
+};
+
+function verdictCell(ip) {
+    const v = _anVerdicts[ip];
+    const meta = v && AN_VERDICT_META[v.verdict];
+    if (meta) {
+        const label = t(meta.key);
+        const note = v.comment ? ' 💬' : '';
+        const title = v.comment || t('fwAnomalies.verdict_edit');
+        return `<button class="badge ${meta.cls}" style="border:0;cursor:pointer" title="${escapeAttr(title)}" onclick="openVerdictModal('${escapeAttr(ip)}')">${escapeHtml(label)}${note}</button>`;
+    }
+    return `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openVerdictModal('${escapeAttr(ip)}')">${t('fwAnomalies.verdict_set')}</button>`;
+}
+
+let _verdictIp = null;
+function openVerdictModal(ip) {
+    _verdictIp = ip;
+    const v = _anVerdicts[ip];
+    document.getElementById('verdictIp').textContent = ip;
+    document.getElementById('verdictMal').checked = v?.verdict === 'malicious';
+    document.getElementById('verdictSus').checked = v?.verdict === 'suspicious';
+    document.getElementById('verdictBen').checked = v?.verdict === 'benign';
+    document.getElementById('verdictComment').value = v?.comment || '';
+    const meta = document.getElementById('verdictMeta');
+    meta.textContent = v?.updated_at ? t('fwAnomalies.verdict_updated', { time: fmtTs(v.updated_at) }) : '';
+    document.getElementById('verdictClearBtn').style.display = v ? '' : 'none';
+    document.getElementById('verdictModal').classList.add('active');
+}
+
+function closeVerdict() {
+    document.getElementById('verdictModal').classList.remove('active');
+}
+
+async function saveVerdict() {
+    const verdict = document.querySelector('input[name="verdictChoice"]:checked')?.value || '';
+    if (!verdict) { alert(t('fwAnomalies.verdict_pick')); return; }
+    await _postVerdict(_verdictIp, verdict, document.getElementById('verdictComment').value);
+}
+
+async function clearVerdict() {
+    await _postVerdict(_verdictIp, '', '');
+}
+
+async function _postVerdict(ip, verdict, comment) {
+    if (!ip) return;
+    try {
+        const r = await fetch('/api/firewall/anomaly-verdict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, verdict, comment }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        if (verdict) _anVerdicts[ip] = { verdict: d.verdict, comment: d.comment, updated_at: d.updated_at };
+        else delete _anVerdicts[ip];
+        closeVerdict();
+        _anRenderRows();
+    } catch (err) {
+        alert(t('fwAnomalies.verdict_failed') + ': ' + err.message);
     }
 }
 

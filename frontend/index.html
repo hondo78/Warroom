@@ -261,6 +261,36 @@
                     </div>
                 </div>
 
+                <!-- Blocked outbound connections to blocklisted IPs -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="dash.blocked_outbound_title">Geblockte ausgehende Verbindungen zu Blocklist-IPs</h3>
+                        <span class="badge bg-danger" id="blockedOutboundCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n="dash.blocked_outbound_hint">Ausgehende Verbindungen interner Hosts zu IP-Adressen, die auf unserer Blocklist stehen und deshalb von der Firewall geblockt wurden.</p>
+                        <div class="waf-summary" id="blockedOutboundSummary"></div>
+                        <div class="filter-row">
+                            <input type="text" data-filter-for="blockedOutboundTable" class="form-control form-control-sm" data-i18n-placeholder="dash.filter_blocked_outbound" placeholder="Filter (Quell-IP, Ziel-IP, Firewall, Grund…)">
+                            <select id="blockedOutboundDays" class="form-select form-select-sm" style="width:auto" onchange="updateBlockedOutbound()">
+                                <option value="1" data-i18n="dashboard.range_24h">24 Stunden</option>
+                                <option value="7" selected data-i18n="dashboard.range_7d">7 Tage</option>
+                                <option value="30" data-i18n="dashboard.range_30d">30 Tage</option>
+                                <option value="90" data-i18n="dashboard.range_90d">90 Tage</option>
+                            </select>
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.time">Zeit</th><th data-i18n="common.severity">Schwere</th><th data-i18n="dash.internal_source">Quelle (intern)</th><th data-i18n="common.firewall">Firewall</th>
+                                    <th data-i18n="dash.blocklist_dest">Ziel-IP (Blocklist)</th><th data-i18n="common.country">Land</th><th data-i18n="dash.proto">Proto</th><th data-i18n="dash.blocklist_reason">Blocklist-Grund</th><th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="blockedOutboundTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Firewall Syslog -->
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="dash.fw_syslog_title">Firewall Security Logs (Syslog)</h3></div>

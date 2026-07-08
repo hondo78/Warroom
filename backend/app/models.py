@@ -243,6 +243,19 @@ class WhitelistedIp(Base):
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AnomalyVerdict(Base):
+    """Analyst verdict on an anomalous IP surfaced by the firewall-anomaly
+    analysis. Anomalies are recomputed on the fly (no stable id), so a verdict
+    is keyed by the IP itself and persists across analyses."""
+    __tablename__ = "anomaly_verdicts"
+
+    ip = Column(String(45), primary_key=True)
+    # 'malicious' (schädlich) | 'suspicious' (verdächtig) | 'benign' (unschädlich)
+    verdict = Column(String(20), nullable=False)
+    comment = Column(Text)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 

@@ -193,6 +193,7 @@
                                     <th data-sort="dips" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_dst_ips">Ziel-IPs</span> <span class="sort-ind"></span></th>
                                     <th data-sort="night" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_night">Nacht</span> <span class="sort-ind"></span></th>
                                     <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_last_seen">Zuletzt</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="fwAnomalies.verdict_col">Bewertung</th>
                                     <th data-i18n="common.action">Aktion</th>
                                 </tr></thead>
                                 <tbody id="anTable"></tbody>
@@ -216,6 +217,35 @@
         <div id="connModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
             <button onclick="closeConn()" data-i18n="common.close">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Anomaly verdict modal (schädlich / unschädlich + comment) -->
+<div class="modal-overlay" id="verdictModal">
+    <div class="modal alert-detail-modal" style="max-width:520px">
+        <div class="alert-detail-header">
+            <h3 data-i18n="fwAnomalies.verdict_title">Anomalie bewerten</h3>
+            <button class="modal-close" onclick="closeVerdict()" title="Schliessen" data-i18n-title="common.close">×</button>
+        </div>
+        <div class="alert-detail-body">
+            <p style="margin:0 0 .75rem">IP: <code id="verdictIp"></code></p>
+            <div class="btn-group w-100 mb-3" role="group">
+                <input type="radio" class="btn-check" name="verdictChoice" id="verdictMal" value="malicious" autocomplete="off">
+                <label class="btn btn-outline-danger" for="verdictMal" data-i18n="fwAnomalies.verdict_malicious">Schädlich</label>
+                <input type="radio" class="btn-check" name="verdictChoice" id="verdictSus" value="suspicious" autocomplete="off">
+                <label class="btn btn-outline-warning" for="verdictSus" data-i18n="fwAnomalies.verdict_suspicious">Verdächtig</label>
+                <input type="radio" class="btn-check" name="verdictChoice" id="verdictBen" value="benign" autocomplete="off">
+                <label class="btn btn-outline-success" for="verdictBen" data-i18n="fwAnomalies.verdict_benign">Unschädlich</label>
+            </div>
+            <label class="form-label" style="font-size:.8rem" for="verdictComment" data-i18n="fwAnomalies.verdict_comment_label">Kommentar</label>
+            <textarea id="verdictComment" class="form-control form-control-sm" rows="3" placeholder="Optionaler Kommentar…" data-i18n-placeholder="fwAnomalies.verdict_comment_ph"></textarea>
+            <div id="verdictMeta" class="text-secondary" style="font-size:.72rem;margin-top:.4rem"></div>
+        </div>
+        <div class="modal-actions">
+            <button class="text-danger" id="verdictClearBtn" onclick="clearVerdict()" data-i18n="fwAnomalies.verdict_clear">Bewertung entfernen</button>
+            <button onclick="closeVerdict()" data-i18n="common.cancel">Abbrechen</button>
+            <button class="primary" onclick="saveVerdict()" data-i18n="common.save">Speichern</button>
         </div>
     </div>
 </div>

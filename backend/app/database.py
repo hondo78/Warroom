@@ -284,6 +284,17 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_osint_results_last_seen ON osint_results(last_seen DESC)",
     "CREATE INDEX IF NOT EXISTS idx_osint_results_type ON osint_results(indicator_type)",
     "CREATE INDEX IF NOT EXISTS idx_osint_results_abuse ON osint_results(abuse_score DESC)",
+    # Analyst verdicts on anomalous IPs (firewall-anomaly page). Anomalies are
+    # recomputed on the fly, so a verdict is keyed by the IP and survives reruns.
+    """
+    CREATE TABLE IF NOT EXISTS anomaly_verdicts (
+        ip VARCHAR(45) PRIMARY KEY,
+        verdict VARCHAR(20) NOT NULL,
+        comment TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_anomaly_verdicts_updated ON anomaly_verdicts(updated_at DESC)",
 ]
 
 

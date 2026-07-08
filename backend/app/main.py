@@ -19,7 +19,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -2344,6 +2344,73 @@ async def firewall_anomalies(
     }
 
 
+# --- Analyst verdicts on anomalous IPs (schädlich / unschädlich + comment) ---
+
+_ANOMALY_VERDICTS = {"malicious", "suspicious", "benign"}
+
+
+class AnomalyVerdictIn(BaseModel):
+    ip: str = Field(..., min_length=7, max_length=45)
+    # 'malicious' | 'suspicious' | 'benign' | '' (empty clears the verdict)
+    verdict: str = Field(default="", max_length=20)
+    comment: str | None = Field(None, max_length=1000)
+
+
+@app.get("/api/firewall/anomaly-verdicts")
+async def list_anomaly_verdicts(db: AsyncSession = Depends(get_db)):
+    """All analyst verdicts, keyed by IP. The table only holds manually-marked
+    IPs, so this stays small; the anomaly page merges it into the live rows."""
+    rows = (await db.execute(select(AnomalyVerdict))).scalars().all()
+    return {
+        "verdicts": {
+            v.ip: {
+                "verdict": v.verdict,
+                "comment": v.comment,
+                "updated_at": v.updated_at.isoformat() if v.updated_at else None,
+            }
+            for v in rows
+        }
+    }
+
+
+@app.post("/api/firewall/anomaly-verdict")
+async def set_anomaly_verdict(body: AnomalyVerdictIn, db: AsyncSession = Depends(get_db)):
+    """Upsert (or clear) an analyst verdict for one anomalous IP."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(body.ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+
+    verdict = (body.verdict or "").strip().lower()
+    existing = (await db.execute(
+        select(AnomalyVerdict).where(AnomalyVerdict.ip == body.ip)
+    )).scalar_one_or_none()
+
+    # An empty verdict clears the entry (removes the mark entirely).
+    if not verdict:
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+        return {"ok": True, "ip": body.ip, "verdict": None, "comment": None}
+
+    if verdict not in _ANOMALY_VERDICTS:
+        raise HTTPException(status_code=400, detail="verdict must be 'malicious', 'suspicious' or 'benign'")
+
+    comment = (body.comment or "").strip() or None
+    now = datetime.now(timezone.utc)
+    if existing is None:
+        db.add(AnomalyVerdict(ip=body.ip, verdict=verdict, comment=comment, updated_at=now))
+    else:
+        existing.verdict = verdict
+        existing.comment = comment
+        existing.updated_at = now
+    await db.commit()
+
+    return {"ok": True, "ip": body.ip, "verdict": verdict, "comment": comment,
+            "updated_at": now.isoformat()}
+
+
 @app.get("/api/ip/{ip}/connections")
 @cached(ttl=120)
 async def ip_connections(
@@ -3374,6 +3441,166 @@ async def get_ips_recent(
             "rule_priority": r[17],
             "platform": r[18],
             "log_subtype": r[19],
+        }
+        for r in rows
+    ]
+
+
+# --- Blocked outbound connections to blocklisted IPs ---
+
+# Which firewall actions count as "the connection was blocked". Sophos writes
+# multi-word phrases into firewall_logs.action (e.g. "Drop destination match",
+# "Deny Session"), so match on substrings rather than an exact value list.
+# Deliberately excludes non-block outcomes like "Allowed", "Expire", "Failed".
+_BLOCK_ACTION_SQL = (
+    "(fl.action ILIKE '%drop%' OR fl.action ILIKE '%deny%' "
+    "OR fl.action ILIKE '%block%' OR fl.action ILIKE '%reject%')"
+)
+
+# firewall_logs has ~16M rows; a plain JOIN against blocked_ips makes the
+# planner seq-scan the whole created_at window (millions of rows). Feeding the
+# blocklist in as an InitPlan array (`destination_ip = ANY(ARRAY(SELECT ...))`)
+# instead drives the (destination_ip, created_at DESC) index and stays <200ms.
+_BLOCKED_OUTBOUND_WHERE = (
+    "fl.destination_ip = ANY(ARRAY(SELECT ip FROM blocked_ips)) "
+    f"AND fl.created_at >= :since AND {_BLOCK_ACTION_SQL}"
+)
+
+
+@app.get("/api/firewall-logs/blocked-outbound/stats")
+@cached(ttl=60)
+async def get_blocked_outbound_stats(
+    days: int = Query(default=7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aggregate stats for outbound connections the firewall blocked because
+    their destination sits on our IOC blocklist (blocked_ips). Proves the feed
+    is catching real callbacks to known-bad IPs."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    # Comment lookup — enriched in Python so the hot query never joins the
+    # 16M-row firewall_logs table against blocked_ips.
+    comment_rows = await db.execute(select(BlockedIp.ip, BlockedIp.comment))
+    comments = {r[0]: r[1] for r in comment_rows.all()}
+
+    sql = text(f"""
+        SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE fl.created_at >= :day_ago) AS last_24h,
+            COUNT(DISTINCT fl.destination_ip) AS unique_dests,
+            COUNT(DISTINCT fl.source_ip) FILTER (WHERE fl.source_ip IS NOT NULL) AS unique_sources
+        FROM firewall_logs fl
+        WHERE {_BLOCKED_OUTBOUND_WHERE}
+    """)
+    row = (await db.execute(sql, {"since": since, "day_ago": day_ago})).first()
+
+    top_dests_sql = text(f"""
+        SELECT fl.destination_ip, fl.attacker_country, fl.attacker_city, COUNT(*) AS cnt
+        FROM firewall_logs fl
+        WHERE {_BLOCKED_OUTBOUND_WHERE}
+        GROUP BY fl.destination_ip, fl.attacker_country, fl.attacker_city
+        ORDER BY cnt DESC
+        LIMIT 10
+    """)
+    dests = (await db.execute(top_dests_sql, {"since": since})).all()
+
+    top_sources_sql = text(f"""
+        SELECT fl.source_ip,
+               COUNT(*) AS cnt,
+               COUNT(DISTINCT fl.destination_ip) AS dests
+        FROM firewall_logs fl
+        WHERE {_BLOCKED_OUTBOUND_WHERE} AND fl.source_ip IS NOT NULL
+        GROUP BY fl.source_ip
+        ORDER BY cnt DESC
+        LIMIT 10
+    """)
+    sources = (await db.execute(top_sources_sql, {"since": since})).all()
+
+    return {
+        "total": int(row[0] or 0),
+        "last_24h": int(row[1] or 0),
+        "unique_dests": int(row[2] or 0),
+        "unique_sources": int(row[3] or 0),
+        "top_destinations": [
+            {"ip": r[0], "country": r[1], "city": r[2],
+             "comment": comments.get(r[0]), "count": int(r[3])}
+            for r in dests
+        ],
+        "top_sources": [
+            {"ip": r[0], "count": int(r[1]), "destinations": int(r[2])}
+            for r in sources
+        ],
+    }
+
+
+@app.get("/api/firewall-logs/blocked-outbound/recent")
+@cached(ttl=60)
+async def get_blocked_outbound_recent(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=300, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent outbound connections that were blocked because the destination is
+    on the IOC blocklist. Source is the internal host, destination is the
+    known-bad IP we listed."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    sql = text(f"""
+        SELECT
+            fl.id,
+            fl.created_at,
+            fl.severity,
+            fl.firewall_name,
+            fl.source_ip,
+            fl.source_port,
+            fl.destination_ip,
+            fl.destination_port,
+            fl.protocol,
+            fl.action,
+            fl.message,
+            fl.threat_name,
+            fl.attacker_country,
+            fl.attacker_city,
+            fl.attacker_asn,
+            fl.attacker_org
+        FROM firewall_logs fl
+        WHERE {_BLOCKED_OUTBOUND_WHERE}
+        ORDER BY fl.created_at DESC
+        LIMIT :lim
+    """)
+    rows = (await db.execute(sql, {"since": since, "lim": limit})).all()
+
+    # Enrich blocklist comment / listing date in Python (see _BLOCKED_OUTBOUND_WHERE).
+    dest_ips = {r[6] for r in rows if r[6]}
+    block_meta: dict[str, tuple] = {}
+    if dest_ips:
+        meta_rows = await db.execute(
+            select(BlockedIp.ip, BlockedIp.comment, BlockedIp.blocked_at)
+            .where(BlockedIp.ip.in_(dest_ips))
+        )
+        block_meta = {m[0]: (m[1], m[2]) for m in meta_rows.all()}
+
+    return [
+        {
+            "id": r[0],
+            "created_at": r[1].isoformat() if r[1] else None,
+            "severity": r[2],
+            "firewall": r[3],
+            "source_ip": r[4],
+            "source_port": r[5],
+            "destination_ip": r[6],
+            "destination_port": r[7],
+            "protocol": r[8],
+            "action": r[9],
+            "message": r[10],
+            "threat": r[11],
+            "country": r[12],
+            "city": r[13],
+            "asn": r[14],
+            "org": r[15],
+            "block_comment": block_meta.get(r[6], (None, None))[0],
+            "block_added_at": (block_meta.get(r[6], (None, None))[1].isoformat()
+                               if block_meta.get(r[6], (None, None))[1] else None),
         }
         for r in rows
     ]
