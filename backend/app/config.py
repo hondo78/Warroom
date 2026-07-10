@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # Incoming-webhook URL for outbound notifications (Warroom → Teams), optional.
     teams_incoming_webhook: str = ""
 
+    # --- M365 login watch ---
+    # Alerts (with a revoke-sessions option) when a user signs in from a device
+    # or country not in their baseline. First run seeds the baseline silently.
+    m365_login_watch_enabled: bool = False
+    m365_login_watch_interval_seconds: int = 120
+    m365_login_watch_lookback_minutes: int = 30   # scan window per pass (overlap-safe)
+
     # --- IP connection monitoring ---
     # Background job tracks which internal hosts talk to specially-flagged
     # ("monitored") blocklist / watchlist IPs and alerts on new sessions.

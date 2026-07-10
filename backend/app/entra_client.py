@@ -388,6 +388,40 @@ class EntraClient:
             r.raise_for_status()
         return {"ok": True, "id": pol["id"], "displayName": pol.get("displayName"), "state": target}
 
+    async def revoke_sign_in_sessions(self, user: str) -> dict:
+        """Revoke ALL refresh/session tokens of a user (Graph
+        ``/users/{id}/revokeSignInSessions``) — forces re-authentication on
+        every device. ``user`` may be a UPN or an Entra object id; UPNs are
+        resolved to the object id from the audit logs when possible.
+
+        Requires the application permission ``User.RevokeSessions.All`` (or
+        User.ReadWrite.All / Directory.ReadWrite.All); a 403 is surfaced with
+        that hint. Raises on failure so callers can record the error."""
+        if not self.configured:
+            raise RuntimeError("O365 app credentials not set")
+        target = user
+        if "@" in user:
+            target = (await _upn_to_object_id(user)) or user
+        await self._ensure_token()
+        client = self._get_client()
+        r = await _request(
+            client, "post",
+            f"{GRAPH}/users/{target}/revokeSignInSessions",
+            headers=self._headers(),
+        )
+        if r.status_code == 403:
+            raise RuntimeError(
+                "403 from Graph — grant the app the 'User.RevokeSessions.All' "
+                "application permission (admin consent) to revoke sessions"
+            )
+        if r.status_code == 404:
+            raise RuntimeError(f"user {user!r} not found in Entra ID")
+        r.raise_for_status()
+        body = r.json() if r.content else {}
+        logger.info(f"entra: revoked sign-in sessions for {user} ({target})")
+        return {"ok": True, "user": user, "object_id": target,
+                "value": body.get("value", True)}
+
     async def test(self) -> dict:
         if not self.configured:
             return {"ok": False, "error": "O365 app credentials not set"}

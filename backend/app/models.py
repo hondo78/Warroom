@@ -316,6 +316,23 @@ class AnomalyVerdict(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class M365LoginProfile(Base):
+    """Per-user baseline of known M365 login devices and locations. The login
+    watch alerts (with a revoke-sessions option) whenever a successful login
+    uses a (user, kind, value) pair that isn't in this table yet."""
+    __tablename__ = "m365_login_profiles"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String(255), nullable=False)
+    # 'device' (Entra device id / os|browser fingerprint) | 'location' (country)
+    kind = Column(String(20), nullable=False)
+    value = Column(String(255), nullable=False)
+    label = Column(String(255))          # human-readable (device name, city…)
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now())
+    seen_count = Column(BigInteger, nullable=False, default=1)
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 

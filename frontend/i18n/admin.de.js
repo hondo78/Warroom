@@ -30,7 +30,7 @@ window.I18N.de.admin = {
     saveSophos: "Sophos-Settings speichern",
 
     // M365
-    o365Hint: "Entra-ID-App-Registrierung mit Application-Berechtigung <code>ActivityFeed.Read</code> auf den <em>Office 365 Management APIs</em> (Admin-Consent erforderlich). Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche landen zusätzlich als Alerts auf der Attack-Map. Anzeige unter <a href=\"/o365.html\" class=\"osint-link\">Microsoft 365</a>.",
+    o365Hint: "Entra-ID-App-Registrierung mit Admin-Consent. Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche landen zusätzlich als Alerts auf der Attack-Map. Anzeige unter <a href=\"/o365.html\" class=\"osint-link\">Microsoft 365</a>.<br><strong>Benötigte Application-Berechtigungen:</strong><br>• <code>ActivityFeed.Read</code> (<em>Office 365 Management APIs</em>) — Login-Audit-Log.<br>• <code>User.RevokeSessions.All</code> (<em>Microsoft Graph</em>) — für die Login-Überwachung: Session-Widerruf bei Anmeldung von neuem Gerät/Standort.",
     tenantId: "Tenant ID",
     saveO365: "M365-Settings speichern",
 

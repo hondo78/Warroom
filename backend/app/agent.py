@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = {
     "block_ip", "block_ips", "block_subnet", "block_domain", "block_url",
-    "acknowledge", "isolate", "notify", "no_action",
+    "acknowledge", "isolate", "notify", "no_action", "revoke_sessions",
 }
 # isolate stays manual. Block actions ALWAYS require human approval and are
 # never auto-executed — regardless of agent_auto_execute. Only the listed
@@ -65,6 +65,7 @@ _SOURCE_LABELS: dict[str, str] = {
     "triage": "Triage",
     "event": "Event",
     "anomaly": "Anomaly",
+    "m365_login": "M365-Login",
 }
 
 
@@ -1677,10 +1678,20 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
             elif rec.action == "no_action":
                 result = {"noop": True}
 
+            elif rec.action == "revoke_sessions":
+                # M365 login watch: kill every session/refresh token of the
+                # user via Graph — forces re-auth on all devices.
+                user = str((rec.action_args or {}).get("target_user") or "").strip()
+                if not user:
+                    raise ValueError("no target_user for revoke_sessions")
+                from app.entra_client import entra_client
+                result = await entra_client.revoke_sign_in_sessions(user)
+
             else:
                 raise ValueError(f"unknown action {rec.action!r}")
 
             rec.status = "executed"
+            rec.error = None            # clear any error from a previous failed attempt
             rec.decided_at = datetime.now(timezone.utc)
             await db.commit()
         except Exception as e:

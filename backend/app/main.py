@@ -19,7 +19,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -163,6 +163,14 @@ async def lifespan(app: FastAPI):
         sync_mdr_threat_feed, "interval",
         seconds=max(30, settings.firewall_mdr_feed_sync_interval_seconds),
         id="firewall_mdr_feed_sync",
+    )
+    # M365 login watch — alerts (with revoke option) on sign-ins from new
+    # devices / locations. First pass seeds the baseline silently.
+    from app.m365_watch import m365_login_watch
+    scheduler.add_job(
+        m365_login_watch, "interval",
+        seconds=max(30, settings.m365_login_watch_interval_seconds),
+        id="m365_login_watch",
     )
     # Connection monitoring for specially-flagged blocklist / watchlist IPs —
     # tracks which internal hosts talk to them and alerts on new sessions.
@@ -728,6 +736,79 @@ async def get_o365_logins(
         },
         "configured": o365_client.configured,
     }
+
+
+# --- M365 login watch (new device / new location alerts + session revoke) ---
+
+@app.get("/api/o365/login-profiles")
+async def get_m365_login_profiles(db: AsyncSession = Depends(get_db)):
+    """Per-user baseline of known devices/locations plus the recent
+    new-device/location alerts (agent decisions, source_type='m365_login')."""
+    profiles = (await db.execute(
+        select(M365LoginProfile).order_by(M365LoginProfile.user_id, M365LoginProfile.kind,
+                                          M365LoginProfile.last_seen.desc())
+    )).scalars().all()
+
+    users: dict[str, dict] = {}
+    for p in profiles:
+        u = users.setdefault(p.user_id, {"user": p.user_id, "devices": [], "locations": []})
+        entry = {
+            "value": p.value, "label": p.label,
+            "first_seen": p.first_seen.isoformat() if p.first_seen else None,
+            "last_seen": p.last_seen.isoformat() if p.last_seen else None,
+            "seen_count": int(p.seen_count or 0),
+        }
+        (u["devices"] if p.kind == "device" else u["locations"]).append(entry)
+
+    decisions = (await db.execute(
+        select(AgentDecision)
+        .where(AgentDecision.source_type == "m365_login")
+        .order_by(AgentDecision.created_at.desc())
+        .limit(100)
+    )).scalars().all()
+
+    return {
+        "enabled": settings.m365_login_watch_enabled,
+        "seeded": bool(profiles),
+        "users": sorted(users.values(), key=lambda u: u["user"]),
+        "alerts": [
+            {
+                "id": d.id,
+                "user": (d.action_args or {}).get("target_user"),
+                "ip": d.source_ip,
+                "status": d.status,
+                "reasoning": d.reasoning,
+                "context": (d.action_args or {}).get("context") or {},
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "error": d.error,
+            }
+            for d in decisions
+        ],
+    }
+
+
+class RevokeSessionsIn(BaseModel):
+    user: str = Field(..., min_length=3, max_length=255)
+
+
+@app.post("/api/o365/revoke-sessions")
+async def o365_revoke_sessions(body: RevokeSessionsIn):
+    """Operator-initiated: revoke ALL sessions of a user immediately (Graph
+    revokeSignInSessions). The UI confirms before calling."""
+    from app.entra_client import entra_client
+    try:
+        result = await entra_client.revoke_sign_in_sessions(body.user.strip())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)[:300])
+    return result
+
+
+@app.post("/api/o365/login-watch/run-now")
+async def m365_login_watch_run_now():
+    """Run one watch pass immediately (synchronous — also used to seed the
+    baseline on first setup). Runs even while the watch is disabled."""
+    from app.m365_watch import m365_login_watch
+    return await m365_login_watch(force=True)
 
 
 # --- Shodan host intelligence (ports + CVEs) ---
@@ -4557,6 +4638,9 @@ class AdminSettingsIn(BaseModel):
     o365_tenant_id: str | None = None
     o365_client_id: str | None = None
     o365_client_secret: str | None = None
+    m365_login_watch_enabled: bool | None = None
+    m365_login_watch_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    m365_login_watch_lookback_minutes: int | None = Field(default=None, ge=5, le=1440)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None

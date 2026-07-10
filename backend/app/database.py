@@ -352,6 +352,23 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_monevent_detected ON monitored_events(detected_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_monevent_ip ON monitored_events(monitored_ip)",
+    # M365 login watch: per-user baseline of known devices / locations. A login
+    # outside this baseline raises an alert with a revoke-sessions option.
+    """
+    CREATE TABLE IF NOT EXISTS m365_login_profiles (
+        id BIGSERIAL PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        kind VARCHAR(20) NOT NULL,
+        value VARCHAR(255) NOT NULL,
+        label VARCHAR(255),
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        seen_count BIGINT NOT NULL DEFAULT 1,
+        UNIQUE (user_id, kind, value)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_m365_profiles_user ON m365_login_profiles(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_m365_profiles_last_seen ON m365_login_profiles(last_seen DESC)",
 ]
 
 

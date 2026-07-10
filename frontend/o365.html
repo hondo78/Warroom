@@ -90,6 +90,44 @@
                     <div class="small-box bg-warning"><div class="inner"><h3 id="o365Ips">-</h3><p data-i18n="o365.stat_ips">Quell-IPs</p></div><div class="small-box-footer" data-i18n="o365.stat_ips_sub">eindeutige Adressen</div><span class="icon"><i class="bi bi-globe"></i></span></div>
                 </div>
 
+                <!-- Login watch: new device / new location alerts + session revoke -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="o365.watch_title">Login-Überwachung — neue Geräte &amp; Standorte</h3>
+                        <div class="d-flex align-items-center gap-2">
+                            <span id="watchStatus" class="badge text-bg-secondary">—</span>
+                            <button class="btn btn-outline-primary btn-sm" onclick="watchRunNow(this)"><i class="bi bi-radar"></i> <span data-i18n="o365.watch_run_now">Jetzt prüfen</span></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="o365.watch_hint">
+                            Meldet jede erfolgreiche Anmeldung von einem <strong>neuen Gerät</strong> oder aus einem
+                            <strong>neuen Land</strong> (Baseline pro Benutzer) — per Telegram (mit Freigabe-Buttons) bzw. Teams.
+                            <strong>Freigeben = alle Sessions des Benutzers widerrufen</strong> (erneute Anmeldung überall nötig).
+                        </p>
+                        <h5 style="font-size:.9rem" data-i18n="o365.watch_alerts">Alarme (neues Gerät / neuer Standort)</h5>
+                        <div class="table-scroll" style="max-height:280px">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.time">Zeit</th><th data-i18n="o365.col_user">Benutzer</th><th data-i18n="o365.watch_col_new">Neu</th>
+                                    <th data-i18n="o365.col_ip">IP</th><th data-i18n="o365.col_location">Standort</th><th data-i18n="common.status">Status</th><th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="watchAlertsTable"></tbody>
+                            </table>
+                        </div>
+                        <h5 style="font-size:.9rem" class="mt-3" data-i18n="o365.watch_profiles">Bekannte Geräte &amp; Standorte pro Benutzer</h5>
+                        <div class="table-scroll" style="max-height:320px">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="o365.col_user">Benutzer</th><th data-i18n="o365.watch_col_devices">Geräte</th>
+                                    <th data-i18n="o365.watch_col_locations">Standorte</th><th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="watchProfilesTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="row">
                     <div class="col-lg-8">
                         <div class="card mb-3">

@@ -208,7 +208,10 @@ async def _handle_callback(cb: dict) -> None:
         if rec is None:
             await _answer_callback(cb_id, _tg("not_found"))
             return
-        if rec.status not in ("pending", "approved"):
+        # 'failed' decisions stay actionable so a transient failure (e.g. a
+        # revoke_sessions that hit a not-yet-granted Graph permission) can be
+        # retried by tapping Approve again once the cause is fixed.
+        if rec.status not in ("pending", "approved", "failed"):
             await _answer_callback(cb_id, _tg("already", s=rec.status))
             if message_id:
                 await _edit_caption(message_id, _decision_caption(rec, _decision_ip(rec)) + "\n\n" + _tg("already_tag", s=rec.status))

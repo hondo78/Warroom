@@ -32,6 +32,9 @@ MANAGED_KEYS: dict[str, type] = {
     "o365_tenant_id": str,
     "o365_client_id": str,
     "o365_client_secret": str,
+    "m365_login_watch_enabled": bool,
+    "m365_login_watch_interval_seconds": int,
+    "m365_login_watch_lookback_minutes": int,
     "entra_block_enabled": bool,
     "entra_named_location_id": str,
     "entra_ca_policy_id": str,
@@ -269,6 +272,7 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
         ("agent_ips_interval_seconds", "agent_ips_loop", "agent_ips_interval_seconds"),
         ("agent_failed_login_interval_seconds", "agent_failed_login_loop", "agent_failed_login_interval_seconds"),
         ("agent_anomaly_interval_seconds", "agent_anomaly_loop", "agent_anomaly_interval_seconds"),
+        ("m365_login_watch_interval_seconds", "m365_login_watch", "m365_login_watch_interval_seconds"),
     ):
         if key in sane:
             try:

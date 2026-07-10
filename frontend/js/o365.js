@@ -7,7 +7,9 @@ const _o365Filters = {};
 
 document.addEventListener('DOMContentLoaded', () => {
     refreshO365();
+    refreshLoginWatch();
     setInterval(refreshO365, 60000);
+    setInterval(refreshLoginWatch, 60000);
 
     // Column sort: click header toggles asc/desc
     document.querySelectorAll('#o365SortRow th[data-sort]').forEach(th => {
@@ -213,5 +215,143 @@ async function blockO365Ip(ip, btn) {
         if (btn) { btn.textContent = 'blocked'; btn.disabled = true; }
     } catch (err) {
         alert(t('o365.block_failed') + ' ' + err.message);
+    }
+}
+
+// ---- Login watch (new device / location alerts + session revoke) -------------
+
+async function refreshLoginWatch() {
+    try {
+        const r = await fetch('/api/o365/login-profiles');
+        if (!r.ok) return;
+        const d = await r.json();
+
+        const status = document.getElementById('watchStatus');
+        if (status) {
+            if (!d.seeded) {
+                status.className = 'badge text-bg-secondary';
+                status.textContent = t('o365.watch_not_seeded');
+            } else if (d.enabled) {
+                status.className = 'badge text-bg-success';
+                status.textContent = t('o365.watch_active');
+            } else {
+                status.className = 'badge text-bg-warning';
+                status.textContent = t('o365.watch_inactive');
+            }
+        }
+        renderWatchAlerts(d.alerts || []);
+        renderWatchProfiles(d.users || []);
+    } catch (err) {
+        console.error('login watch refresh failed:', err);
+    }
+}
+
+function _watchStatusBadge(s) {
+    const cls = { pending: 'text-bg-warning', executed: 'text-bg-danger',
+                  rejected: 'text-bg-secondary', failed: 'text-bg-danger' }[s] || 'text-bg-secondary';
+    const label = s === 'executed' ? t('o365.watch_revoked') : s;
+    return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function renderWatchAlerts(alerts) {
+    const tbody = document.getElementById('watchAlertsTable');
+    if (!tbody) return;
+    if (!alerts.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-3">${t('o365.watch_no_alerts')}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = alerts.map(a => {
+        const ctx = a.context || {};
+        const news = [];
+        if (ctx.new_device) news.push(`<span class="badge text-bg-danger" title="${escapeAttr(t('o365.watch_new_device'))}"><i class="bi bi-phone"></i> ${escapeHtml(ctx.new_device)}</span>`);
+        if (ctx.new_location) news.push(`<span class="badge text-bg-warning" title="${escapeAttr(t('o365.watch_new_location'))}"><i class="bi bi-geo-alt"></i> ${escapeHtml(ctx.new_location)}</span>`);
+        let action = '—';
+        // 'failed' stays actionable — a transient failure (e.g. a revoke before
+        // the Graph permission was granted) can be retried with the same button.
+        if (a.status === 'pending' || a.status === 'failed') {
+            const retry = a.status === 'failed';
+            const errTip = retry && a.error ? ` <span class="ack-label" title="${escapeAttr(a.error)}">❗</span>` : '';
+            const label = retry ? t('o365.watch_btn_retry') : t('o365.watch_btn_revoke');
+            action = `<button class="ack-btn" onclick="watchDecision(${a.id}, 'approve', this)">${label}</button>
+                      <button class="block-link" style="margin-left:.3rem" onclick="watchDecision(${a.id}, 'reject', this)">${t('o365.watch_btn_dismiss')}</button>${errTip}`;
+        }
+        const loc = [ctx.country, ctx.city].filter(Boolean).join(' / ') || '—';
+        return `<tr title="${escapeAttr(a.reasoning || '')}">
+            <td style="white-space:nowrap">${formatTime(a.created_at)}</td>
+            <td>${escapeHtml(a.user || '—')}</td>
+            <td>${news.join(' ') || '—'}</td>
+            <td><code>${escapeHtml(a.ip || '—')}</code></td>
+            <td>${escapeHtml(loc)}</td>
+            <td>${_watchStatusBadge(a.status)}</td>
+            <td>${action}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderWatchProfiles(users) {
+    const tbody = document.getElementById('watchProfilesTable');
+    if (!tbody) return;
+    if (!users.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-secondary py-3">${t('o365.watch_no_profiles')}</td></tr>`;
+        return;
+    }
+    const pill = (e, icon) =>
+        `<span class="badge text-bg-secondary me-1" title="${escapeAttr(t('o365.watch_seen', { n: e.seen_count, last: formatTime(e.last_seen) }))}"><i class="bi ${icon}"></i> ${escapeHtml(e.label || e.value)}</span>`;
+    tbody.innerHTML = users.map(u => `
+        <tr>
+            <td>${escapeHtml(u.user)}</td>
+            <td>${u.devices.map(e => pill(e, 'bi-phone')).join(' ') || '—'}</td>
+            <td>${u.locations.map(e => pill(e, 'bi-geo-alt')).join(' ') || '—'}</td>
+            <td><button class="block-link" onclick="revokeUserSessions('${escapeAttr(u.user)}', this)">${t('o365.watch_btn_revoke')}</button></td>
+        </tr>`).join('');
+}
+
+// Approve (= revoke sessions) or reject a pending login-watch decision — same
+// endpoints the dashboard's agent card uses.
+async function watchDecision(id, verb, btn) {
+    if (verb === 'approve' && !confirm(t('o365.watch_confirm_revoke_decision'))) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/agent/decisions/${id}/${verb}`, { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        await refreshLoginWatch();
+    } catch (err) {
+        alert(t('o365.watch_action_failed') + ': ' + err.message);
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Operator-initiated immediate revoke for a user (no pending decision).
+async function revokeUserSessions(user, btn) {
+    if (!confirm(t('o365.watch_confirm_revoke', { user }))) return;
+    if (btn) { btn.disabled = true; }
+    try {
+        const r = await fetch('/api/o365/revoke-sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        if (btn) { btn.textContent = t('o365.watch_revoked'); }
+    } catch (err) {
+        alert(t('o365.watch_action_failed') + ': ' + err.message);
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function watchRunNow(btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/o365/login-watch/run-now', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        await refreshLoginWatch();
+        if (d.seed) alert(t('o365.watch_seeded', { n: d.profiles || 0 }));
+    } catch (err) {
+        alert(t('o365.watch_action_failed') + ': ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
