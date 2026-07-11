@@ -333,6 +333,33 @@ class M365LoginProfile(Base):
     seen_count = Column(BigInteger, nullable=False, default=1)
 
 
+class CveScore(Base):
+    """CVSS / KEV / EPSS for a CVE, cached from the free Shodan CVE DB. Static
+    per CVE, so this is a permanent lookup table shared across all IPs/hosts."""
+    __tablename__ = "cve_scores"
+
+    cve_id = Column(String(30), primary_key=True)
+    cvss = Column(Float)
+    cvss_v3 = Column(Float)
+    severity = Column(String(12))       # critical | high | medium | low | none
+    kev = Column(Boolean, nullable=False, default=False)   # CISA known-exploited
+    epss = Column(Float)                # exploit-prediction score 0..1
+    summary = Column(Text)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class IpHostname(Base):
+    """Resolved hostname for an internal IP, cached across sources. Positive
+    hits get a long TTL, misses a short one so a host that later comes online
+    still gets picked up. Source: 'sophos' | 'dns' | 'netbios'."""
+    __tablename__ = "ip_hostnames"
+
+    ip = Column(String(45), primary_key=True)
+    hostname = Column(String(255))       # NULL = resolved-but-nothing-found (negative)
+    source = Column(String(20))
+    resolved_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 

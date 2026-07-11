@@ -1,6 +1,7 @@
 const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
     o365: ['o365_tenant_id', 'o365_client_id', 'o365_client_secret'],
+    hostnames: ['hostname_resolve_enabled', 'internal_dns_servers', 'hostname_netbios_enabled', 'hostname_cache_ttl_hours', 'hostname_negative_ttl_hours'],
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],

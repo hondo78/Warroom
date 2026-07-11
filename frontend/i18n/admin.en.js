@@ -30,6 +30,15 @@ window.I18N.en.admin = {
     saveSophos: "Save Sophos settings",
 
     // M365
+    hostnamesTitle: "Internal hostnames",
+    hostnamesHint: "Resolves hostnames for internal (private) IPs and shows them wherever an internal IP appears. Sources in order: <strong>Sophos endpoints</strong> → <strong>reverse DNS (PTR)</strong> → <strong>NetBIOS</strong>. For PTR of private ranges, enter your internal DNS server IP (the container's default resolver usually can't).",
+    hostnamesEnabled: "Resolution active",
+    internalDnsServers: "Internal DNS servers",
+    internalDnsServersHint: "Comma-separated. Empty ⇒ system resolver. PTR records must exist.",
+    netbiosEnabled: "NetBIOS fallback (UDP 137)",
+    hostnameTtl: "Cache TTL (hours)",
+    hostnameNegTtl: "Negative TTL (hours)",
+    saveHostnames: "Save hostname settings",
     o365Hint: "Entra ID app registration with admin consent. The collector fetches login events (UserLoggedIn / UserLoginFailed); failed attempts also appear as alerts on the attack map. Shown under <a href=\"/o365.html\" class=\"osint-link\">Microsoft 365</a>.<br><strong>Required application permissions:</strong><br>• <code>ActivityFeed.Read</code> (<em>Office 365 Management APIs</em>) — login audit log.<br>• <code>User.RevokeSessions.All</code> (<em>Microsoft Graph</em>) — for the login watch: revoke sessions on sign-in from a new device/location.",
     tenantId: "Tenant ID",
     saveO365: "Save M365 settings",

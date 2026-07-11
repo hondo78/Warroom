@@ -64,6 +64,11 @@ window.I18N.de.osint = {
     error: "Fehler",
 
     // triage
+    add_watchlist: "Auf Watchlist",
+    watchlist_comment_prompt: "Kommentar für den Watchlist-Eintrag (optional):",
+    watchlist_added: "{ip} auf die Watchlist gesetzt.",
+    watchlist_link: "Überwachung",
+    watchlist_failed: "Watchlist fehlgeschlagen",
     triage_hand_over: "An KI-Triage übergeben",
     triage_note_prompt: "Optionaler Hinweis für den KI-Agenten (Kontext):",
     triage_running: "KI-Triage läuft — der Agent prüft den Wert (kann einige Sekunden dauern)…",
@@ -86,6 +91,12 @@ window.I18N.de.osint = {
     open_shodan_search: "Shodan-Suche öffnen",
     open_shodan: "Shodan öffnen",
     l_country_city: "Land/Stadt",
+    sev_critical: "kritisch",
+    sev_high: "hoch",
+    sev_medium: "mittel",
+    sev_low: "niedrig",
+    kev_tip: "CISA KEV — aktiv in freier Wildbahn ausgenutzt",
+    cve_truncated: "(nur die schwersten bewertet)",
     l_open_ports: "Offene Ports",
     l_as_of: "Stand",
 

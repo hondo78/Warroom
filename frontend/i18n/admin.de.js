@@ -30,6 +30,15 @@ window.I18N.de.admin = {
     saveSophos: "Sophos-Settings speichern",
 
     // M365
+    hostnamesTitle: "Interne Hostnamen",
+    hostnamesHint: "Löst Hostnamen für interne (private) IPs auf und zeigt sie überall an, wo eine interne IP erscheint. Quellen in dieser Reihenfolge: <strong>Sophos-Endpoints</strong> → <strong>Reverse-DNS (PTR)</strong> → <strong>NetBIOS</strong>. Für PTR privater Bereiche trage die IP deines internen DNS-Servers ein (der Standard-Resolver des Containers kann das i.d.R. nicht).",
+    hostnamesEnabled: "Auflösung aktiv",
+    internalDnsServers: "Interne DNS-Server",
+    internalDnsServersHint: "Kommagetrennt. Leer ⇒ System-Resolver. PTR-Records müssen existieren.",
+    netbiosEnabled: "NetBIOS-Fallback (UDP 137)",
+    hostnameTtl: "Cache-TTL (Stunden)",
+    hostnameNegTtl: "Negativ-TTL (Stunden)",
+    saveHostnames: "Hostname-Settings speichern",
     o365Hint: "Entra-ID-App-Registrierung mit Admin-Consent. Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche landen zusätzlich als Alerts auf der Attack-Map. Anzeige unter <a href=\"/o365.html\" class=\"osint-link\">Microsoft 365</a>.<br><strong>Benötigte Application-Berechtigungen:</strong><br>• <code>ActivityFeed.Read</code> (<em>Office 365 Management APIs</em>) — Login-Audit-Log.<br>• <code>User.RevokeSessions.All</code> (<em>Microsoft Graph</em>) — für die Login-Überwachung: Session-Widerruf bei Anmeldung von neuem Gerät/Standort.",
     tenantId: "Tenant ID",
     saveO365: "M365-Settings speichern",

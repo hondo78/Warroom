@@ -164,6 +164,13 @@ async def lifespan(app: FastAPI):
         seconds=max(30, settings.firewall_mdr_feed_sync_interval_seconds),
         id="firewall_mdr_feed_sync",
     )
+    # Internal-hostname resolver: drains the pending set (DNS/NetBIOS), caching
+    # names for internal IPs shown across the UI.
+    from app.hostname_service import hostname_resolve_worker
+    scheduler.add_job(
+        hostname_resolve_worker, "interval",
+        seconds=20, id="hostname_resolve_worker",
+    )
     # M365 login watch — alerts (with revoke option) on sign-ins from new
     # devices / locations. First pass seeds the baseline silently.
     from app.m365_watch import m365_login_watch
@@ -809,6 +816,138 @@ async def m365_login_watch_run_now():
     baseline on first setup). Runs even while the watch is disabled."""
     from app.m365_watch import m365_login_watch
     return await m365_login_watch(force=True)
+
+
+# --- Internal hostname resolution ---
+
+class HostnamesIn(BaseModel):
+    ips: list[str] = Field(..., min_length=1, max_length=1000)
+
+
+@app.post("/api/hostnames")
+async def resolve_hostnames(body: HostnamesIn):
+    """Bulk resolve hostnames for internal IPs. Returns everything already known
+    (Sophos inventory + cache) immediately and queues the rest for background
+    resolution (reverse DNS / NetBIOS) — poll again to pick those up. Only
+    internal/private IPs are considered."""
+    from app.hostname_service import lookup_cached, queue_for_resolution, is_internal
+    ips = [ip for ip in (body.ips or []) if isinstance(ip, str)]
+    known = await lookup_cached(ips)
+    # Queue the internal IPs we couldn't answer from cache/inventory.
+    misses = [ip for ip in ips if is_internal(ip) and ip not in known]
+    if misses:
+        await queue_for_resolution(misses)
+    return {"hostnames": known, "pending": misses}
+
+
+# Private-IPv4 SQL guard (regex first so the ::inet cast only sees IPv4 literals).
+_PRIV_SQL = (
+    "{c} ~ '^[0-9.]+$' AND ({c}::inet << inet '10.0.0.0/8' "
+    "OR {c}::inet << inet '172.16.0.0/12' OR {c}::inet << inet '192.168.0.0/16')"
+)
+
+
+@cached(ttl=120)
+async def _internal_netflow_agg(days: int) -> list[dict]:
+    """Distinct internal IPs seen in NetFlow (both directions) over the window,
+    with last/first activity and traffic totals. Heavy (multi-million-row scan)
+    so it is cached; the hostname join happens live on top."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    sql = text(f"""
+        SELECT ip, MAX(last_seen) AS last_seen, MIN(first_seen) AS first_seen,
+               SUM(bytes) AS bytes, SUM(flows) AS flows
+        FROM (
+            SELECT src_ip AS ip, MAX(bucket_start) AS last_seen, MIN(bucket_start) AS first_seen,
+                   SUM(bytes) AS bytes, SUM(flows) AS flows
+            FROM netflow_buckets
+            WHERE bucket_start >= :since AND {_PRIV_SQL.format(c='src_ip')}
+            GROUP BY src_ip
+            UNION ALL
+            SELECT dst_ip AS ip, MAX(bucket_start), MIN(bucket_start), SUM(bytes), SUM(flows)
+            FROM netflow_buckets
+            WHERE bucket_start >= :since AND {_PRIV_SQL.format(c='dst_ip')}
+            GROUP BY dst_ip
+        ) t
+        GROUP BY ip
+        ORDER BY MAX(last_seen) DESC
+        LIMIT 3000
+    """)
+    async with async_session() as db:
+        rows = (await db.execute(sql, {"since": since})).all()
+    return [
+        {"ip": r[0],
+         "last_seen": r[1].isoformat() if r[1] else None,
+         "first_seen": r[2].isoformat() if r[2] else None,
+         "bytes": int(r[3] or 0), "flows": int(r[4] or 0)}
+        for r in rows
+    ]
+
+
+@app.get("/api/hosts/internal")
+async def list_internal_hosts(
+    days: int = Query(default=7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """Auto-fed inventory of internal hosts: every private IP seen in NetFlow
+    (plus managed Sophos endpoints), enriched with its resolved hostname
+    (Sophos / DNS / NetBIOS / manual). Unresolved IPs are queued for background
+    resolution — poll again to pick up names as they arrive."""
+    from app.hostname_service import lookup_cached, queue_for_resolution, is_internal
+
+    agg = await _internal_netflow_agg(days)
+    by_ip: dict[str, dict] = {a["ip"]: dict(a) for a in agg if is_internal(a["ip"])}
+
+    # Fold in managed endpoints so known devices show even without recent NetFlow.
+    ep_rows = (await db.execute(
+        select(Endpoint.ipv4, Endpoint.hostname, Endpoint.endpoint_type,
+               Endpoint.os_name, Endpoint.last_seen_at)
+        .where(Endpoint.ipv4.isnot(None))
+    )).all()
+    ep_meta: dict[str, dict] = {}
+    for ipv4, hn, etype, osn, seen in ep_rows:
+        if not ipv4 or not is_internal(ipv4):
+            continue
+        ep_meta[ipv4] = {"os": osn, "device_type": etype}
+        by_ip.setdefault(ipv4, {"ip": ipv4, "last_seen": None, "first_seen": None,
+                                "bytes": 0, "flows": 0})
+
+    ips = list(by_ip.keys())
+    names = await lookup_cached(ips)
+    misses = [ip for ip in ips if ip not in names]
+    if misses:
+        await queue_for_resolution(misses)
+
+    items = []
+    for ip, base in by_ip.items():
+        nm = names.get(ip) or {}
+        meta = ep_meta.get(ip) or {}
+        items.append({
+            **base,
+            "hostname": nm.get("hostname"),
+            "source": nm.get("source"),
+            "os": meta.get("os"),
+            "device_type": meta.get("device_type"),
+        })
+    # Named first, then by recent activity.
+    items.sort(key=lambda x: (x["hostname"] is not None, x["last_seen"] or ""), reverse=True)
+    return {"items": items, "resolving": len(misses), "window_days": days}
+
+
+class HostnameSetIn(BaseModel):
+    ip: str = Field(..., min_length=7, max_length=45)
+    hostname: str | None = Field(None, max_length=255)
+
+
+@app.post("/api/hosts/internal/hostname")
+async def set_internal_hostname(body: HostnameSetIn):
+    """Operator override: name an internal IP manually (empty hostname clears it
+    so automatic resolution takes over again). Manual names are never overwritten
+    by the auto-resolver."""
+    from app.hostname_service import set_manual
+    try:
+        return await set_manual(body.ip.strip(), body.hostname)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Shodan host intelligence (ports + CVEs) ---
@@ -4641,6 +4780,11 @@ class AdminSettingsIn(BaseModel):
     m365_login_watch_enabled: bool | None = None
     m365_login_watch_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     m365_login_watch_lookback_minutes: int | None = Field(default=None, ge=5, le=1440)
+    hostname_resolve_enabled: bool | None = None
+    internal_dns_servers: str | None = Field(default=None, max_length=500)
+    hostname_netbios_enabled: bool | None = None
+    hostname_cache_ttl_hours: int | None = Field(default=None, ge=1, le=8760)
+    hostname_negative_ttl_hours: int | None = Field(default=None, ge=1, le=168)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None
@@ -5270,7 +5414,7 @@ async def get_agent_workflow():
     # keyed by `key` (agentWorkflow.pipeline.<key>.step/.detail).
     pipeline = [
         {"key": "candidates", "step": "Kandidaten", "detail": "Quelle liefert Kandidaten (Alert / WAF- / IPS- / Login-Events)"},
-        {"key": "osint", "step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ Block-Indikator"},
+        {"key": "osint", "step": "OSINT", "detail": "Anreicherung öffentlicher IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan High/Critical-CVE (CVSS >= 7) oder KEV ⇒ Block-Indikator"},
         {"key": "llm", "step": "LLM", "detail": "Strukturierte Abfrage mit Pydantic-Schema (response_format) je Stufen-Prompt"},
         {"key": "validation", "step": "Validierung", "detail": "Pydantic-Validierung + Beschränkung auf erlaubte Aktionen der Stufe"},
         {"key": "persistence", "step": "Persistenz", "detail": "Entscheidung in agent_decisions gespeichert"},

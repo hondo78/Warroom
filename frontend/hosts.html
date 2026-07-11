@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Interne Hosts</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="hosts">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <select id="hostsDays" class="form-select form-select-sm" style="width:auto" onchange="refreshHosts()">
+                    <option value="1" data-i18n="dashboard.range_24h">24 Stunden</option>
+                    <option value="7" selected data-i18n="dashboard.range_7d">7 Tage</option>
+                    <option value="30" data-i18n="dashboard.range_30d">30 Tage</option>
+                    <option value="90" data-i18n="dashboard.range_90d">90 Tage</option>
+                </select>
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshHosts()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Interne Hosts</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+                    <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+                    <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
+                    <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+                    <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+                    <li class="nav-item"><a href="/monitored.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>Überwachung</p></a></li>
+                    <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
+                    <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
+                    <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+                    <li class="nav-item"><a href="/hosts.html" class="nav-link active"><i class="nav-icon bi bi-hdd-network"></i><p data-i18n="nav.hosts">Interne Hosts</p></a></li>
+                    <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+                    <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+                    <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+                    <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
+                    <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>OSINT</p></a></li>
+                    <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+                    <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-gear"></i><p>Admin</p></a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid">
+                <h3 class="mb-0" data-i18n="hosts.title">Interne Hosts</h3>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <p class="admin-hint" data-i18n-html="hosts.intro">
+                    Automatisch befüllt aus dem NetFlow (interne IPs, die wir sehen) und den Sophos-Endpoints.
+                    Der Hostname wird über <strong>Sophos → Reverse-DNS → NetBIOS</strong> ermittelt. Fehlt eine
+                    Auflösung, kannst du den Hostnamen <strong>manuell eintragen</strong> — manuelle Namen werden nie überschrieben.
+                </p>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-info"><div class="inner"><h3 id="hTotal">-</h3><p data-i18n="hosts.stat_total">Interne Hosts</p></div><span class="icon"><i class="bi bi-hdd-network"></i></span></div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-success"><div class="inner"><h3 id="hNamed">-</h3><p data-i18n="hosts.stat_named">Mit Hostname</p></div><span class="icon"><i class="bi bi-tag"></i></span></div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-warning"><div class="inner"><h3 id="hUnnamed">-</h3><p data-i18n="hosts.stat_unnamed">Ohne Hostname</p></div><span class="icon"><i class="bi bi-question-circle"></i></span></div>
+                    </div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="small-box bg-secondary"><div class="inner"><h3 id="hResolving" style="font-size:1.4rem">-</h3><p data-i18n="hosts.stat_resolving">Wird aufgelöst…</p></div><span class="icon"><i class="bi bi-hourglass-split"></i></span></div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="hosts.table_title">Hosts</h3>
+                        <input type="text" data-filter-for="hostsTable" class="form-control form-control-sm" style="max-width:280px" data-i18n-placeholder="hosts.filter" placeholder="Filter (IP, Hostname, Quelle…)">
+                    </div>
+                    <div class="card-body">
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="hosts.col_ip">IP</th><th data-i18n="hosts.col_hostname">Hostname</th><th data-i18n="hosts.col_source">Quelle</th>
+                                    <th data-i18n="hosts.col_os">OS / Typ</th><th data-i18n="hosts.col_last">Letzte Aktivität</th><th data-i18n="hosts.col_traffic">Traffic</th><th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="hostsTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Manual hostname modal -->
+<div class="modal-overlay" id="hostModal">
+    <div class="modal alert-detail-modal" style="max-width:480px">
+        <div class="alert-detail-header">
+            <h3 data-i18n="hosts.edit_title">Hostname eintragen</h3>
+            <button class="modal-close" onclick="closeHostModal()" title="Schliessen" data-i18n-title="common.close">×</button>
+        </div>
+        <div class="alert-detail-body">
+            <p style="margin:0 0 .6rem">IP: <code id="hostModalIp"></code></p>
+            <label class="form-label" style="font-size:.8rem" for="hostModalName" data-i18n="hosts.col_hostname">Hostname</label>
+            <input type="text" id="hostModalName" class="form-control form-control-sm" placeholder="z.B. NAS-01" autocomplete="off">
+            <div id="hostModalMeta" class="text-secondary" style="font-size:.72rem;margin-top:.4rem"></div>
+        </div>
+        <div class="modal-actions">
+            <button class="text-danger" id="hostClearBtn" onclick="clearHostname()" data-i18n="hosts.clear_manual">Manuellen Namen entfernen</button>
+            <button onclick="closeHostModal()" data-i18n="common.cancel">Abbrechen</button>
+            <button class="primary" onclick="saveHostname()" data-i18n="common.save">Speichern</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/hosts.de.js"></script>
+    <script src="/i18n/hosts.en.js"></script>
+    <script src="/js/i18n.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/hosts.js"></script>
+<script src="/js/hostnames.js"></script>
+</body>
+</html>

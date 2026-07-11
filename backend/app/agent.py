@@ -383,11 +383,12 @@ confidence aus.
 3. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, High Risk, Bad})
                                                     → block_ip.
-4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern — die IP exponiert
-   mehrere bekannte Schwachstellen und ist damit ein verwundbares/kompromittiertes
-   System bzw. eine angreifende Maschine mit großer Angriffsfläche.
+4. SHODAN-CVE-SCHWERE: shodan.cve_severity.has_high_critical = true — die IP
+   exponiert MINDESTENS EINE CVE mit CVSS High/Critical (>= 7.0), ODER
+   shodan.cve_severity.kev > 0 (CISA-KEV, aktiv ausgenutzt).
                                                     → block_ip.
-   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs aus shodan.vulns.
+   NUR mittlere/niedrige CVEs (has_high_critical = false) sind KEIN Block-Grund.
+   Nenne im reasoning die schwerste CVE-ID + CVSS/Severity (aus cve_severity.top).
 5. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
                                                     → block_ip.
@@ -434,11 +435,12 @@ confidence aus.
 3. OSINT Sophos Intelix hit (security_category set OR
    intelix.score >= 70 OR intelix.category ∈ {Malicious, High Risk, Bad})
                                                     → block_ip.
-4. SHODAN VULNS: shodan.vulns contains MORE THAN 2 CVE numbers — the IP exposes
-   multiple known vulnerabilities and is therefore a vulnerable/compromised
-   system or an attacking machine with a large attack surface.
+4. SHODAN CVE SEVERITY: shodan.cve_severity.has_high_critical = true — the IP
+   exposes AT LEAST ONE CVE with CVSS High/Critical (>= 7.0), OR
+   shodan.cve_severity.kev > 0 (CISA KEV, actively exploited).
                                                     → block_ip.
-   Name in the reasoning the number of CVEs and 2-3 CVE IDs from shodan.vulns.
+   Medium/low CVEs only (has_high_critical = false) are NOT a block reason.
+   Name in the reasoning the worst CVE id + CVSS/severity (from cve_severity.top).
 5. OSINT hit from other providers (abuseipdb.abuse_score >= 75 OR
    virustotal.malicious >= 2 OR greynoise.classification = "malicious")
                                                     → block_ip.
@@ -469,9 +471,9 @@ action="block_ip", sonst action="no_action". Gib KEINE confidence aus.
    Schwere ist Block ohne weitere Belege gerechtfertigt.
 2. count_24h >= threshold                            → block_ip.
 3. OSINT-Sophos-Intelix-Treffer                      → block_ip.
-4. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
-   kompromittiertes System, große Angriffsfläche)    → block_ip.
-   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+4. SHODAN-CVE-SCHWERE: shodan.cve_severity.has_high_critical = true (mind. eine
+   CVE mit CVSS High/Critical >= 7.0) ODER kev > 0    → block_ip.
+   Nur mittlere/niedrige CVEs sind KEIN Block-Grund. Nenne die schwerste CVE+CVSS.
 5. OSINT-Treffer anderer Provider                    → block_ip.
 6. Sonst                                             → no_action.
 
@@ -500,9 +502,9 @@ action="block_ip", otherwise action="no_action". Gib KEINE confidence aus.
    severity a block is justified without further evidence.
 2. count_24h >= threshold                            → block_ip.
 3. OSINT Sophos Intelix hit                          → block_ip.
-4. SHODAN VULNS: shodan.vulns contains MORE THAN 2 CVE numbers (vulnerable/
-   compromised system, large attack surface)         → block_ip.
-   Name in the reasoning the number of CVEs and 2-3 CVE IDs.
+4. SHODAN CVE SEVERITY: shodan.cve_severity.has_high_critical = true (>= one CVE
+   with CVSS High/Critical >= 7.0) OR kev > 0         → block_ip.
+   Medium/low CVEs only are NOT a block reason. Name the worst CVE + CVSS.
 5. OSINT hit from other providers                    → block_ip.
 6. Otherwise                                         → no_action.
 
@@ -530,9 +532,9 @@ ENTSCHEIDUNGSREGELN (erste passende greift). Ist eine Schwelle erreicht ⇒
 action="block_ip", sonst action="no_action". Gib KEINE confidence aus.
 1. count_24h >= threshold                          → block_ip.
 2. OSINT Sophos-Intelix-Treffer                    → block_ip.
-3. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern (verwundbares/
-   kompromittiertes System)                        → block_ip.
-   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+3. SHODAN-CVE-SCHWERE: shodan.cve_severity.has_high_critical = true (mind. eine
+   CVE mit CVSS High/Critical >= 7.0) ODER kev > 0  → block_ip.
+   Nur mittlere/niedrige CVEs sind KEIN Block-Grund. Nenne die schwerste CVE+CVSS.
 4. OSINT-Treffer anderer Provider                  → block_ip.
 5. Sonst                                           → no_action.
 
@@ -560,9 +562,9 @@ DECISION RULES (first match wins). If a threshold is reached ⇒
 action="block_ip", otherwise action="no_action". Gib KEINE confidence aus.
 1. count_24h >= threshold                          → block_ip.
 2. OSINT Sophos Intelix hit                        → block_ip.
-3. SHODAN VULNS: shodan.vulns contains MORE THAN 2 CVE numbers (vulnerable/
-   compromised system)                             → block_ip.
-   Name in the reasoning the number of CVEs and 2-3 CVE IDs.
+3. SHODAN CVE SEVERITY: shodan.cve_severity.has_high_critical = true (>= one CVE
+   with CVSS High/Critical >= 7.0) OR kev > 0       → block_ip.
+   Medium/low CVEs only are NOT a block reason. Name the worst CVE + CVSS.
 4. OSINT hit from other providers                  → block_ip.
 5. Otherwise                                       → no_action.
 
@@ -690,9 +692,9 @@ erreicht ⇒ Block, sonst no_action. Gib KEINE confidence aus.
 1. OSINT Sophos-Intelix-Treffer (security_category gesetzt ODER
    intelix.score >= 70 ODER intelix.category ∈ {Malicious, Phishing, Spam,
    High Risk, Bad})                                  → Block.
-2. SHODAN-VULNS (nur bei value_type="ip"): shodan.vulns enthält MEHR ALS 2
-   CVE-Nummern (verwundbares/kompromittiertes System) → Block.
-   Nenne im reasoning die Anzahl CVEs und 2-3 CVE-IDs.
+2. SHODAN-CVE-SCHWERE (nur bei value_type="ip"): shodan.cve_severity.has_high_critical
+   = true (CVE mit CVSS High/Critical >= 7.0) ODER kev > 0 → Block.
+   Nur mittlere/niedrige CVEs sind KEIN Block-Grund. Nenne die schwerste CVE+CVSS.
 3. OSINT-Treffer anderer Provider (abuseipdb.abuse_score >= 75 ODER
    virustotal.malicious >= 2 ODER greynoise.classification = "malicious")
                                                       → Block.
@@ -731,9 +733,9 @@ reached ⇒ Block, otherwise no_action. Gib KEINE confidence aus.
 1. OSINT Sophos Intelix hit (security_category set OR
    intelix.score >= 70 OR intelix.category ∈ {Malicious, Phishing, Spam,
    High Risk, Bad})                                  → Block.
-2. SHODAN VULNS (only for value_type="ip"): shodan.vulns contains MORE THAN 2
-   CVE numbers (vulnerable/compromised system)        → Block.
-   Name in the reasoning the number of CVEs and 2-3 CVE IDs.
+2. SHODAN CVE SEVERITY (only for value_type="ip"): shodan.cve_severity.has_high_critical
+   = true (CVE with CVSS High/Critical >= 7.0) OR kev > 0 → Block.
+   Medium/low CVEs only are NOT a block reason. Name the worst CVE + CVSS.
 3. OSINT hit from other providers (abuseipdb.abuse_score >= 75 OR
    virustotal.malicious >= 2 OR greynoise.classification = "malicious")
                                                       → Block.
@@ -853,7 +855,7 @@ ENTSCHEIDUNGSREGELN (erste passende greift). Gib KEINE confidence aus.
    öffentlich) und bösartigem Befund — Event-Typ enthält "CommandAndControl"
    oder "Threat::Detected", ODER OSINT belegt Bösartigkeit (intelix-Treffer,
    abuseipdb.abuse_score >= 75, virustotal.malicious >= 2,
-   greynoise.classification = "malicious", ODER shodan.vulns > 2 CVEs)
+   greynoise.classification = "malicious", ODER shodan.cve_severity.has_high_critical (High/Critical-CVE oder KEV))
                                                     → block_ip (target_ip = die
        bösartige externe IP). Nenne im reasoning die ausschlaggebenden Signale.
 2. Aktiver Endpoint-Befund OHNE blockbare externe IP, aber mit klarem Gerätebezug
@@ -892,7 +894,7 @@ DECISION RULES (first match wins). Gib KEINE confidence aus.
    public) and a malicious finding — event type contains "CommandAndControl"
    or "Threat::Detected", OR OSINT proves maliciousness (intelix hit,
    abuseipdb.abuse_score >= 75, virustotal.malicious >= 2,
-   greynoise.classification = "malicious", OR shodan.vulns > 2 CVEs)
+   greynoise.classification = "malicious", OR shodan.cve_severity.has_high_critical (High/Critical CVE or KEV))
                                                     → block_ip (target_ip = the
        malicious external IP). Name in the reasoning the decisive signals.
 2. Active endpoint finding WITHOUT a blockable external IP, but with a clear
@@ -930,7 +932,9 @@ ENTSCHEIDUNGSREGELN (in Reihenfolge prüfen, erste passende greift):
    ODER intelix.category ∈ {Malicious, High Risk, Bad, botnet})   → block_ip.
 2. abuseipdb.abuse_score >= 75 ODER virustotal.malicious >= 2
    ODER greynoise.classification = "malicious"                    → block_ip.
-3. SHODAN-VULNS: shodan.vulns enthält MEHR ALS 2 CVE-Nummern      → block_ip.
+3. SHODAN-CVE-SCHWERE: shodan.cve_severity.has_high_critical=true
+   (CVE mit CVSS High/Critical >= 7.0) ODER kev > 0               → block_ip.
+   Nur mittlere/niedrige CVEs sind KEIN Block-Grund.
 4. Sonst                                                          → no_action.
 
 Die Anomalie selbst (hoher Score) ist KEIN Block-Grund — nur OSINT-Belege zählen.
@@ -969,7 +973,9 @@ DECISION RULES (check in order, first match wins):
    OR intelix.category ∈ {Malicious, High Risk, Bad, botnet})     → block_ip.
 2. abuseipdb.abuse_score >= 75 OR virustotal.malicious >= 2
    OR greynoise.classification = "malicious"                      → block_ip.
-3. SHODAN VULNS: shodan.vulns contains MORE THAN 2 CVE numbers    → block_ip.
+3. SHODAN CVE SEVERITY: shodan.cve_severity.has_high_critical=true
+   (CVE with CVSS High/Critical >= 7.0) OR kev > 0                → block_ip.
+   Medium/low CVEs only are NOT a block reason.
 4. Otherwise                                                      → no_action.
 
 The anomaly itself (high score) is NOT a reason to block — only OSINT evidence
@@ -1063,6 +1069,7 @@ def _osint_summary(osint: dict[str, Any]) -> dict[str, Any]:
     without storing the full provider payloads."""
     if not isinstance(osint, dict):
         return {}
+    sev = (osint.get("shodan") or {}).get("cve_severity") or {}
     return {
         "cached": osint.get("cached"),
         "abuseipdb_score": (osint.get("abuseipdb") or {}).get("abuse_score"),
@@ -1071,6 +1078,9 @@ def _osint_summary(osint: dict[str, Any]) -> dict[str, Any]:
         "intelix_category": (osint.get("intelix") or {}).get("category"),
         "intelix_score": (osint.get("intelix") or {}).get("score"),
         "greynoise_classification": (osint.get("greynoise") or {}).get("classification"),
+        "cve_high_critical": sev.get("high_critical"),
+        "cve_kev": sev.get("kev"),
+        "cve_max_cvss": sev.get("max_cvss"),
     }
 
 

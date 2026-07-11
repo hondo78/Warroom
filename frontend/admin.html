@@ -39,6 +39,7 @@
                     <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-fire"></i><p>Firewalls</p></a></li>
                     <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
                     <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+                    <li class="nav-item"><a href="/hosts.html" class="nav-link"><i class="nav-icon bi bi-hdd-network"></i><p>Interne Hosts</p></a></li>
                     <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
                     <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
                     <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
@@ -111,6 +112,38 @@
                         </div>
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('o365')" data-i18n="admin.saveO365">M365-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Internal hostname resolution -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title mb-0" data-i18n="admin.hostnamesTitle">Interne Hostnamen</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.hostnamesHint">
+                            Löst Hostnamen für interne (private) IPs auf und zeigt sie überall an, wo eine interne IP erscheint.
+                            Quellen in dieser Reihenfolge: <strong>Sophos-Endpoints</strong> → <strong>Reverse-DNS (PTR)</strong> → <strong>NetBIOS</strong>.
+                            Für PTR privater Bereiche trage die IP deines internen DNS-Servers ein (der Standard-Resolver des Containers kann das i.d.R. nicht).
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.hostnamesEnabled">Auflösung aktiv</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="hostname_resolve_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.internalDnsServers">Interne DNS-Server</label></div>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control form-control-sm" data-key="internal_dns_servers" placeholder="z.B. 172.16.0.1, 172.16.0.2" autocomplete="off">
+                                <small class="admin-hint" data-i18n="admin.internalDnsServersHint">Kommagetrennt. Leer ⇒ System-Resolver. PTR-Records müssen existieren.</small>
+                            </div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.netbiosEnabled">NetBIOS-Fallback (UDP 137)</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="hostname_netbios_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.hostnameTtl">Cache-TTL (Stunden)</label></div>
+                            <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="hostname_cache_ttl_hours"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.hostnameNegTtl">Negativ-TTL (Stunden)</label></div>
+                            <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="hostname_negative_ttl_hours"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('hostnames')" data-i18n="admin.saveHostnames">Hostname-Settings speichern</button>
                         </div>
                     </div>
                 </div>
@@ -713,5 +746,6 @@
     <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/admin.js"></script>
+<script src="/js/hostnames.js"></script>
 </body>
 </html>

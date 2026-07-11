@@ -484,9 +484,17 @@ def looks_malicious(payload: dict[str, Any], abuse_threshold: int = 80) -> bool:
 
 async def shodan_enrich(ip: str) -> dict[str, Any]:
     """Query Shodan for a single IP and persist the ports/CVEs long-term.
-    The ONLY path that spends a Shodan credit."""
+    The ONLY path that spends a Shodan credit. Enriches the CVE list with
+    severity (CVSS/KEV via the free Shodan CVE DB) so callers can weigh
+    High/Critical vulns instead of a raw count."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         s = await _track("shodan", _shodan(client, ip))
+    if isinstance(s, dict) and s.get("vulns"):
+        try:
+            from app.cve_severity import enrich_cves
+            s["cve_severity"] = await enrich_cves(s["vulns"])
+        except Exception as e:
+            logger.warning(f"OSINT CVE severity enrich failed for {ip}: {e}")
     await _persist_shodan(ip, s)
     return s
 

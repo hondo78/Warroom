@@ -65,6 +65,9 @@ async function showOsint(value, type = 'ip') {
         return;
     }
     _ensureTriageButton(modal);
+    // Watchlist add only makes sense for IPs.
+    const wlBtn = modal.querySelector('#osintWatchlistBtn');
+    if (wlBtn) wlBtn.style.display = (type === 'ip') ? '' : 'none';
     const label = { ip: 'IP', domain: 'Domain', url: 'URL' }[type] || 'IP';
     if (titleEl) titleEl.textContent = t('osint.modal_title_for', { label, value });
     body.innerHTML = `<div class="osint-loading">${_osintEscape(t('osint.loading_parallel'))}</div>`;
@@ -75,14 +78,49 @@ async function showOsint(value, type = 'ip') {
 // Inject the AI-triage action into the shared modal once per page — keeps the
 // static modal markup in the HTML files unchanged.
 function _ensureTriageButton(modal) {
-    if (modal.querySelector('#osintTriageBtn')) return;
     const actions = modal.querySelector('.modal-actions');
     if (!actions) return;
-    const btn = document.createElement('button');
-    btn.id = 'osintTriageBtn';
-    btn.innerHTML = '🤖 ' + _osintEscape(t('osint.triage_hand_over'));
-    btn.onclick = triageFromOsint;
-    actions.insertBefore(btn, actions.firstChild);
+    if (!modal.querySelector('#osintTriageBtn')) {
+        const btn = document.createElement('button');
+        btn.id = 'osintTriageBtn';
+        btn.innerHTML = '🤖 ' + _osintEscape(t('osint.triage_hand_over'));
+        btn.onclick = triageFromOsint;
+        actions.insertBefore(btn, actions.firstChild);
+    }
+    if (!modal.querySelector('#osintWatchlistBtn')) {
+        const wl = document.createElement('button');
+        wl.id = 'osintWatchlistBtn';
+        wl.innerHTML = '🔭 ' + _osintEscape(t('osint.add_watchlist'));
+        wl.onclick = watchlistFromOsint;
+        actions.insertBefore(wl, actions.firstChild);
+    }
+}
+
+// Put the currently-checked IP on the watchlist, with an optional comment.
+async function watchlistFromOsint() {
+    const { value, type } = _osintCurrent;
+    if (!value || type !== 'ip') return;
+    const comment = prompt(t('osint.watchlist_comment_prompt'), '');
+    if (comment === null) return;   // cancelled
+    const btn = document.getElementById('osintWatchlistBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/watchlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: value, comment: comment.trim() }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        _osintTriageMsg(
+            '🔭 ' + _osintEscape(t('osint.watchlist_added', { ip: value })) +
+            ` <a href="/monitored.html" class="alert-link">${_osintEscape(t('osint.watchlist_link'))} ↗</a>`,
+            'success');
+    } catch (err) {
+        _osintTriageMsg(`${_osintEscape(t('osint.watchlist_failed'))}: ${_osintEscape(err.message)}`, 'danger');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function _osintTriageMsg(html, kind) {
@@ -399,11 +437,39 @@ function _osintRenderShodan(p) {
     return `<div id="osintShodanCard">${_osintRenderShodanBody(p)}</div>`;
 }
 
+// CVE list coloured by CVSS severity. Uses cve_severity (from the free Shodan
+// CVE DB) when present: a severity summary line + per-CVE colour + KEV star;
+// falls back to plain CVE tags when severity wasn't resolved.
+const _SEV_CLASS = { critical: 'osint-vuln-critical', high: 'osint-vuln-high',
+                     medium: 'osint-vuln-medium', low: 'osint-vuln-low' };
+function _osintRenderVulns(p) {
+    const sev = p.cve_severity;
+    if (sev && sev.total) {
+        const c = sev.counts || {};
+        const parts = [];
+        for (const band of ['critical', 'high', 'medium', 'low']) {
+            if (c[band]) parts.push(`<span class="osint-tag ${_SEV_CLASS[band]}">${c[band]} ${t('osint.sev_' + band)}</span>`);
+        }
+        if (sev.kev) parts.push(`<span class="osint-tag osint-vuln-critical" title="${_osintEscape(t('osint.kev_tip'))}">★ ${sev.kev} KEV</span>`);
+        const summary = `<div style="margin-bottom:.3rem">${parts.join(' ')}${sev.truncated ? ` <span class="osint-na">${_osintEscape(t('osint.cve_truncated'))}</span>` : ''}</div>`;
+        // The worst CVEs, coloured; each links to its Shodan CVE-DB entry.
+        const top = (sev.top || []).map(v => {
+            const cls = _SEV_CLASS[v.severity] || 'osint-vuln';
+            const score = (v.cvss_v3 ?? v.cvss);
+            const star = v.kev ? '★' : '';
+            const label = `${v.cve}${score != null ? ' ' + score : ''}${star}`;
+            return `<a class="osint-tag ${cls}" href="https://www.cvedetails.com/cve/${encodeURIComponent(v.cve)}/" target="_blank" rel="noopener" title="${_osintEscape((v.severity || '') + (v.epss != null ? ' · EPSS ' + Math.round(v.epss * 100) + '%' : ''))}">${_osintEscape(label)}</a>`;
+        }).join(' ');
+        return _osintRow('CVEs', summary + top);
+    }
+    const vulns = (p.vulns || []).slice(0, 30).map(v => `<span class="osint-tag osint-vuln">${_osintEscape(v)}</span>`).join(' ');
+    return vulns ? _osintRow('Vulns', vulns) : '';
+}
+
 function _osintRenderShodanBody(p) {
     const head = _osintHead(p); if (head !== null) return head;
     if (p.no_record) return `<div class="osint-na">${_osintEscape(t('osint.shodan_no_record'))}</div>${_osintLink(p.url, t('osint.open_shodan_search'))}`;
     const ports = (p.ports || []).slice(0, 30).map(pt => `<span class="osint-tag">${pt}</span>`).join(' ');
-    const vulns = (p.vulns || []).slice(0, 30).map(v => `<span class="osint-tag osint-vuln">${_osintEscape(v)}</span>`).join(' ');
     const tags = (p.tags || []).map(t => `<span class="osint-tag">${_osintEscape(t)}</span>`).join(' ');
     return `
         <dl class="detail-grid osint-dl">
@@ -412,7 +478,7 @@ function _osintRenderShodanBody(p) {
             ${_osintRow(t('osint.l_country_city'), _osintEscape([p.country, p.city].filter(Boolean).join(', ')))}
             ${_osintRow('OS', _osintEscape(p.os || ''))}
             ${ports ? _osintRow(t('osint.l_open_ports'), ports) : ''}
-            ${vulns ? _osintRow('Vulns', vulns) : ''}
+            ${_osintRenderVulns(p)}
             ${tags ? _osintRow('Tags', tags) : ''}
             ${_osintRow('Hostnames', _osintEscape((p.hostnames || []).slice(0, 5).join(', ')))}
             ${_osintRow(t('osint.l_as_of'), _osintEscape(p.last_update || ''))}

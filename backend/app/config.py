@@ -59,6 +59,18 @@ class Settings(BaseSettings):
     # Incoming-webhook URL for outbound notifications (Warroom → Teams), optional.
     teams_incoming_webhook: str = ""
 
+    # --- Internal hostname resolution ---
+    # Resolve hostnames for internal (private) IPs and show them everywhere an
+    # internal IP appears. Sources tried in order: Sophos endpoints → reverse
+    # DNS → NetBIOS. All best-effort and cached.
+    hostname_resolve_enabled: bool = True
+    # Comma-separated internal DNS server IPs to query for PTR records of private
+    # IPs (the container's default resolver usually can't). Empty ⇒ system resolver.
+    internal_dns_servers: str = ""
+    hostname_netbios_enabled: bool = True        # NetBIOS NBSTAT fallback (UDP 137)
+    hostname_cache_ttl_hours: int = 168          # keep a positive hit for a week
+    hostname_negative_ttl_hours: int = 6         # retry a miss after 6h
+
     # --- M365 login watch ---
     # Alerts (with a revoke-sessions option) when a user signs in from a device
     # or country not in their baseline. First run seeds the baseline silently.

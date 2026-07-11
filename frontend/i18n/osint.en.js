@@ -64,6 +64,11 @@ window.I18N.en.osint = {
     error: "Error",
 
     // triage
+    add_watchlist: "Add to watchlist",
+    watchlist_comment_prompt: "Comment for the watchlist entry (optional):",
+    watchlist_added: "{ip} added to the watchlist.",
+    watchlist_link: "Monitoring",
+    watchlist_failed: "Watchlist failed",
     triage_hand_over: "Hand to AI triage",
     triage_note_prompt: "Optional note for the AI agent (context):",
     triage_running: "AI triage running — the agent is assessing the value (may take a few seconds)…",
@@ -86,6 +91,12 @@ window.I18N.en.osint = {
     open_shodan_search: "Open Shodan search",
     open_shodan: "Open Shodan",
     l_country_city: "Country/City",
+    sev_critical: "critical",
+    sev_high: "high",
+    sev_medium: "medium",
+    sev_low: "low",
+    kev_tip: "CISA KEV — actively exploited in the wild",
+    cve_truncated: "(only the worst scored)",
     l_open_ports: "Open ports",
     l_as_of: "As of",
 

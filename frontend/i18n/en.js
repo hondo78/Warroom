@@ -9,6 +9,7 @@ Object.assign(window.I18N.en, {
         chat: "AI Chat",
         netflow: "NetFlow",
         blocklist: "Blocklist",
+        hosts: "Internal hosts",
         monitoring: "Monitoring",
         firewalls: "Firewalls",
         fw_anomalies: "FW Anomalies",

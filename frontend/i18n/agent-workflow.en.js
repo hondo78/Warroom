@@ -73,7 +73,7 @@ window.I18N.en.agentWorkflow = {
     // decision pipeline (backend-driven, keyed by step id)
     pipeline: {
         candidates: { step: "Candidates", detail: "Source yields candidates (alert / WAF / IPS / login events)" },
-        osint: { step: "OSINT", detail: "Enrichment of public IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan >2 CVEs ⇒ block indicator" },
+        osint: { step: "OSINT", detail: "Enrichment of public IPs (AbuseIPDB, VirusTotal, Shodan, GreyNoise, Intelix, ipinfo) — Shodan High/Critical CVE (CVSS >= 7) or KEV ⇒ block indicator" },
         llm: { step: "LLM", detail: "Structured query with Pydantic schema (response_format) per stage prompt" },
         validation: { step: "Validation", detail: "Pydantic validation + restriction to the stage's allowed actions" },
         persistence: { step: "Persistence", detail: "Decision stored in agent_decisions" },

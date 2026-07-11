@@ -9,6 +9,7 @@ Object.assign(window.I18N.de, {
         chat: "KI-Chat",
         netflow: "NetFlow",
         blocklist: "Blocklist",
+        hosts: "Interne Hosts",
         monitoring: "Überwachung",
         firewalls: "Firewalls",
         fw_anomalies: "FW-Anomalien",

@@ -369,6 +369,31 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_m365_profiles_user ON m365_login_profiles(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_m365_profiles_last_seen ON m365_login_profiles(last_seen DESC)",
+    # CVE severity cache (cvss/KEV/EPSS from the free Shodan CVE DB). Scores are
+    # static per CVE, so this is a permanent lookup cache shared across IPs.
+    """
+    CREATE TABLE IF NOT EXISTS cve_scores (
+        cve_id VARCHAR(30) PRIMARY KEY,
+        cvss DOUBLE PRECISION,
+        cvss_v3 DOUBLE PRECISION,
+        severity VARCHAR(12),
+        kev BOOLEAN NOT NULL DEFAULT FALSE,
+        epss DOUBLE PRECISION,
+        summary TEXT,
+        fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cve_scores_severity ON cve_scores(severity)",
+    # Internal-IP → hostname cache (Sophos endpoints / reverse DNS / NetBIOS).
+    """
+    CREATE TABLE IF NOT EXISTS ip_hostnames (
+        ip VARCHAR(45) PRIMARY KEY,
+        hostname VARCHAR(255),
+        source VARCHAR(20),
+        resolved_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ip_hostnames_resolved ON ip_hostnames(resolved_at DESC)",
 ]
 
 
