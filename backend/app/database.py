@@ -394,6 +394,42 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_ip_hostnames_resolved ON ip_hostnames(resolved_at DESC)",
+    # Honeypot pods (remote decoy agents managed by Warroom) + their events.
+    """
+    CREATE TABLE IF NOT EXISTS honeypots (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        token_hash VARCHAR(64) NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        services JSONB,
+        host_ip VARCHAR(45),
+        host_info JSONB,
+        last_seen TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_honeypots_token ON honeypots(token_hash)",
+    "ALTER TABLE honeypots ADD COLUMN IF NOT EXISTS files JSONB",
+    """
+    CREATE TABLE IF NOT EXISTS honeypot_events (
+        id BIGSERIAL PRIMARY KEY,
+        honeypot_id VARCHAR(36) NOT NULL,
+        service VARCHAR(20),
+        event_type VARCHAR(20),
+        source_ip VARCHAR(45),
+        source_port INTEGER,
+        dest_port INTEGER,
+        payload JSONB,
+        attacker_country VARCHAR(100),
+        attacker_city VARCHAR(255),
+        attacker_asn VARCHAR(255),
+        attacker_org VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_honeypot_events_created ON honeypot_events(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_honeypot_events_pod ON honeypot_events(honeypot_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_honeypot_events_src ON honeypot_events(source_ip)",
 ]
 
 

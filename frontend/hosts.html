@@ -49,6 +49,7 @@
                     <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
                     <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
                     <li class="nav-item"><a href="/hosts.html" class="nav-link active"><i class="nav-icon bi bi-hdd-network"></i><p data-i18n="nav.hosts">Interne Hosts</p></a></li>
+                    <li class="nav-item"><a href="/honeypot.html" class="nav-link"><i class="nav-icon bi bi-bug"></i><p>Honeypot</p></a></li>
                     <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
                     <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
                     <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
@@ -100,9 +101,14 @@
                     <div class="card-body">
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
-                                <thead><tr>
-                                    <th data-i18n="hosts.col_ip">IP</th><th data-i18n="hosts.col_hostname">Hostname</th><th data-i18n="hosts.col_source">Quelle</th>
-                                    <th data-i18n="hosts.col_os">OS / Typ</th><th data-i18n="hosts.col_last">Letzte Aktivität</th><th data-i18n="hosts.col_traffic">Traffic</th><th data-i18n="common.action">Aktion</th>
+                                <thead><tr id="hostsSortRow">
+                                    <th data-sort="ip" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_ip">IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="hostname" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_hostname">Hostname</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="source" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_source">Quelle</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="os" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_os">OS / Typ</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_last">Letzte Aktivität</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="bytes" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_traffic">Traffic</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="common.action">Aktion</th>
                                 </tr></thead>
                                 <tbody id="hostsTable"></tbody>
                             </table>

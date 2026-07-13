@@ -1,0 +1,569 @@
+#!/usr/bin/env python3
+"""Warroom honeypot agent — deploy on a remote Linux host.
+
+Simulates a handful of the most-attacked network services (SSH, Telnet, FTP,
+HTTP, RDP, SMB, MySQL, VNC, …). These are low-interaction *decoys*: nothing
+here is a real service, so ANY connection is suspicious. Every access is
+reported to Warroom, which geo-enriches it and raises a Telegram/Teams alert.
+
+Managed by Warroom: on each heartbeat the agent fetches its desired service
+config and starts/stops listeners to match — enable/disable services from the
+Warroom UI without touching the host.
+
+Stdlib only (asyncio + urllib) — no pip install. Run as root to bind ports < 1024.
+
+    curl -fsSL https://<warroom>/api/honeypot/agent/download -o honeypot_agent.py
+    sudo WARROOM_URL=https://<warroom> HONEYPOT_TOKEN=hp_xxxx python3 honeypot_agent.py
+
+Env: WARROOM_URL, HONEYPOT_TOKEN (required); HONEYPOT_BIND (default 0.0.0.0),
+HONEYPOT_TLS_VERIFY (default 1).
+"""
+import asyncio
+import ctypes
+import json
+import os
+import platform
+import pwd
+import socket
+import ssl
+import struct
+import sys
+import time
+import urllib.request
+
+WARROOM_URL = os.environ.get("WARROOM_URL", "").rstrip("/")
+TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
+BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
+TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
+AGENT_VERSION = "1.0"
+
+if not WARROOM_URL or not TOKEN:
+    print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
+    sys.exit(2)
+
+READ_TIMEOUT = 8.0
+MAX_READ = 4096
+
+_event_q: asyncio.Queue = asyncio.Queue(maxsize=10000)
+_servers: dict[str, asyncio.AbstractServer] = {}   # service -> server
+_ports: dict[str, int] = {}                         # service -> bound port
+
+
+def _safe(data: bytes, limit: int = 800) -> str:
+    """Bytes → a JSON-safe, printable-ish string (escaping control chars)."""
+    if not data:
+        return ""
+    return data[:limit].decode("utf-8", "backslashreplace")
+
+
+async def _emit(service, dest_port, peer, event_type="connect", payload=None):
+    ip, port = (peer[0], peer[1]) if peer else (None, None)
+    ev = {"service": service, "event_type": event_type,
+          "source_ip": ip, "source_port": port, "dest_port": dest_port,
+          "payload": payload or {}}
+    try:
+        _event_q.put_nowait(ev)
+    except asyncio.QueueFull:
+        pass
+
+
+async def _read(reader, n=MAX_READ, timeout=READ_TIMEOUT):
+    try:
+        return await asyncio.wait_for(reader.read(n), timeout=timeout)
+    except Exception:
+        return b""
+
+
+# --- per-service handlers -----------------------------------------------------
+# Each returns after logging; handlers must never raise (a bad client must not
+# take down a listener).
+
+async def _h_generic(service, port, banner=None):
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        try:
+            if banner:
+                writer.write(banner)
+                await writer.drain()
+            data = await _read(reader)
+            payload = {"data": _safe(data)} if data else {}
+            await _emit(service, port, peer, payload=payload)
+        except Exception:
+            await _emit(service, port, peer)
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_ssh(port):
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        try:
+            writer.write(b"SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5\r\n")
+            await writer.drain()
+            data = await _read(reader)
+            await _emit("ssh", port, peer, payload={"client": _safe(data, 200)})
+        except Exception:
+            await _emit("ssh", port, peer)
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_telnet(port):
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        creds = {}
+        try:
+            writer.write(b"\xff\xfb\x01login: ")   # IAC WILL ECHO + prompt
+            await writer.drain()
+            user = await _read(reader, 128)
+            writer.write(b"Password: ")
+            await writer.drain()
+            pw = await _read(reader, 128)
+            creds = {"username": _safe(user, 64).strip(), "password": _safe(pw, 64).strip()}
+            writer.write(b"\r\nLogin incorrect\r\n")
+            await writer.drain()
+            await _emit("telnet", port, peer, "login", creds)
+        except Exception:
+            await _emit("telnet", port, peer, "login", creds)
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_ftp(port):
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        creds = {}
+        try:
+            writer.write(b"220 (vsFTPd 3.0.3)\r\n")
+            await writer.drain()
+            for _ in range(4):
+                line = await _read(reader, 256)
+                if not line:
+                    break
+                s = _safe(line, 128).strip()
+                up = s.upper()
+                if up.startswith("USER"):
+                    creds["username"] = s[5:].strip()
+                    writer.write(b"331 Please specify the password.\r\n")
+                elif up.startswith("PASS"):
+                    creds["password"] = s[5:].strip()
+                    writer.write(b"530 Login incorrect.\r\n")
+                    await writer.drain()
+                    break
+                else:
+                    writer.write(b"530 Please login with USER and PASS.\r\n")
+                await writer.drain()
+            await _emit("ftp", port, peer, "login" if creds else "connect", creds)
+        except Exception:
+            await _emit("ftp", port, peer, "login", creds)
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_http(port, service="http"):
+    PAGE = (b"HTTP/1.1 200 OK\r\nServer: nginx\r\nContent-Type: text/html\r\n"
+            b"Connection: close\r\nContent-Length: 120\r\n\r\n"
+            b"<html><body><h3>Router Admin</h3><form method=post>"
+            b"User <input name=u> Pass <input name=p type=password>"
+            b"<button>Login</button></form></body></html>")
+
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        try:
+            raw = await _read(reader, MAX_READ)
+            text = raw.decode("latin1", "replace")
+            lines = text.split("\r\n")
+            req = lines[0] if lines else ""
+            parts = req.split(" ")
+            method = parts[0][:10] if parts else ""
+            path = parts[1][:300] if len(parts) > 1 else ""
+            headers = {}
+            for ln in lines[1:]:
+                if ":" in ln:
+                    k, v = ln.split(":", 1)
+                    headers[k.strip().lower()[:40]] = v.strip()[:200]
+            payload = {"http_method": method, "path": path,
+                       "user_agent": headers.get("user-agent", ""),
+                       "host": headers.get("host", "")}
+            if headers.get("authorization"):
+                payload["authorization"] = headers["authorization"][:120]
+            # capture posted body (login form)
+            if "\r\n\r\n" in text:
+                body = text.split("\r\n\r\n", 1)[1][:300]
+                if body:
+                    payload["body"] = body
+            writer.write(PAGE)
+            await writer.drain()
+            await _emit(service, port, peer, "http_request", payload)
+        except Exception:
+            await _emit(service, port, peer, "http_request")
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_mysql(port):
+    # Minimal MySQL server greeting (protocol 10) so nmap/scanners engage.
+    greeting = bytes([
+        0x4a, 0x00, 0x00, 0x00, 0x0a]) + b"5.7.33-log\x00" + bytes([
+        0x36, 0x00, 0x00, 0x00]) + b"\x01\x02\x03\x04\x05\x06\x07\x08\x00" + \
+        bytes([0xff, 0xf7, 0x21, 0x02, 0x00, 0x0f, 0x80, 0x15, 0x00] + [0] * 10) + b"\x00"
+
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        try:
+            writer.write(greeting)
+            await writer.drain()
+            data = await _read(reader, 512)
+            await _emit("mysql", port, peer, payload={"data": _safe(data, 200)})
+        except Exception:
+            await _emit("mysql", port, peer)
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+async def _h_redis(port):
+    async def handler(reader, writer):
+        peer = writer.get_extra_info("peername")
+        cmds = []
+        try:
+            for _ in range(6):
+                data = await _read(reader, 512, timeout=5.0)
+                if not data:
+                    break
+                cmds.append(_safe(data, 120).replace("\r\n", " ").strip())
+                up = data.upper()
+                if b"PING" in up:
+                    writer.write(b"+PONG\r\n")
+                elif b"INFO" in up:
+                    writer.write(b"$10\r\nredis_ver:\r\n")
+                else:
+                    writer.write(b"+OK\r\n")
+                await writer.drain()
+            await _emit("redis", port, peer, payload={"commands": cmds})
+        except Exception:
+            await _emit("redis", port, peer, payload={"commands": cmds})
+        finally:
+            try: writer.close()
+            except Exception: pass
+    return handler
+
+
+# service -> factory returning a (reader, writer) handler
+_HANDLERS = {
+    "ssh": _h_ssh,
+    "telnet": _h_telnet,
+    "ftp": _h_ftp,
+    "http": lambda p: _h_http(p, "http"),
+    "https": lambda p: _h_http(p, "https"),
+    "mysql": _h_mysql,
+    "redis": _h_redis,
+    "vnc": lambda p: _h_generic("vnc", p, b"RFB 003.008\n"),
+    "rdp": lambda p: _h_generic("rdp", p),
+    "smb": lambda p: _h_generic("smb", p),
+    "mssql": lambda p: _h_generic("mssql", p),
+    "postgres": lambda p: _h_generic("postgres", p),
+}
+
+
+# --- file honeypot (canary files, watched via inotify) -----------------------
+# Any read/open/modify of a decoy file is an alarm — nothing legitimate should
+# ever touch it. Works as any user; identifying the accessing process is
+# best-effort (a /proc scan at event time).
+
+IN_ACCESS, IN_MODIFY, IN_ATTRIB = 0x1, 0x2, 0x4
+IN_CLOSE_WRITE, IN_OPEN = 0x8, 0x20
+IN_DELETE_SELF, IN_MOVE_SELF = 0x400, 0x800
+IN_NONBLOCK = 0x800
+_FILE_MASK = IN_ACCESS | IN_MODIFY | IN_ATTRIB | IN_OPEN | IN_DELETE_SELF | IN_MOVE_SELF
+
+_libc = None
+_inotify_fd = -1
+_wd_path: dict[int, str] = {}
+_path_wd: dict[str, int] = {}
+_file_kind: dict[str, str] = {}
+_file_debounce: dict[str, float] = {}
+
+_BAIT = {
+    "credentials": b"username=administrator\npassword=P@ssw0rd-2024!\nscope=prod domain admin\n",
+    "aws": b"[default]\naws_access_key_id = AKIA5EXAMPLE7Q9J2KLM\n"
+           b"aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nregion = eu-central-1\n",
+    "ssh_key": b"-----BEGIN OPENSSH PRIVATE KEY-----\n"
+               b"b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdz\n"
+               b"c2gtcnNhAAAAAwEAAQAAAYEExampleExampleExampleDoNotUseThisKeyAtAll\n"
+               b"-----END OPENSSH PRIVATE KEY-----\n",
+    "env": b"DB_HOST=10.0.0.20\nDB_USER=root\nDB_PASSWORD=SuperSecret123!\n"
+           b"JWT_SECRET=8f3c1a...\nSTRIPE_API_KEY=sk_live_51ExampleKeyDoNotUse\n",
+    "db_dump": b"-- MySQL dump 10.13\nINSERT INTO users (id,user,pass_hash,email) VALUES\n"
+               b"(1,'admin','$2y$10$abcdefghijklmnopqrstuv','admin@corp.local');\n",
+    "password_list": b"admin:Winter2024!\nroot:toor\nsvc_backup:Backup#2023\nhelpdesk:Passw0rd\n",
+}
+
+
+def _bait(kind):
+    return _BAIT.get(kind, _BAIT["credentials"])
+
+
+def _create_decoy(path, kind):
+    """Plant a decoy file with bait content, only if it doesn't exist yet
+    (never clobber a real file)."""
+    try:
+        d = os.path.dirname(path)
+        if d and not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+        if not os.path.exists(path):
+            with open(path, "wb") as f:
+                f.write(_bait(kind))
+            try:
+                os.chmod(path, 0o600)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"  ! honeyfile {path}: create failed: {e}", file=sys.stderr)
+
+
+def _find_actor(path):
+    """Best-effort: which process currently has the file open (via /proc)."""
+    try:
+        rp = os.path.realpath(path)
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            fddir = f"/proc/{pid}/fd"
+            try:
+                for fd in os.listdir(fddir):
+                    if os.path.realpath(os.path.join(fddir, fd)) == rp:
+                        comm = open(f"/proc/{pid}/comm").read().strip()
+                        uid = os.stat(f"/proc/{pid}").st_uid
+                        try:
+                            user = pwd.getpwuid(uid).pw_name
+                        except Exception:
+                            user = str(uid)
+                        return {"process": comm, "pid": int(pid), "user": user}
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {}
+
+
+def _access_label(mask):
+    if mask & (IN_DELETE_SELF | IN_MOVE_SELF):
+        return "delete"
+    if mask & (IN_MODIFY | IN_CLOSE_WRITE):
+        return "modify"
+    if mask & IN_ATTRIB:
+        return "attrib"
+    return "read"   # IN_OPEN / IN_ACCESS
+
+
+def _on_inotify_readable():
+    try:
+        data = os.read(_inotify_fd, 8192)
+    except BlockingIOError:
+        return
+    except Exception:
+        return
+    off = 0
+    while off + 16 <= len(data):
+        wd, mask, cookie, length = struct.unpack_from("iIII", data, off)
+        off += 16 + length
+        path = _wd_path.get(wd)
+        if not path:
+            continue
+        now = time.time()
+        if now - _file_debounce.get(path, 0) < 2.0:
+            continue                       # coalesce the open+access+close burst
+        _file_debounce[path] = now
+        access = _access_label(mask)
+        actor = _find_actor(path)
+        payload = {"path": path, "access": access, "kind": _file_kind.get(path)}
+        payload.update(actor)
+        # source_ip left empty → Warroom stamps the pod's transport IP.
+        try:
+            _event_q.put_nowait({"service": "file", "event_type": "file_" + access,
+                                 "source_ip": None, "dest_port": None, "payload": payload})
+        except asyncio.QueueFull:
+            pass
+        print(f"[file] {access} {path}" + (f" by {actor.get('process')}({actor.get('user')})" if actor else ""))
+
+
+def _inotify_init():
+    global _libc, _inotify_fd
+    if _inotify_fd >= 0:
+        return True
+    try:
+        _libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        fd = _libc.inotify_init1(IN_NONBLOCK)
+        if fd < 0:
+            raise OSError(ctypes.get_errno(), "inotify_init1")
+        _inotify_fd = fd
+        asyncio.get_event_loop().add_reader(fd, _on_inotify_readable)
+        return True
+    except Exception as e:
+        print(f"  ! inotify unavailable ({e}) — file honeypot disabled", file=sys.stderr)
+        return False
+
+
+def _watch_file(path):
+    if path in _path_wd:
+        return
+    wd = _libc.inotify_add_watch(_inotify_fd, path.encode(), _FILE_MASK)
+    if wd < 0:
+        print(f"  ! honeyfile {path}: watch failed", file=sys.stderr)
+        return
+    _wd_path[wd] = path
+    _path_wd[path] = wd
+    print(f"  + honeyfile watching {path}")
+
+
+def _unwatch_file(path):
+    wd = _path_wd.pop(path, None)
+    if wd is not None:
+        try:
+            _libc.inotify_rm_watch(_inotify_fd, wd)
+        except Exception:
+            pass
+        _wd_path.pop(wd, None)
+    _file_kind.pop(path, None)
+
+
+async def _reconcile_files(files):
+    want = {f["path"]: f.get("kind", "credentials") for f in (files or []) if f.get("path")}
+    if want and not _inotify_init():
+        return
+    for path in list(_path_wd):
+        if path not in want:
+            _unwatch_file(path)
+    for path, kind in want.items():
+        _file_kind[path] = kind
+        _create_decoy(path, kind)
+        _watch_file(path)
+
+
+async def _start_service(service, port):
+    if service in _servers:
+        return
+    factory = _HANDLERS.get(service)
+    if not factory:
+        return
+    handler = await factory(port)
+    try:
+        server = await asyncio.start_server(handler, BIND, port)
+    except PermissionError:
+        print(f"  ! {service}:{port} needs root (port < 1024) — skipped", file=sys.stderr)
+        return
+    except OSError as e:
+        print(f"  ! {service}:{port} bind failed: {e}", file=sys.stderr)
+        return
+    _servers[service] = server
+    _ports[service] = port
+    print(f"  + {service} listening on {BIND}:{port}")
+
+
+async def _stop_service(service):
+    server = _servers.pop(service, None)
+    _ports.pop(service, None)
+    if server:
+        server.close()
+        try:
+            await server.wait_closed()
+        except Exception:
+            pass
+        print(f"  - {service} stopped")
+
+
+async def _reconcile(listen: list[dict]):
+    want = {d["service"]: d["port"] for d in listen if d.get("service") in _HANDLERS}
+    for service in list(_servers):
+        if service not in want or _ports.get(service) != want.get(service):
+            await _stop_service(service)
+    for service, port in want.items():
+        await _start_service(service, port)
+
+
+# --- Warroom transport (blocking urllib, run off the event loop) --------------
+
+def _ctx():
+    if not TLS_VERIFY:
+        c = ssl.create_default_context()
+        c.check_hostname = False
+        c.verify_mode = ssl.CERT_NONE
+        return c
+    return None
+
+
+def _post(path, obj):
+    req = urllib.request.Request(
+        WARROOM_URL + path, data=json.dumps(obj).encode(),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + TOKEN},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
+async def _heartbeat_loop():
+    host_info = {"hostname": socket.gethostname(),
+                 "os": platform.platform(), "agent_version": AGENT_VERSION}
+    loop = asyncio.get_event_loop()
+    interval = 30
+    while True:
+        try:
+            resp = await loop.run_in_executor(
+                None, _post, "/api/honeypot/agent/heartbeat", {"host_info": host_info})
+            if resp.get("enabled"):
+                await _reconcile(resp.get("listen") or [])
+                await _reconcile_files(resp.get("files") or [])
+            else:
+                for s in list(_servers):
+                    await _stop_service(s)
+                for pth in list(_path_wd):
+                    _unwatch_file(pth)
+            interval = max(10, int(resp.get("heartbeat_seconds") or 30))
+        except Exception as e:
+            print(f"heartbeat failed: {e}", file=sys.stderr)
+        await asyncio.sleep(interval)
+
+
+async def _reporter_loop():
+    loop = asyncio.get_event_loop()
+    while True:
+        ev = await _event_q.get()
+        batch = [ev]
+        # drain up to a small batch
+        try:
+            while len(batch) < 50:
+                batch.append(_event_q.get_nowait())
+        except asyncio.QueueEmpty:
+            pass
+        for e in batch:
+            svc, src = e.get("service"), e.get("source_ip")
+            print(f"[hit] {svc} <- {src}")
+        try:
+            await loop.run_in_executor(None, _post, "/api/honeypot/agent/events", {"events": batch})
+        except Exception as e:
+            print(f"report failed ({len(batch)} events dropped): {e}", file=sys.stderr)
+
+
+async def main():
+    print(f"Warroom honeypot agent {AGENT_VERSION} → {WARROOM_URL}")
+    asyncio.ensure_future(_reporter_loop())
+    await _heartbeat_loop()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

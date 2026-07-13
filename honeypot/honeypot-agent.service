@@ -1,0 +1,24 @@
+[Unit]
+Description=Warroom Honeypot Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root is only needed for privileged ports (< 1024). For high-ports-only setups
+# you can run as an unprivileged user instead.
+User=root
+Environment=WARROOM_URL=https://CHANGEME.example.com
+Environment=HONEYPOT_TOKEN=hp_CHANGEME
+# Environment=HONEYPOT_TLS_VERIFY=0
+ExecStart=/usr/bin/python3 /usr/local/bin/honeypot_agent.py
+Restart=always
+RestartSec=10
+# Hardening (the agent only needs the network + its own script)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

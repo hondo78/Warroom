@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import logging
 import re
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -19,7 +20,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -43,6 +44,11 @@ async def verify_api_key(request: Request, x_api_key: str | None = Header(defaul
     # The Teams webhook authenticates itself with its own HMAC signature
     # (Teams never sends X-API-Key), so it is exempt from the global key check.
     if request.url.path.startswith("/api/teams/"):
+        return
+    # Honeypot pods authenticate with their own per-pod bearer token (they run on
+    # remote hosts and never hold the Warroom API key), so the agent-facing
+    # endpoints are exempt from the global key check and verify the token inline.
+    if request.url.path.startswith("/api/honeypot/agent/"):
         return
     expected = settings.warroom_api_key
     if not expected:
@@ -948,6 +954,235 @@ async def set_internal_hostname(body: HostnameSetIn):
         return await set_manual(body.ip.strip(), body.hostname)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- Honeypot: remote decoy pods managed by Warroom -------------------------
+
+def _client_ip(request: Request) -> str | None:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def _bearer(request: Request) -> str | None:
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+# --- agent-facing (token auth, exempt from the global X-API-Key) ---
+
+@app.post("/api/honeypot/agent/heartbeat")
+async def honeypot_heartbeat(request: Request):
+    from app import honeypot as hp
+    body = await request.json()
+    pod = await hp.authenticate(_bearer(request) or body.get("token"))
+    if pod is None:
+        raise HTTPException(status_code=401, detail="invalid honeypot token")
+    return await hp.touch(pod.id, _client_ip(request), body.get("host_info"))
+
+
+@app.post("/api/honeypot/agent/events")
+async def honeypot_ingest(request: Request):
+    from app import honeypot as hp
+    body = await request.json()
+    pod = await hp.authenticate(_bearer(request) or body.get("token"))
+    if pod is None:
+        raise HTTPException(status_code=401, detail="invalid honeypot token")
+    # Stamp the transport source IP when the agent couldn't determine the peer.
+    src = _client_ip(request)
+    events = body.get("events") or []
+    for e in events:
+        if not e.get("source_ip"):
+            e["source_ip"] = src
+    stored = await hp.ingest_events(pod, events)
+    return {"ok": True, "stored": stored}
+
+
+@app.get("/api/honeypot/agent/download")
+async def honeypot_agent_download():
+    """Serve the deployable agent script so a pod can be bootstrapped with a
+    single curl. No secret in the file — the token is passed at runtime."""
+    from fastapi.responses import FileResponse
+    import os
+    path = os.path.join(os.path.dirname(__file__), "deploy", "honeypot_agent.py")
+    return FileResponse(path, media_type="text/x-python", filename="honeypot_agent.py")
+
+
+# --- management (normal auth, used by the UI) ---
+
+class HoneypotIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    services: list[str] | None = None
+    files: list[dict] | None = None
+
+
+class HoneypotPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    services: list[str] | None = None
+    files: list[dict] | None = None
+
+
+def _pod_online(pod: Honeypot) -> bool:
+    if not pod.last_seen:
+        return False
+    return (datetime.now(timezone.utc) - pod.last_seen) < timedelta(seconds=90)
+
+
+def _deploy_snippet(request: Request, token: str) -> str:
+    # Prefer the externally-visible host (behind nginx the backend sees localhost),
+    # so the deploy command shows the URL the operator actually reaches Warroom at.
+    fwd_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    fwd_proto = request.headers.get("x-forwarded-proto")
+    if fwd_host:
+        base = f"{fwd_proto or 'https'}://{fwd_host}".rstrip("/")
+    else:
+        base = str(request.base_url).rstrip("/")
+    return (
+        f"# Run on the remote Linux honeypot host (needs root for ports < 1024):\n"
+        f"curl -fsSL {base}/api/honeypot/agent/download -o honeypot_agent.py\n"
+        f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} python3 honeypot_agent.py"
+    )
+
+
+@app.get("/api/honeypot/pods")
+async def list_honeypots(request: Request, db: AsyncSession = Depends(get_db)):
+    from app import honeypot as hp
+    pods = (await db.execute(select(Honeypot).order_by(Honeypot.created_at.desc()))).scalars().all()
+    # Recent event counts per pod (last 24h).
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    counts = {r[0]: r[1] for r in (await db.execute(text(
+        "SELECT honeypot_id, COUNT(*) FROM honeypot_events WHERE created_at >= :s GROUP BY honeypot_id"
+    ), {"s": since})).all()}
+    return {
+        "services": hp.SERVICES,
+        "file_templates": hp.FILE_TEMPLATES,
+        "items": [
+            {
+                "id": p.id, "name": p.name, "enabled": bool(p.enabled),
+                "online": _pod_online(p),
+                "services": hp.normalize_services(p.services),
+                "files": hp.normalize_files(p.files),
+                "host_ip": p.host_ip, "host_info": p.host_info,
+                "last_seen": p.last_seen.isoformat() if p.last_seen else None,
+                "events_24h": int(counts.get(p.id, 0)),
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in pods
+        ],
+    }
+
+
+@app.post("/api/honeypot/pods")
+async def create_honeypot(body: HoneypotIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app import honeypot as hp
+    token, token_hash = hp.new_token()
+    svc = hp.normalize_services(body.services if body.services is not None else hp.DEFAULT_SERVICES)
+    pod = Honeypot(id=str(uuid.uuid4()), name=body.name.strip(), token_hash=token_hash,
+                   enabled=True, services=svc, files=hp.normalize_files(body.files or []))
+    db.add(pod)
+    await db.commit()
+    # The clear token is returned exactly once.
+    return {"id": pod.id, "name": pod.name, "token": token,
+            "deploy": _deploy_snippet(request, token)}
+
+
+@app.patch("/api/honeypot/pods/{pod_id}")
+async def update_honeypot(pod_id: str, body: HoneypotPatch, db: AsyncSession = Depends(get_db)):
+    from app import honeypot as hp
+    pod = await db.get(Honeypot, pod_id)
+    if pod is None:
+        raise HTTPException(status_code=404, detail="honeypot not found")
+    if body.name is not None:
+        pod.name = body.name.strip()
+    if body.enabled is not None:
+        pod.enabled = body.enabled
+    if body.services is not None:
+        pod.services = hp.normalize_services(body.services)
+    if body.files is not None:
+        pod.files = hp.normalize_files(body.files)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/honeypot/pods/{pod_id}")
+async def delete_honeypot(pod_id: str, db: AsyncSession = Depends(get_db)):
+    pod = await db.get(Honeypot, pod_id)
+    if pod is None:
+        raise HTTPException(status_code=404, detail="honeypot not found")
+    await db.delete(pod)
+    await db.execute(text("DELETE FROM honeypot_events WHERE honeypot_id = :id"), {"id": pod_id})
+    await db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/honeypot/sources")
+async def list_honeypot_sources(
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Honeypot accesses grouped by source IP — the collapsed alert list. Each
+    row expands (via /api/honeypot/events?source_ip=…) to its connections."""
+    rows = (await db.execute(text("""
+        SELECT source_ip,
+               COUNT(*)                                              AS hits,
+               MIN(created_at)                                       AS first_seen,
+               MAX(created_at)                                       AS last_seen,
+               array_agg(DISTINCT service) FILTER (WHERE service IS NOT NULL) AS services,
+               array_agg(DISTINCT honeypot_id)                       AS pods,
+               MAX(attacker_country)                                 AS country,
+               MAX(attacker_city)                                    AS city,
+               MAX(attacker_org)                                     AS org,
+               COUNT(*) FILTER (WHERE event_type = 'login')          AS logins
+        FROM honeypot_events
+        WHERE source_ip IS NOT NULL
+        GROUP BY source_ip
+        ORDER BY MAX(created_at) DESC
+        LIMIT :lim
+    """), {"lim": limit})).all()
+    pod_names = {p.id: p.name for p in (await db.execute(select(Honeypot))).scalars().all()}
+    return {"sources": [
+        {
+            "source_ip": r[0], "hits": int(r[1]),
+            "first_seen": r[2].isoformat() if r[2] else None,
+            "last_seen": r[3].isoformat() if r[3] else None,
+            "services": list(r[4] or []),
+            "pods": [pod_names.get(pid, pid) for pid in (r[5] or [])],
+            "country": r[6], "city": r[7], "org": r[8],
+            "logins": int(r[9] or 0),
+        }
+        for r in rows
+    ]}
+
+
+@app.get("/api/honeypot/events")
+async def list_honeypot_events(
+    limit: int = Query(default=200, ge=1, le=1000),
+    honeypot_id: str | None = Query(default=None),
+    source_ip: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(HoneypotEvent).order_by(HoneypotEvent.created_at.desc())
+    if honeypot_id:
+        q = q.where(HoneypotEvent.honeypot_id == honeypot_id)
+    if source_ip:
+        q = q.where(HoneypotEvent.source_ip == source_ip)
+    rows = (await db.execute(q.limit(limit))).scalars().all()
+    names = {p.id: p.name for p in (await db.execute(select(Honeypot))).scalars().all()}
+    return {"events": [
+        {
+            "id": e.id, "honeypot_id": e.honeypot_id, "honeypot": names.get(e.honeypot_id),
+            "service": e.service, "event_type": e.event_type,
+            "source_ip": e.source_ip, "source_port": e.source_port, "dest_port": e.dest_port,
+            "payload": e.payload,
+            "country": e.attacker_country, "city": e.attacker_city, "org": e.attacker_org,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in rows
+    ]}
 
 
 # --- Shodan host intelligence (ports + CVEs) ---

@@ -5,6 +5,7 @@
 const HOSTS_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 let _hostsItems = [];
 let _hostsPollTimer = null;
+const _hostsSort = { key: 'last_seen', dir: 'desc' };
 
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
@@ -13,7 +14,39 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('hostModal').addEventListener('click', e => {
         if (e.target.id === 'hostModal') closeHostModal();
     });
+    // Column sorting: click a header, click again to flip direction.
+    document.querySelectorAll('#hostsSortRow th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (_hostsSort.key === key) {
+                _hostsSort.dir = _hostsSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _hostsSort.key = key;
+                // text columns read better ascending, numbers/dates descending
+                _hostsSort.dir = ['hostname', 'source', 'os'].includes(key) ? 'asc' : 'desc';
+            }
+            renderHosts();
+        });
+    });
 });
+
+// Numeric IPv4 value so 172.16.16.9 sorts before 172.16.16.100.
+function _ipNum(ip) {
+    const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(ip || '');
+    return m ? ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4] : -1;
+}
+
+function _hostsSortVal(h, key) {
+    switch (key) {
+        case 'ip': return _ipNum(h.ip);
+        case 'hostname': return (h.hostname || '').toLowerCase();
+        case 'source': return h.source || '';
+        case 'os': return [h.os, h.device_type].filter(Boolean).join(' ').toLowerCase();
+        case 'last_seen': return h.last_seen || '';
+        case 'bytes': return h.bytes || 0;
+        default: return '';
+    }
+}
 
 function initFilters() {
     document.querySelectorAll('input[data-filter-for]').forEach(input => {
@@ -79,11 +112,25 @@ async function refreshHosts() {
 
 function renderHosts() {
     const tbody = document.getElementById('hostsTable');
+    // Sort indicators on the headers.
+    document.querySelectorAll('#hostsSortRow th[data-sort]').forEach(th => {
+        const ind = th.querySelector('.sort-ind');
+        if (ind) ind.textContent = th.dataset.sort === _hostsSort.key ? (_hostsSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    });
     if (!_hostsItems.length) {
         tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-3">${t('hosts.empty')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = _hostsItems.map(h => {
+    const mul = _hostsSort.dir === 'asc' ? 1 : -1;
+    const key = _hostsSort.key;
+    const rows = _hostsItems.slice().sort((a, b) => {
+        const va = _hostsSortVal(a, key), vb = _hostsSortVal(b, key);
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return mul * String(va).localeCompare(String(vb), HOSTS_LOCALE, { numeric: true });
+        }
+        return mul * (va - vb);
+    });
+    tbody.innerHTML = rows.map(h => {
         const src = h.source
             ? `<span class="badge ${_SRC_BADGE[h.source] || 'text-bg-secondary'}">${escapeHtml(t('hosts.src_' + h.source) || h.source)}</span>`
             : '';

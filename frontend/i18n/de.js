@@ -14,6 +14,7 @@ Object.assign(window.I18N.de, {
         firewalls: "Firewalls",
         fw_anomalies: "FW-Anomalien",
         endpoints: "Endpoints",
+        honeypot: "Honeypot",
         agent: "Agent",
         agent_workflow: "Agent-Workflow",
         email: "Email",

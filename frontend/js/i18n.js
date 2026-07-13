@@ -55,6 +55,7 @@
         '/firewall-anomalies.html': 'nav.fw_anomalies',
         '/endpoints.html': 'nav.endpoints',
         '/hosts.html': 'nav.hosts',
+        '/honeypot.html': 'nav.honeypot',
         '/agent.html': 'nav.agent',
         '/agent-workflow.html': 'nav.agent_workflow',
         '/email.html': 'nav.email',

@@ -14,6 +14,7 @@ Object.assign(window.I18N.en, {
         firewalls: "Firewalls",
         fw_anomalies: "FW Anomalies",
         endpoints: "Endpoints",
+        honeypot: "Honeypot",
         agent: "Agent",
         agent_workflow: "Agent Workflow",
         email: "Email",

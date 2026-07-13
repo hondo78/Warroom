@@ -333,6 +333,46 @@ class M365LoginProfile(Base):
     seen_count = Column(BigInteger, nullable=False, default=1)
 
 
+class Honeypot(Base):
+    """A remote honeypot pod, managed by Warroom. Runs the honeypot agent on a
+    Linux host, simulates decoy services and reports any access. The pod polls
+    its desired service config on each heartbeat, so config is driven here."""
+    __tablename__ = "honeypots"
+
+    id = Column(String(36), primary_key=True)          # uuid4
+    name = Column(String(120), nullable=False)
+    token_hash = Column(String(64), nullable=False)    # sha256 of the pod token
+    enabled = Column(Boolean, nullable=False, default=True)
+    # Which decoy services to run: {"ssh": true, "http": true, ...}
+    services = Column(JSONB)
+    # Decoy files to plant + watch: [{"path": "/root/backup.sql", "kind": "db_dump"}]
+    files = Column(JSONB)
+    host_ip = Column(String(45))                       # last reported source IP
+    host_info = Column(JSONB)                           # hostname, os, agent version
+    last_seen = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HoneypotEvent(Base):
+    """A single access to a honeypot decoy service — by definition suspicious."""
+    __tablename__ = "honeypot_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    honeypot_id = Column(String(36), nullable=False)
+    service = Column(String(20))                        # ssh/telnet/http/...
+    event_type = Column(String(20))                    # connect | login | http_request
+    source_ip = Column(String(45))
+    source_port = Column(Integer)
+    dest_port = Column(Integer)
+    # Captured interaction: {username, password, http_method, path, data, ...}
+    payload = Column(JSONB)
+    attacker_country = Column(String(100))
+    attacker_city = Column(String(255))
+    attacker_asn = Column(String(255))
+    attacker_org = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CveScore(Base):
     """CVSS / KEV / EPSS for a CVE, cached from the free Shodan CVE DB. Static
     per CVE, so this is a permanent lookup table shared across all IPs/hosts."""
