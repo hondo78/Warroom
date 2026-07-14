@@ -2581,6 +2581,271 @@ async def agent_connection_anomaly_loop(force: bool = False) -> None:
     logger.info(f"agent[conn-anomaly]: {len(hits)} hit(s), {processed} new verdict(s), {sent} alarm(s)")
 
 
+# --- Daily LLM assessment of connection anomalies (source↔destination reasoning) ---
+
+CONN_TRIAGE_PROMPT = """Du bist ein Netzwerk-Verbindungs-Analyst für Warroom.
+
+Du bewertest EINE einzelne Verbindung zwischen einem internen Host (Quelle) und
+einer externen IP (Ziel). Ziel: erkläre, WAS diese Verbindung höchstwahrscheinlich
+ist, und stufe sie ein.
+
+INPUT (JSON, vom System gestellt):
+  - source_ip, source_hostname — der interne Host (Hostname hilft: z. B.
+    "homeassistant", "nas", "backup", "jumphost", "cam", "printer").
+  - destination_ip, destination_country
+  - connection — Verkehrsmuster: kind (c2 = regelmäßiges Beaconing, exfil =
+    upload-lastig, new = neu/untypisch), port, out_bytes/in_bytes, upload_ratio,
+    flows, is_new, baseline_days (an wie vielen Tagen das Paar historisch schon
+    auftrat), dst_internal_hosts_sharing (wie viele interne Hosts dieses Ziel
+    kontaktieren — viele = geteilter Dienst), beacon {period_s, regularity,
+    span_min}, signals, score.
+  - osint — Reverse-DNS/FQDN (hostnames), Organisation/ASN, Land und Reputation
+    (abuseipdb, virustotal, greynoise, shodan, intelix). Felder können fehlen.
+
+VORGEHEN:
+1. Kombiniere Quell-Hostname + Ziel-FQDN/Org/ASN + Port + Muster, um den Dienst
+   zu benennen. Beispiele für BENIGNE, gut erklärbare Verbindungen:
+   - HomeAssistant, das regelmäßig kleine Verbindungen zu einem Wetter-Server
+     öffnet (z. B. api.met.no / Meteorologisk Institutt in Norwegen, Port 443)
+     um das Wetter abzurufen → benign, connection_type "HomeAssistant Wetter-Abruf".
+   - NTP (Port 123), DNS (53), OS-/App-Updates, CDN, Cloud-Backup (S3/Azure/GCP),
+     Messaging/Push (APNs, FCM, Telegram), VPN, Zeit-/Telemetrie-Dienste → benign.
+2. Beaconing ALLEIN ist kein Beleg für C2 — viele legitime Dienste pollen
+   periodisch. Ordne es nur dann als schädlich ein, wenn Ziel/Muster
+   unerklärlich sind ODER OSINT-Reputation schlecht ist.
+3. Wenn nichts das Ziel erklärt (unbekannte/reputationsschwache IP, unerklärliches
+   Beaconing oder Upload) → suspicious; bei klaren OSINT-Malware-/C2-Belegen →
+   malicious.
+
+VERDICT:
+  - benign     — Dienst plausibel identifiziert / bekannt-gutartig.
+  - suspicious — unerklärlich, aber (noch) kein harter Malware-Beleg.
+  - malicious  — OSINT belegt C2/Malware/Scanner, oder klare Exfiltration.
+
+AUSGABE (strikt JSON, kein ```-Fence). action = "block_ip" nur bei malicious,
+sonst "no_action". BEISPIEL:
+{
+  "action": "no_action",
+  "args": {"verdict": "benign", "connection_type": "HomeAssistant Wetter-Abruf (api.met.no)"},
+  "reasoning": "Quelle homeassistant.fritz.box; Ziel 157.249.81.141 löst zu api.met.no auf (Meteorologisk Institutt, Norwegen). Regelmäßige kleine 443-Abrufe alle ~57 min = Wetter-Polling, kein C2."
+}
+"""
+
+CONN_TRIAGE_PROMPT_EN = """You are a network connection analyst for Warroom.
+
+You assess ONE single connection between an internal host (source) and an
+external IP (destination). Goal: explain WHAT this connection most likely is and
+classify it.
+
+INPUT (JSON, provided by the system):
+  - source_ip, source_hostname — the internal host (the hostname helps: e.g.
+    "homeassistant", "nas", "backup", "jumphost", "cam", "printer").
+  - destination_ip, destination_country
+  - connection — traffic pattern: kind (c2 = regular beaconing, exfil =
+    upload-skewed, new = new/atypical), port, out_bytes/in_bytes, upload_ratio,
+    flows, is_new, baseline_days (on how many days the pair already appeared),
+    dst_internal_hosts_sharing (how many internal hosts contact this destination
+    — many = shared service), beacon {period_s, regularity, span_min}, signals,
+    score.
+  - osint — reverse DNS/FQDN (hostnames), organisation/ASN, country and
+    reputation (abuseipdb, virustotal, greynoise, shodan, intelix). Fields may
+    be missing.
+
+APPROACH:
+1. Combine source hostname + destination FQDN/org/ASN + port + pattern to name
+   the service. Examples of BENIGN, well-explained connections:
+   - HomeAssistant regularly opening small connections to a weather server
+     (e.g. api.met.no / Meteorologisk Institutt in Norway, port 443) to fetch
+     the weather → benign, connection_type "HomeAssistant weather polling".
+   - NTP (port 123), DNS (53), OS/app updates, CDN, cloud backup (S3/Azure/GCP),
+     messaging/push (APNs, FCM, Telegram), VPN, time/telemetry services → benign.
+2. Beaconing ALONE is not proof of C2 — many legitimate services poll
+   periodically. Only classify as malicious if the destination/pattern is
+   unexplainable OR OSINT reputation is bad.
+3. If nothing explains the destination (unknown/low-reputation IP, unexplained
+   beaconing or upload) → suspicious; with clear OSINT malware/C2 evidence →
+   malicious.
+
+VERDICT:
+  - benign     — service plausibly identified / known-good.
+  - suspicious — unexplained, but no hard malware evidence (yet).
+  - malicious  — OSINT proves C2/malware/scanner, or clear exfiltration.
+
+OUTPUT (strict JSON, no ``` fence). action = "block_ip" only for malicious,
+otherwise "no_action". EXAMPLE:
+{
+  "action": "no_action",
+  "args": {"verdict": "benign", "connection_type": "HomeAssistant weather polling (api.met.no)"},
+  "reasoning": "Source homeassistant.fritz.box; destination 157.249.81.141 resolves to api.met.no (Meteorologisk Institutt, Norway). Regular small 443 fetches every ~57 min = weather polling, not C2."
+}
+"""
+
+_VERDICT_VALUES = {"malicious", "suspicious", "benign"}
+
+
+def _normalize_verdict(v: Any) -> str | None:
+    s = str(v or "").strip().lower()
+    return s if s in _VERDICT_VALUES else None
+
+
+async def _llm_assess_connection(a: dict, src_host: str | None,
+                                 osint: dict, lang: str) -> dict | None:
+    """Ask the LLM what a single src→dst connection is and how to rate it.
+    Returns {verdict, connection_type, reasoning, action} or None on failure."""
+    conn = {
+        "kind": a["kind"], "score": a["score"],
+        "port": a.get("top_port"), "distinct_dst_ports": a.get("dst_ports"),
+        "out_bytes": a["out_bytes"], "in_bytes": a["in_bytes"],
+        "upload_ratio": a["upload_ratio"], "flows": a["flows"],
+        "is_new": a["is_new"], "baseline_days": a["baseline_days"],
+        "dst_internal_hosts_sharing": a["dst_hosts"],
+        "night_ratio": a["night_ratio"], "beacon": a.get("beacon"),
+        "signals": [s.get("code") for s in (a.get("signals") or [])],
+    }
+    payload = {
+        "source_ip": a["src"], "source_hostname": src_host,
+        "destination_ip": a["dst"], "destination_country": a.get("country"),
+        "connection": conn,
+        "osint": osint or {},
+        "allowed_actions": ["no_action", "block_ip"],
+    }
+    prompt = (settings.agent_conntriage_system_prompt or "").strip() or (
+        CONN_TRIAGE_PROMPT_EN if lang == "en" else CONN_TRIAGE_PROMPT)
+    lead = "Connection to assess:\n" if lang == "en" else "Zu bewertende Verbindung:\n"
+    user_msg = lead + json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    try:
+        decision = await _call_llm(user_msg, system_prompt=prompt,
+                                   source="connection",
+                                   allowed_actions=["no_action", "block_ip"])
+    except Exception as e:
+        logger.warning(f"agent[conn-triage]: LLM failed for {a['src']}->{a['dst']}: {e}")
+        return None
+    args = decision.get("args") or {}
+    verdict = _normalize_verdict(args.get("verdict")) or (
+        "malicious" if decision.get("action") == "block_ip" else "suspicious")
+    return {
+        "verdict": verdict,
+        "connection_type": str(args.get("connection_type") or "").strip()[:120],
+        "reasoning": (decision.get("reasoning") or "").strip(),
+        "action": decision.get("action"),
+    }
+
+
+def _conntriage_comment(a: dict, r: dict, lang: str) -> str:
+    ct = r.get("connection_type")
+    head = ct if ct else ("Verbindung" if lang == "de" else "connection")
+    reason = r.get("reasoning") or ""
+    return f"agent[Verbindung]: {head} — {reason}"[:1000]
+
+
+def _conntriage_alert_html(a: dict, r: dict, lang: str) -> str:
+    de = lang == "de"
+    vmap = {"malicious": "🔴", "suspicious": "🟠", "benign": "🟢"}
+    icon = vmap.get(r["verdict"], "⚠️")
+    vlabel = {"malicious": "Schädlich" if de else "Malicious",
+              "suspicious": "Verdächtig" if de else "Suspicious",
+              "benign": "Unschädlich" if de else "Benign"}[r["verdict"]]
+    country = f" ({a['country']})" if a.get("country") else ""
+    ct = r.get("connection_type") or ("unbekannt" if de else "unknown")
+    head = f"{icon} <b>{vlabel}</b> · " + (a["kind"].upper())
+    body = (f"Host <code>{a['src']}</code> → <code>{a['dst']}</code>{country}\n"
+            f"{('Typ' if de else 'Type')}: {ct}\n{r.get('reasoning','')}")
+    return f"{head}\n{body}"
+
+
+async def agent_connection_triage_loop(force: bool = False) -> None:
+    """Daily LLM assessment of the per-connection anomalies.
+
+    For each anomalous src→dst connection it resolves the internal source
+    hostname, OSINT-enriches the external destination (reverse DNS / org / ASN /
+    reputation), and asks the LLM what the connection most likely **is** — e.g.
+    "HomeAssistant polling api.met.no for the weather" (benign) vs. unexplained
+    beaconing/upload to an unknown host (suspicious/malicious). The reasoned
+    verdict + a human-readable connection type are written on the destination IP;
+    malicious/suspicious verdicts optionally raise a Telegram/Teams alarm. Human
+    verdicts are never overwritten; recently-assessed destinations are skipped
+    (cooldown). Meant to run once a day (see ``agent_conntriage_interval_seconds``).
+    """
+    if (not settings.agent_enabled or not settings.agent_conntriage_enabled) and not force:
+        return
+
+    min_score = float(settings.agent_conntriage_min_score or 0.5)
+    cap = max(1, int(settings.agent_conntriage_max or 30))
+    do_alarm = bool(settings.agent_conntriage_alarm)
+    now = datetime.now(timezone.utc)
+
+    from app import connection_anomaly as conn_anom
+    async with async_session() as db:
+        res = await conn_anom.analyze(db, hours=24, min_flows=5,
+                                      overrides={"min_score": min_score})
+    anomalies = res.get("anomalies") or []
+    if not anomalies:
+        logger.info("agent[conn-triage]: no connection anomalies to assess")
+        return
+
+    # Skip destinations with a human verdict or a fresh agent verdict (cooldown);
+    # keep prior verdict values so we only alarm on a new/changed rating.
+    dsts = list({a["dst"] for a in anomalies})
+    async with async_session() as db:
+        vrows = (await db.execute(
+            select(AnomalyVerdict.ip, AnomalyVerdict.verdict,
+                   AnomalyVerdict.created_by, AnomalyVerdict.updated_at)
+            .where(AnomalyVerdict.ip.in_(dsts))
+        )).all()
+    human = {r[0] for r in vrows if (r[2] or "human") != "agent"}
+    prior = {r[0]: r[1] for r in vrows}
+    # Scheduled runs skip destinations re-assessed <20 h ago to save LLM calls; a
+    # manual run (force) re-assesses everything so a stale rule-loop 'suspicious'
+    # can be corrected to a reasoned verdict immediately. Human verdicts always win.
+    cooldown = timedelta(hours=20)
+    fresh = set() if force else {
+        r[0] for r in vrows
+        if (r[2] or "human") == "agent" and r[3] is not None
+        and (now - r[3]) < cooldown}
+
+    # Bulk-resolve the internal source hostnames.
+    host_map: dict[str, dict] = {}
+    try:
+        from app.hostname_service import lookup_cached
+        host_map = await lookup_cached(list({a["src"] for a in anomalies}))
+    except Exception as e:
+        logger.warning(f"agent[conn-triage]: hostname resolve failed: {e}")
+
+    lang = _agent_lang()
+    from app.notifications import notify
+    processed = alarms = 0
+    seen: set[str] = set()
+    for a in anomalies:
+        if processed >= cap:
+            logger.info(f"agent[conn-triage]: cap {cap} reached, stopping")
+            break
+        dst = a["dst"]
+        if dst in human or dst in fresh or dst in seen:
+            continue
+        seen.add(dst)
+
+        osint: dict[str, Any] = {}
+        if _is_public_ip(dst):
+            try:
+                from app.osint import lookup as osint_lookup
+                osint = await osint_lookup(dst, force=False, allow_shodan=False)
+            except Exception as e:
+                osint = {"error": str(e)[:200]}
+        src_host = (host_map.get(a["src"]) or {}).get("hostname")
+
+        assess = await _llm_assess_connection(a, src_host, osint, lang)
+        if not assess:
+            continue
+        processed += 1
+        await _set_agent_verdict(dst, assess["verdict"], _conntriage_comment(a, assess, lang))
+        if (do_alarm and assess["verdict"] in ("malicious", "suspicious")
+                and prior.get(dst) != assess["verdict"]):
+            await notify(_conntriage_alert_html(a, assess, lang),
+                         title="Warroom · Verbindungs-Bewertung")
+            alarms += 1
+    logger.info(f"agent[conn-triage]: assessed {processed} connection(s), {alarms} alarm(s)")
+
+
 # --- Failed-login loop (rule-based, brute-force detection) ---
 
 

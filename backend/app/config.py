@@ -196,6 +196,16 @@ class Settings(BaseSettings):
     agent_connanom_hours: int = 24               # NetFlow recent window
     agent_connanom_min_score: float = 0.7        # alarm only at/above this score
     agent_connanom_max_alerts: int = 10          # alarm cap per sweep
+    # Daily LLM assessment of connection anomalies: enriches source (internal
+    # hostname) + destination (OSINT/FQDN/ASN) and reasons what the connection is
+    # (e.g. HomeAssistant polling a weather API = benign). Writes a reasoned
+    # verdict on the destination; alarms on malicious/suspicious. Off by default.
+    agent_conntriage_enabled: bool = False
+    agent_conntriage_interval_seconds: int = 86400   # daily
+    agent_conntriage_min_score: float = 0.5          # assess connections at/above this
+    agent_conntriage_max: int = 30                   # LLM-call cap per run
+    agent_conntriage_alarm: bool = True              # alarm on malicious/suspicious
+    agent_conntriage_system_prompt: str = ""         # admin override (else bundled default)
     # Central-Event loop — rule-based; analyses the Sophos Central *event* stream
     # (separate from alerts) filtered to security-relevant event_types. The
     # high-volume firewall ATP events are deliberately excluded (already covered

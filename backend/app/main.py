@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI):
     # is the gate, so we always schedule it.
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
                            agent_anomaly_loop, agent_connection_anomaly_loop,
+                           agent_connection_triage_loop,
                            agent_failed_login_loop, agent_user_login_alert_loop)
     scheduler.add_job(
         agent_loop, "interval",
@@ -117,6 +118,12 @@ async def lifespan(app: FastAPI):
         agent_connection_anomaly_loop, "interval",
         seconds=max(60, settings.agent_connanom_interval_seconds),
         id="agent_connection_anomaly_loop",
+    )
+    # Daily LLM assessment of connection anomalies (source↔destination reasoning).
+    scheduler.add_job(
+        agent_connection_triage_loop, "interval",
+        seconds=max(3600, settings.agent_conntriage_interval_seconds),
+        id="agent_connection_triage_loop",
     )
     scheduler.add_job(
         agent_failed_login_loop, "interval",
@@ -3054,6 +3061,16 @@ async def firewall_connection_anomalies_scan_now():
     return {"ok": True}
 
 
+@app.post("/api/firewall/connection-anomalies/triage-now")
+async def firewall_connection_anomalies_triage_now():
+    """Run the daily LLM connection-assessment agent once now (force). Enriches
+    source + destination, reasons what each connection is, and writes a reasoned
+    verdict on the destination IP (alarming on malicious/suspicious per settings)."""
+    from app.agent import agent_connection_triage_loop
+    await agent_connection_triage_loop(force=True)
+    return {"ok": True}
+
+
 # --- Analyst verdicts on anomalous IPs (schädlich / unschädlich + comment) ---
 
 _ANOMALY_VERDICTS = {"malicious", "suspicious", "benign"}
@@ -5127,6 +5144,12 @@ class AdminSettingsIn(BaseModel):
     agent_connanom_hours: int | None = Field(default=None, ge=1, le=168)
     agent_connanom_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     agent_connanom_max_alerts: int | None = Field(default=None, ge=1, le=200)
+    agent_conntriage_enabled: bool | None = None
+    agent_conntriage_interval_seconds: int | None = Field(default=None, ge=3600, le=604800)
+    agent_conntriage_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    agent_conntriage_max: int | None = Field(default=None, ge=1, le=200)
+    agent_conntriage_alarm: bool | None = None
+    agent_conntriage_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_failed_login_enabled: bool | None = None
     agent_failed_login_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)

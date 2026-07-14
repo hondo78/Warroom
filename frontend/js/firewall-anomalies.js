@@ -375,6 +375,33 @@ function _renderConnAnRows() {
     if (f && f.value.trim()) f.dispatchEvent(new Event('input'));
 }
 
+// AI assessment: LLM reasons about each connection (source + destination OSINT)
+// and writes a verdict + conclusion. Polls verdicts a few times for live updates.
+async function connAnAssessNow(btn) {
+    if (!confirm(t('fwAnomalies.conn2_assess_confirm'))) return;
+    const label = btn?.querySelector('span'); const orig = label?.textContent;
+    if (btn) btn.disabled = true;
+    try {
+        const p = fetch('/api/firewall/connection-anomalies/triage-now', { method: 'POST' });
+        for (let i = 0; i < 8; i++) {           // ~2 min of live verdict updates
+            if (label) label.textContent = t('fwAnomalies.conn2_assess_running');
+            await new Promise(res => setTimeout(res, 15000));
+            await loadVerdicts();
+            _renderConnAnRows();
+            _anRenderRows();
+        }
+        const r = await p;
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+        await loadVerdicts();
+        _renderConnAnRows();
+    } catch (err) {
+        alert(t('fwAnomalies.conn2_assess_failed') + ': ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+        if (label && orig) label.textContent = orig;
+    }
+}
+
 // Agent scan: assess C2/exfil now AND raise the configured Telegram/Teams alarms.
 async function connAnScanNow(btn) {
     if (!confirm(t('fwAnomalies.conn2_scan_confirm'))) return;
