@@ -24,4 +24,18 @@ window.I18N.de.honeypot = {
     deploy_cmd: "Auf dem Linux-Honeypot-Host ausführen",
     edit_title: "Pod bearbeiten", delete: "Pod löschen", confirm_delete: "Pod „{name}\" löschen? Alle zugehörigen Events werden mit entfernt.",
     save_failed: "Speichern fehlgeschlagen", login: "Login",
+
+    // acknowledge honeypot alerts
+    hide_acked: "Nur offene",
+    ack: "Bestätigen",
+    ack_title: "Diese Quell-IP als gesehen markieren (bis sie erneut zugreift)",
+    unack: "Öffnen",
+    unack_title: "Bestätigung aufheben — Alarm wieder öffnen",
+    ack_badge: "bestätigt",
+    ack_at: "bestätigt {time}",
+    ack_all: "Alle bestätigen",
+    ack_all_title: "Alle aktuellen Alarme als gesehen markieren",
+    ack_all_confirm: "Alle aktuellen Honeypot-Alarme als gesehen markieren?",
+    ack_failed: "Bestätigen fehlgeschlagen",
+    no_open_events: "Keine offenen Alarme.",
 };

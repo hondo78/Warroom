@@ -168,11 +168,14 @@ function renderSources(sources) {
     _hpSources = sources || _hpSources;
     const tbody = document.getElementById('hpEventsTable');
     _sortIndicators('srcSortRow', _srcSort);
-    if (!_hpSources.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-secondary py-3">${t('honeypot.no_events')}</td></tr>`;
+    const hideAcked = document.getElementById('hpHideAcked')?.checked;
+    let list = _applySort(_hpSources, _srcSort, _srcSortVal);
+    if (hideAcked) list = list.filter(s => !s.acknowledged);
+    if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-secondary py-3">${t(hideAcked ? 'honeypot.no_open_events' : 'honeypot.no_events')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = _applySort(_hpSources, _srcSort, _srcSortVal).map(s => {
+    tbody.innerHTML = list.map(s => {
         const osint = typeof osintButton === 'function' ? osintButton(s.source_ip, 'osint-btn', 'ip') : '';
         const svcs = (s.services || []).map(sv => {
             const isFile = sv === 'file';
@@ -181,17 +184,61 @@ function renderSources(sources) {
         const logins = s.logins
             ? `<span class="badge text-bg-danger" title="${escapeAttr(t('honeypot.captured_logins'))}">${s.logins}</span>`
             : '<span class="text-secondary">0</span>';
-        return `<tr class="hp-src-row" data-ip="${escapeAttr(s.source_ip)}" style="cursor:pointer" onclick="toggleSource(this, '${escapeAttr(s.source_ip)}')">
+        const ackBadge = s.acknowledged
+            ? ` <span class="badge text-bg-success" style="font-size:.62rem" title="${escapeAttr(t('honeypot.ack_at', { time: fmtTime(s.acknowledged_at) }))}"><i class="bi bi-check2"></i></span>`
+            : '';
+        const ip = escapeAttr(s.source_ip);
+        const action = s.acknowledged
+            ? `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.unack_title'))}" onclick="event.stopPropagation(); unackSource('${ip}', this)"><i class="bi bi-arrow-counterclockwise"></i> <span data-i18n="honeypot.unack">Öffnen</span></button>`
+            : `<button class="btn btn-sm btn-outline-success py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.ack_title'))}" onclick="event.stopPropagation(); ackSource('${ip}', this)"><i class="bi bi-check2"></i> <span data-i18n="honeypot.ack">Bestätigen</span></button>`;
+        return `<tr class="hp-src-row" data-ip="${ip}" style="cursor:pointer${s.acknowledged ? ';opacity:.55' : ''}" onclick="toggleSource(this, '${ip}')">
             <td><i class="bi bi-caret-right-fill hp-caret"></i></td>
-            <td><code>${escapeHtml(s.source_ip)}</code>${osint}</td>
+            <td><code>${escapeHtml(s.source_ip)}</code>${osint}${ackBadge}</td>
             <td>${escapeHtml([s.country, s.city].filter(Boolean).join(', ') || '—')}</td>
             <td>${svcs}</td>
             <td><span class="badge text-bg-warning">${s.hits}</span></td>
             <td>${logins}</td>
             <td style="white-space:nowrap">${fmtTime(s.first_seen)}</td>
             <td style="white-space:nowrap">${fmtTime(s.last_seen)}</td>
+            <td style="white-space:nowrap">${action}</td>
         </tr>`;
     }).join('');
+}
+
+// --- Acknowledge honeypot alerts (per source IP) -----------------------------
+async function ackSource(ip, btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/honeypot/sources/${encodeURIComponent(ip)}/ack`, { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = _hpSources.find(x => x.source_ip === ip);
+        if (s) { s.acknowledged = true; s.acknowledged_at = new Date().toISOString(); }
+        renderSources();
+    } catch (e) { alert(t('honeypot.ack_failed') + ': ' + e.message); if (btn) btn.disabled = false; }
+}
+
+async function unackSource(ip, btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/honeypot/sources/${encodeURIComponent(ip)}/ack`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const s = _hpSources.find(x => x.source_ip === ip);
+        if (s) { s.acknowledged = false; s.acknowledged_at = null; }
+        renderSources();
+    } catch (e) { alert(t('honeypot.ack_failed') + ': ' + e.message); if (btn) btn.disabled = false; }
+}
+
+async function ackAllSources(btn) {
+    if (!confirm(t('honeypot.ack_all_confirm'))) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/honeypot/sources/ack-all', { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const now = new Date().toISOString();
+        _hpSources.forEach(s => { s.acknowledged = true; s.acknowledged_at = now; });
+        renderSources();
+    } catch (e) { alert(t('honeypot.ack_failed') + ': ' + e.message); }
+    finally { if (btn) btn.disabled = false; }
 }
 
 // Format one event's captured payload for the detail table.
@@ -218,7 +265,7 @@ async function toggleSource(rowEl, ip) {
     rowEl.querySelector('.hp-caret')?.classList.replace('bi-caret-right-fill', 'bi-caret-down-fill');
     const detail = document.createElement('tr');
     detail.className = 'hp-detail-row';
-    detail.innerHTML = `<td></td><td colspan="7" class="py-2"><div class="text-secondary">${t('common.loading')}</div></td>`;
+    detail.innerHTML = `<td></td><td colspan="8" class="py-2"><div class="text-secondary">${t('common.loading')}</div></td>`;
     rowEl.after(detail);
     try {
         const r = await fetch(`/api/honeypot/events?source_ip=${encodeURIComponent(ip)}&limit=500`);
@@ -233,7 +280,7 @@ async function toggleSource(rowEl, ip) {
                 <td>${_payloadHtml(e)}</td>
             </tr>`;
         }).join('');
-        detail.innerHTML = `<td></td><td colspan="7" class="py-2">
+        detail.innerHTML = `<td></td><td colspan="8" class="py-2">
             <table class="table table-sm mb-0" style="background:rgba(0,0,0,.12)">
                 <thead><tr>
                     <th data-i18n="common.time">Zeit</th><th data-i18n="honeypot.col_pod">Pod</th><th data-i18n="honeypot.col_service">Service</th>
@@ -243,7 +290,7 @@ async function toggleSource(rowEl, ip) {
             </table></td>`;
         if (window.i18nApply) window.i18nApply(detail);
     } catch (err) {
-        detail.innerHTML = `<td></td><td colspan="7" class="detail-error">${escapeHtml(err.message)}</td>`;
+        detail.innerHTML = `<td></td><td colspan="8" class="detail-error">${escapeHtml(err.message)}</td>`;
     }
 }
 

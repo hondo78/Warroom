@@ -24,4 +24,18 @@ window.I18N.en.honeypot = {
     deploy_cmd: "Run on the Linux honeypot host",
     edit_title: "Edit pod", delete: "Delete pod", confirm_delete: "Delete pod \"{name}\"? All its events are removed too.",
     save_failed: "Save failed", login: "Login",
+
+    // acknowledge honeypot alerts
+    hide_acked: "Only open",
+    ack: "Acknowledge",
+    ack_title: "Mark this source IP as seen (until it hits a decoy again)",
+    unack: "Reopen",
+    unack_title: "Remove acknowledgement — re-open the alert",
+    ack_badge: "acknowledged",
+    ack_at: "acknowledged {time}",
+    ack_all: "Acknowledge all",
+    ack_all_title: "Mark all current alerts as seen",
+    ack_all_confirm: "Acknowledge all current honeypot alerts?",
+    ack_failed: "Acknowledge failed",
+    no_open_events: "No open alerts.",
 };

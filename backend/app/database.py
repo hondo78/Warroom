@@ -430,6 +430,16 @@ _MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_honeypot_events_created ON honeypot_events(created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_honeypot_events_pod ON honeypot_events(honeypot_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_honeypot_events_src ON honeypot_events(source_ip)",
+    # Acknowledgement of honeypot alerts, keyed by source IP. A source counts as
+    # acknowledged while acknowledged_at >= its latest event — new activity after
+    # the ack re-surfaces it automatically.
+    """
+    CREATE TABLE IF NOT EXISTS honeypot_acks (
+        source_ip VARCHAR(45) PRIMARY KEY,
+        acknowledged_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        acknowledged_by VARCHAR(100)
+    )
+    """,
 ]
 
 

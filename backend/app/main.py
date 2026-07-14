@@ -1141,35 +1141,84 @@ async def list_honeypot_sources(
     """Honeypot accesses grouped by source IP — the collapsed alert list. Each
     row expands (via /api/honeypot/events?source_ip=…) to its connections."""
     rows = (await db.execute(text("""
-        SELECT source_ip,
+        SELECT e.source_ip,
                COUNT(*)                                              AS hits,
-               MIN(created_at)                                       AS first_seen,
-               MAX(created_at)                                       AS last_seen,
-               array_agg(DISTINCT service) FILTER (WHERE service IS NOT NULL) AS services,
-               array_agg(DISTINCT honeypot_id)                       AS pods,
-               MAX(attacker_country)                                 AS country,
-               MAX(attacker_city)                                    AS city,
-               MAX(attacker_org)                                     AS org,
-               COUNT(*) FILTER (WHERE event_type = 'login')          AS logins
-        FROM honeypot_events
-        WHERE source_ip IS NOT NULL
-        GROUP BY source_ip
-        ORDER BY MAX(created_at) DESC
+               MIN(e.created_at)                                     AS first_seen,
+               MAX(e.created_at)                                     AS last_seen,
+               array_agg(DISTINCT e.service) FILTER (WHERE e.service IS NOT NULL) AS services,
+               array_agg(DISTINCT e.honeypot_id)                     AS pods,
+               MAX(e.attacker_country)                               AS country,
+               MAX(e.attacker_city)                                  AS city,
+               MAX(e.attacker_org)                                   AS org,
+               COUNT(*) FILTER (WHERE e.event_type = 'login')        AS logins,
+               MAX(a.acknowledged_at)                                AS acked_at
+        FROM honeypot_events e
+        LEFT JOIN honeypot_acks a ON a.source_ip = e.source_ip
+        WHERE e.source_ip IS NOT NULL
+        GROUP BY e.source_ip
+        ORDER BY MAX(e.created_at) DESC
         LIMIT :lim
     """), {"lim": limit})).all()
     pod_names = {p.id: p.name for p in (await db.execute(select(Honeypot))).scalars().all()}
-    return {"sources": [
-        {
+    sources = []
+    for r in rows:
+        last_seen, acked_at = r[3], r[10]
+        # Acknowledged only while the ack is at/after the newest event — later
+        # activity from the same IP re-opens the alert.
+        acknowledged = acked_at is not None and last_seen is not None and acked_at >= last_seen
+        sources.append({
             "source_ip": r[0], "hits": int(r[1]),
             "first_seen": r[2].isoformat() if r[2] else None,
-            "last_seen": r[3].isoformat() if r[3] else None,
+            "last_seen": last_seen.isoformat() if last_seen else None,
             "services": list(r[4] or []),
             "pods": [pod_names.get(pid, pid) for pid in (r[5] or [])],
             "country": r[6], "city": r[7], "org": r[8],
             "logins": int(r[9] or 0),
-        }
-        for r in rows
-    ]}
+            "acknowledged": acknowledged,
+            "acknowledged_at": acked_at.isoformat() if acked_at else None,
+        })
+    return {"sources": sources}
+
+
+@app.post("/api/honeypot/sources/{source_ip}/ack")
+async def ack_honeypot_source(source_ip: str, db: AsyncSession = Depends(get_db)):
+    """Acknowledge all current honeypot alerts from one source IP. Upserts an ack
+    timestamp; the source re-surfaces if it hits a decoy again afterwards."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(source_ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid IP address")
+    await db.execute(text("""
+        INSERT INTO honeypot_acks (source_ip, acknowledged_at, acknowledged_by)
+        VALUES (:ip, NOW(), 'human')
+        ON CONFLICT (source_ip)
+        DO UPDATE SET acknowledged_at = NOW(), acknowledged_by = 'human'
+    """), {"ip": source_ip})
+    await db.commit()
+    return {"ok": True, "source_ip": source_ip}
+
+
+@app.delete("/api/honeypot/sources/{source_ip}/ack")
+async def unack_honeypot_source(source_ip: str, db: AsyncSession = Depends(get_db)):
+    """Remove the acknowledgement for one source IP (re-open the alert)."""
+    await db.execute(text("DELETE FROM honeypot_acks WHERE source_ip = :ip"), {"ip": source_ip})
+    await db.commit()
+    return {"ok": True, "source_ip": source_ip}
+
+
+@app.post("/api/honeypot/sources/ack-all")
+async def ack_all_honeypot_sources(db: AsyncSession = Depends(get_db)):
+    """Acknowledge every source IP that currently has honeypot events."""
+    res = await db.execute(text("""
+        INSERT INTO honeypot_acks (source_ip, acknowledged_at, acknowledged_by)
+        SELECT DISTINCT source_ip, NOW(), 'human'
+        FROM honeypot_events WHERE source_ip IS NOT NULL
+        ON CONFLICT (source_ip)
+        DO UPDATE SET acknowledged_at = NOW(), acknowledged_by = 'human'
+    """))
+    await db.commit()
+    return {"ok": True, "acknowledged": res.rowcount}
 
 
 @app.get("/api/honeypot/events")

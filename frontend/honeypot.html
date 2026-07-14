@@ -97,7 +97,16 @@
 
                 <!-- Events -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="honeypot.events_title">Zugriffe (Alarme)</h3></div>
+                    <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                        <h3 class="card-title mb-0" data-i18n="honeypot.events_title">Zugriffe (Alarme)</h3>
+                        <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" id="hpHideAcked" onchange="renderSources()">
+                                <label class="form-check-label small" for="hpHideAcked" data-i18n="honeypot.hide_acked">Nur offene</label>
+                            </div>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="ackAllSources(this)" title="Alle Alarme als gesehen markieren" data-i18n-title="honeypot.ack_all_title"><i class="bi bi-check2-all"></i> <span data-i18n="honeypot.ack_all">Alle bestätigen</span></button>
+                        </div>
+                    </div>
                     <div class="card-body">
                         <div class="mb-2"><input type="text" data-filter-for="hpEventsTable" class="form-control form-control-sm" data-i18n-placeholder="honeypot.filter_sources" placeholder="Filter (IP, Service, Land…)"></div>
                         <div class="table-scroll">
@@ -111,6 +120,7 @@
                                     <th data-sort="logins" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_logins">Logins</span> <span class="sort-ind"></span></th>
                                     <th data-sort="first_seen" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_firstseen">Erstmals</span> <span class="sort-ind"></span></th>
                                     <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_lastseen">Zuletzt</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="common.action">Aktion</th>
                                 </tr></thead>
                                 <tbody id="hpEventsTable"></tbody>
                             </table>
