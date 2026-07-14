@@ -107,6 +107,7 @@ window.I18N.de.fwAnomalies = {
     verdict_watchlist_comment: "FW-Anomalie-Bewertung",
     verdict_watchlist_failed: "Watchlist-Eintrag fehlgeschlagen",
     on_watchlist: "IP steht auf der Watchlist",
+    on_blocklist: "IP ist auf der Blocklist (geblockt)",
     verdict_by_agent: "Vom KI-Agent bewertet (OSINT-Triage)",
     ai_scan: "KI-Analyse (unbewertete)",
     ai_scan_title: "KI-Agent bewertet jetzt alle noch unbewerteten Anomalien (OSINT + LLM)",

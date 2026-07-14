@@ -255,7 +255,7 @@ async function anomalyRefresh() {
         document.getElementById('anTopScore').textContent = top ? top.score.toFixed(3) : '—';
         document.getElementById('anTopIp').textContent = top ? top.ip : '—';
 
-        await Promise.all([loadVerdicts(), loadWatchlist()]);
+        await Promise.all([loadVerdicts(), loadWatchlist(), loadBlocklist()]);
         _anScatterData = d.scatter || [];
         renderScatter(_anScatterData);
         render3d(_anScatterData);
@@ -363,7 +363,7 @@ function _renderConnAnRows() {
             <td><span class="badge ${km.cls}">${t(km.key)}</span></td>
             <td>${scoreBadge(a.score)}</td>
             <td><code style="font-size:.8rem">${escapeHtml(a.src)}</code></td>
-            <td><code style="font-size:.8rem">${escapeHtml(a.dst)}</code>${watchlistBadge(a.dst)}${osint} ${port}</td>
+            <td><code style="font-size:.8rem">${escapeHtml(a.dst)}</code>${watchlistBadge(a.dst)}${blocklistBadge(a.dst)}${osint} ${port}</td>
             <td>${country}</td>
             <td>${vol}</td>
             <td style="max-width:340px;white-space:normal">${connSignalChips(a.signals)}</td>
@@ -480,7 +480,7 @@ function _anRenderRows() {
             : '<span class="text-secondary">—</span>';
         return `<tr data-ip="${escapeAttr(it.ip)}" style="${baseBg}cursor:pointer" title="${escapeAttr(t('fwAnomalies.row_click_title'))}">
             <td>${scoreBadge(it.score)}${driverChips(it.drivers)}</td>
-            <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${watchlistBadge(it.ip)}${osint}</td>
+            <td><code style="font-size:.82rem">${escapeHtml(it.ip || '')}</code>${watchlistBadge(it.ip)}${blocklistBadge(it.ip)}${osint}</td>
             <td>${peer}</td>
             <td>${country}</td>
             <td>${fmtBytes(it.bytes)}</td>
@@ -716,6 +716,23 @@ async function loadWatchlist() {
 function watchlistBadge(ip) {
     if (!_anWatchlist.has(ip)) return '';
     return ` <span class="badge text-bg-info" style="font-size:.62rem" title="${escapeAttr(t('fwAnomalies.on_watchlist'))}"><i class="bi bi-binoculars"></i></span>`;
+}
+
+// Blocklist membership for the shown rows — a red badge in the IP column so it's
+// clear at a glance which anomalous addresses are already blocked on the firewall.
+let _anBlocklist = new Set();
+async function loadBlocklist() {
+    try {
+        const r = await fetch('/api/firewall/blocked-ips');
+        if (!r.ok) return;
+        const d = await r.json();
+        _anBlocklist = new Set((d.items || []).map(b => b.ip));
+    } catch (e) { /* keep the previous set on error */ }
+}
+
+function blocklistBadge(ip) {
+    if (!_anBlocklist.has(ip)) return '';
+    return ` <span class="badge text-bg-danger" style="font-size:.62rem" title="${escapeAttr(t('fwAnomalies.on_blocklist'))}"><i class="bi bi-shield-slash"></i></span>`;
 }
 
 async function loadVerdicts() {
