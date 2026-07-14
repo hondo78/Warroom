@@ -7,6 +7,7 @@ window.I18N.de.honeypot = {
     events_title: "Zugriffe (Alarme)", no_events: "Noch keine Zugriffe — sobald jemand einen Decoy berührt, erscheint er hier.",
     filter_events: "Filter (IP, Service, Land, Payload…)",
     col_status: "Status", col_name: "Name", col_host: "Host", col_services: "Services", col_hits: "Hits (24h)", col_lastseen: "Zuletzt gesehen",
+    filter_pods: "Filter (Name, Host, Service…)",
     filter_sources: "Filter (IP, Service, Land…)",
     col_logins: "Logins",
     col_firstseen: "Erstmals",

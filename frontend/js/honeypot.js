@@ -9,8 +9,50 @@ let _editPodId = null;
 const _FILE_LABEL = { file: 'Datei' };
 function _svcLabel(s) { return _hpServices[s]?.label || _FILE_LABEL[s] || s; }
 
+let _hpSources = [];
+const _podsSort = { key: 'last_seen', dir: 'desc' };
+const _srcSort = { key: 'last_seen', dir: 'desc' };
+
+// Numeric IPv4 value so 172.16.16.9 sorts before 172.16.16.100.
+function _ipNum(ip) {
+    const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(ip || '');
+    return m ? ((+m[1] * 256 + +m[2]) * 256 + +m[3]) * 256 + +m[4] : -1;
+}
+
+// Wire a sortable header row: click sorts, click again flips direction.
+function _initSort(rowId, state, rerender) {
+    document.querySelectorAll(`#${rowId} th[data-sort]`).forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (state.key === key) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+            else { state.key = key; state.dir = ['name', 'host', 'country'].includes(key) ? 'asc' : 'desc'; }
+            rerender();
+        });
+    });
+}
+
+function _applySort(rows, state, valFn) {
+    const mul = state.dir === 'asc' ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+        const va = valFn(a, state.key), vb = valFn(b, state.key);
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return mul * String(va).localeCompare(String(vb), HP_LOCALE, { numeric: true });
+        }
+        return mul * (va - vb);
+    });
+}
+
+function _sortIndicators(rowId, state) {
+    document.querySelectorAll(`#${rowId} th[data-sort]`).forEach(th => {
+        const ind = th.querySelector('.sort-ind');
+        if (ind) ind.textContent = th.dataset.sort === state.key ? (state.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
+    _initSort('podsSortRow', _podsSort, renderPods);
+    _initSort('srcSortRow', _srcSort, () => renderSources(_hpSources));
     refreshHoneypot();
     setInterval(refreshHoneypot, 30000);
     ['createPodModal', 'deployModal', 'editPodModal'].forEach(id => {
@@ -19,6 +61,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+function _podSortVal(p, key) {
+    switch (key) {
+        case 'status': return (p.online ? 2 : 0) + (p.enabled ? 0 : -1);   // online>offline>disabled
+        case 'name': return (p.name || '').toLowerCase();
+        case 'host': return (p.host_info?.hostname || p.host_ip || '').toLowerCase();
+        case 'hits': return p.events_24h || 0;
+        case 'last_seen': return p.last_seen || '';
+        default: return '';
+    }
+}
+
+function _srcSortVal(s, key) {
+    switch (key) {
+        case 'source_ip': return _ipNum(s.source_ip);
+        case 'country': return (s.country || '').toLowerCase();
+        case 'hits': return s.hits || 0;
+        case 'logins': return s.logins || 0;
+        case 'first_seen': return s.first_seen || '';
+        case 'last_seen': return s.last_seen || '';
+        default: return '';
+    }
+}
 
 function initFilters() {
     document.querySelectorAll('input[data-filter-for]').forEach(input => {
@@ -65,11 +130,12 @@ function _svcBadges(services) {
 
 function renderPods() {
     const tbody = document.getElementById('podsTable');
+    _sortIndicators('podsSortRow', _podsSort);
     if (!_hpPods.length) {
         tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-3">${t('honeypot.no_pods')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = _hpPods.map(p => {
+    tbody.innerHTML = _applySort(_hpPods, _podsSort, _podSortVal).map(p => {
         const dot = p.online
             ? `<span class="badge text-bg-success">● ${t('honeypot.online')}</span>`
             : `<span class="badge text-bg-secondary">○ ${t('honeypot.offline')}</span>`;
@@ -99,12 +165,14 @@ const _EVT_BADGE = { login: 'text-bg-danger', http_request: 'text-bg-warning', c
 
 // The accesses list, grouped by source IP. Each row expands to its connections.
 function renderSources(sources) {
+    _hpSources = sources || _hpSources;
     const tbody = document.getElementById('hpEventsTable');
-    if (!sources.length) {
+    _sortIndicators('srcSortRow', _srcSort);
+    if (!_hpSources.length) {
         tbody.innerHTML = `<tr><td colspan="8" class="text-center text-secondary py-3">${t('honeypot.no_events')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = sources.map(s => {
+    tbody.innerHTML = _applySort(_hpSources, _srcSort, _srcSortVal).map(s => {
         const osint = typeof osintButton === 'function' ? osintButton(s.source_ip, 'osint-btn', 'ip') : '';
         const svcs = (s.services || []).map(sv => {
             const isFile = sv === 'file';

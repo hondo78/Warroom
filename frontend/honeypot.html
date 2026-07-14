@@ -77,11 +77,17 @@
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="honeypot.pods_title">Pods</h3></div>
                     <div class="card-body">
+                        <div class="mb-2"><input type="text" data-filter-for="podsTable" class="form-control form-control-sm" data-i18n-placeholder="honeypot.filter_pods" placeholder="Filter (Name, Host, Service…)"></div>
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
-                                <thead><tr>
-                                    <th data-i18n="honeypot.col_status">Status</th><th data-i18n="honeypot.col_name">Name</th><th data-i18n="honeypot.col_host">Host</th>
-                                    <th data-i18n="honeypot.col_services">Services</th><th data-i18n="honeypot.col_hits">Hits (24h)</th><th data-i18n="honeypot.col_lastseen">Zuletzt gesehen</th><th data-i18n="common.action">Aktion</th>
+                                <thead><tr id="podsSortRow">
+                                    <th data-sort="status" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_status">Status</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="name" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_name">Name</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="host" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_host">Host</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="honeypot.col_services">Services</th>
+                                    <th data-sort="hits" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_hits">Hits (24h)</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_lastseen">Zuletzt gesehen</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="common.action">Aktion</th>
                                 </tr></thead>
                                 <tbody id="podsTable"></tbody>
                             </table>
@@ -96,10 +102,15 @@
                         <div class="mb-2"><input type="text" data-filter-for="hpEventsTable" class="form-control form-control-sm" data-i18n-placeholder="honeypot.filter_sources" placeholder="Filter (IP, Service, Land…)"></div>
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
-                                <thead><tr>
-                                    <th style="width:1.5rem"></th><th data-i18n="honeypot.col_source">Quelle</th><th data-i18n="common.country">Land</th>
-                                    <th data-i18n="honeypot.col_services">Services</th><th data-i18n="honeypot.col_hits">Zugriffe</th><th data-i18n="honeypot.col_logins">Logins</th>
-                                    <th data-i18n="honeypot.col_firstseen">Erstmals</th><th data-i18n="honeypot.col_lastseen">Zuletzt</th>
+                                <thead><tr id="srcSortRow">
+                                    <th style="width:1.5rem"></th>
+                                    <th data-sort="source_ip" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_source">Quelle</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="country" style="cursor:pointer;user-select:none"><span data-i18n="common.country">Land</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="honeypot.col_services">Services</th>
+                                    <th data-sort="hits" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_hits">Zugriffe</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="logins" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_logins">Logins</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="first_seen" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_firstseen">Erstmals</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="last_seen" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.col_lastseen">Zuletzt</span> <span class="sort-ind"></span></th>
                                 </tr></thead>
                                 <tbody id="hpEventsTable"></tbody>
                             </table>
