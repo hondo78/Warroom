@@ -215,6 +215,11 @@ class BlockedIp(Base):
     # Specially flagged for connection monitoring — the monitor job tracks which
     # internal hosts talk to this IP and alerts on new sessions.
     monitored = Column(Boolean, nullable=False, default=False)
+    # Provenance: who created the block ('human' | 'agent') and which detection
+    # it originated from ('manual' | 'bulk' | 'chat' | 'anomaly' | 'connection' |
+    # 'waf' | 'ips' | 'failed_login' | 'event' | 'triage' | …).
+    blocked_by = Column(String(20), nullable=False, default="human")
+    source = Column(String(40), nullable=False, default="manual")
 
 
 class WatchlistIp(Base):

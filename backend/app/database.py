@@ -55,6 +55,27 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_blocked_ips_blocked_at ON blocked_ips(blocked_at DESC)",
+    # Provenance: who created the block (human vs the AI agent) and which
+    # detection it came from (manual / anomaly / waf / ips / failed_login / …).
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS blocked_by VARCHAR(20) NOT NULL DEFAULT 'human'",
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS source VARCHAR(40) NOT NULL DEFAULT 'manual'",
+    # One-time best-effort backfill of provenance for pre-existing rows from the
+    # comment prefix the writers used. Guards make it a no-op after the first run
+    # (and it never touches genuinely-manual rows or newly-tagged inserts).
+    """
+    UPDATE blocked_ips SET blocked_by='agent', source=CASE
+        WHEN comment ILIKE 'agent[WAF%'        THEN 'waf'
+        WHEN comment ILIKE 'agent[Login%'      THEN 'failed_login'
+        WHEN comment ILIKE 'agent[IPS%'        THEN 'ips'
+        WHEN comment ILIKE 'agent[Anomal%'     THEN 'anomaly'
+        WHEN comment ILIKE 'agent[Verbindung%' OR comment ILIKE 'agent[Connection%' THEN 'connection'
+        WHEN comment ILIKE 'agent[Event%'      THEN 'event'
+        WHEN comment ILIKE 'agent[Triage%'     THEN 'triage'
+        ELSE 'agent' END
+      WHERE comment ILIKE 'agent[%' AND blocked_by = 'human'
+    """,
+    "UPDATE blocked_ips SET blocked_by='human', source='chat' WHERE comment ILIKE 'chat[%' AND source='manual'",
+    "UPDATE blocked_ips SET blocked_by='human', source='bulk' WHERE comment ILIKE 'bulk:%' AND source='manual'",
     """
     CREATE TABLE IF NOT EXISTS blocked_domains (
         domain VARCHAR(255) PRIMARY KEY,

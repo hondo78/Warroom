@@ -1845,6 +1845,8 @@ async def list_blocked_ips(db: AsyncSession = Depends(get_db)):
                 "comment": b.comment,
                 "blocked_at": b.blocked_at.isoformat() if b.blocked_at else None,
                 "monitored": bool(b.monitored),
+                "blocked_by": b.blocked_by or "human",
+                "source": b.source or "manual",
             }
             for b in rows
         ],
@@ -1876,7 +1878,8 @@ async def block_ip(body: BlockIpIn, db: AsyncSession = Depends(get_db)):
     entry = existing.scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if entry is None:
-        entry = BlockedIp(ip=body.ip, comment=body.comment, blocked_at=now)
+        entry = BlockedIp(ip=body.ip, comment=body.comment, blocked_at=now,
+                          blocked_by="human", source="manual")
         db.add(entry)
     elif body.comment is not None:
         entry.comment = body.comment
@@ -1925,7 +1928,8 @@ async def block_ips_bulk(body: BlockIpsIn, db: AsyncSession = Depends(get_db)):
             continue
         if ip in added:
             continue
-        db.add(BlockedIp(ip=ip, comment=body.comment, blocked_at=now))
+        db.add(BlockedIp(ip=ip, comment=body.comment, blocked_at=now,
+                         blocked_by="human", source="manual"))
         added.append(ip)
     await db.commit()
 

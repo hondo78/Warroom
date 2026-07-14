@@ -222,6 +222,27 @@ async function whitelistRefresh() {
     } catch (err) { alert(t('blocked.err_refresh_failed') + err.message); }
 }
 
+// Block provenance: which detection created it + whether AI or a human did it.
+const BLOCK_SRC_KEYS = {
+    manual: 'blocked.src_manual', bulk: 'blocked.src_bulk', chat: 'blocked.src_chat',
+    anomaly: 'blocked.src_anomaly', connection: 'blocked.src_connection',
+    waf: 'blocked.src_waf', ips: 'blocked.src_ips', failed_login: 'blocked.src_failed_login',
+    event: 'blocked.src_event', triage: 'blocked.src_triage', alert: 'blocked.src_alert',
+    agent: 'blocked.src_agent',
+};
+function blockSourceLabel(src) {
+    const k = BLOCK_SRC_KEYS[src];
+    return k ? t(k) : (src || '-');
+}
+function blockOriginCell(b) {
+    const byAgent = (b.blocked_by || 'human') === 'agent';
+    const who = byAgent
+        ? `<span class="badge text-bg-info" title="${escapeAttr(t('blocked.by_agent'))}"><i class="bi bi-robot"></i> ${t('blocked.who_ai')}</span>`
+        : `<span class="badge text-bg-secondary" title="${escapeAttr(t('blocked.by_human'))}"><i class="bi bi-person"></i> ${t('blocked.who_human')}</span>`;
+    const src = `<span class="badge text-bg-dark ms-1">${escapeHtml(blockSourceLabel(b.source))}</span>`;
+    return who + src;
+}
+
 async function updateBlockedIpsTable() {
     try {
         const resp = await fetch('/api/firewall/blocked-ips');
@@ -234,7 +255,7 @@ async function updateBlockedIpsTable() {
 
         const tbody = document.getElementById('blockedIpsTable');
         if (!items.length) {
-            tbody.innerHTML = emptyRow(5, t('blocked.empty_ips'));
+            tbody.innerHTML = emptyRow(6, t('blocked.empty_ips'));
             return;
         }
         tbody.innerHTML = items.map(b => `
@@ -242,6 +263,7 @@ async function updateBlockedIpsTable() {
                 <td><code>${escapeHtml(b.ip)}</code>${typeof osintButton === 'function' ? osintButton(b.ip, 'osint-btn', 'ip') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
+                <td>${blockOriginCell(b)}</td>
                 <td>${monitorToggleCell(b.ip, b.monitored)}</td>
                 <td><button class="restore-btn" onclick="unblockIp('${escapeAttr(b.ip)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');

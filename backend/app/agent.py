@@ -1523,6 +1523,8 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
                         ip=ip,
                         comment=f"agent[{src_label}]: {rec.reasoning[:200]}",
                         blocked_at=datetime.now(timezone.utc),
+                        blocked_by=rec.decided_by or "agent",
+                        source=rec.source_type or "agent",
                     ))
                 result = {"ip": ip, "source": rec.source_type}
 
@@ -1564,7 +1566,9 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
                         continue
                     if ip in existing:
                         continue
-                    db.add(BlockedIp(ip=ip, comment=comment, blocked_at=now_ts))
+                    db.add(BlockedIp(ip=ip, comment=comment, blocked_at=now_ts,
+                                     blocked_by=rec.decided_by or "agent",
+                                     source=rec.source_type or "agent"))
                     added.append(ip)
                 if skipped_wl:
                     logger.warning(
@@ -1620,7 +1624,9 @@ async def execute_decision(decision_id: int) -> dict[str, Any]:
                         continue
                     if ip in existing:
                         continue
-                    db.add(BlockedIp(ip=ip, comment=comment, blocked_at=now_ts))
+                    db.add(BlockedIp(ip=ip, comment=comment, blocked_at=now_ts,
+                                     blocked_by=rec.decided_by or "agent",
+                                     source=rec.source_type or "agent"))
                     added.append(ip)
                 if skipped_wl:
                     logger.warning(

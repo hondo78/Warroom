@@ -263,7 +263,8 @@ async def _h_block_ip(args, actor) -> str:
         existing = (await db.execute(select(BlockedIp).where(BlockedIp.ip == ip))).scalar_one_or_none()
         if existing:
             return f"INFO {ip} ist bereits geblockt."
-        db.add(BlockedIp(ip=ip, comment=f"chat[{actor}]", blocked_at=datetime.now(timezone.utc)))
+        db.add(BlockedIp(ip=ip, comment=f"chat[{actor}]", blocked_at=datetime.now(timezone.utc),
+                         blocked_by="human", source="chat"))
         await db.commit()
     return f"OK IP **{ip}** auf die Blocklist gesetzt. Die Firewall zieht sie ueber den IOC-Feed."
 
