@@ -1057,7 +1057,8 @@ def _deploy_snippet(request: Request, token: str) -> str:
     return (
         f"# Run on the remote Linux honeypot host (needs root for ports < 1024):\n"
         f"curl -fsSL {base}/api/honeypot/agent/download -o honeypot_agent.py\n"
-        f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} python3 honeypot_agent.py"
+        f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} python3 honeypot_agent.py\n"
+        f"# Self-signed reverse proxy? add HONEYPOT_TLS_VERIFY=0 (or HONEYPOT_CA=/path/to/ca.pem)"
     )
 
 

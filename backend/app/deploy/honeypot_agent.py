@@ -15,8 +15,10 @@ Stdlib only (asyncio + urllib) — no pip install. Run as root to bind ports < 1
     curl -fsSL https://<warroom>/api/honeypot/agent/download -o honeypot_agent.py
     sudo WARROOM_URL=https://<warroom> HONEYPOT_TOKEN=hp_xxxx python3 honeypot_agent.py
 
-Env: WARROOM_URL, HONEYPOT_TOKEN (required); HONEYPOT_BIND (default 0.0.0.0),
-HONEYPOT_TLS_VERIFY (default 1).
+Env: WARROOM_URL, HONEYPOT_TOKEN (required); HONEYPOT_BIND (default 0.0.0.0).
+TLS: HONEYPOT_TLS_VERIFY (default 1) — set 0 to skip cert verification when
+Warroom sits behind a self-signed reverse proxy; or HONEYPOT_CA=/path/to/ca.pem
+to verify against that proxy's CA instead (preferred over disabling).
 """
 import asyncio
 import ctypes
@@ -29,13 +31,15 @@ import ssl
 import struct
 import sys
 import time
+import urllib.error
 import urllib.request
 
 WARROOM_URL = os.environ.get("WARROOM_URL", "").rstrip("/")
 TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
 BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
 TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
-AGENT_VERSION = "1.0"
+CA_FILE = os.environ.get("HONEYPOT_CA", "").strip()
+AGENT_VERSION = "1.1"
 
 if not WARROOM_URL or not TOKEN:
     print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
@@ -501,6 +505,10 @@ def _ctx():
         c.check_hostname = False
         c.verify_mode = ssl.CERT_NONE
         return c
+    if CA_FILE:
+        # Verify against the reverse proxy's own CA (e.g. Nginx Proxy Manager's
+        # self-signed CA) — secure alternative to disabling verification.
+        return ssl.create_default_context(cafile=CA_FILE)
     return None
 
 
@@ -509,8 +517,26 @@ def _post(path, obj):
         WARROOM_URL + path, data=json.dumps(obj).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + TOKEN},
         method="POST")
-    with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
-        return json.loads(r.read().decode() or "{}")
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+            body = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:300]
+        raise RuntimeError(f"HTTP {e.code} from {path}: {detail or e.reason}")
+    except urllib.error.URLError as e:
+        reason = e.reason
+        if isinstance(reason, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(reason):
+            raise RuntimeError(
+                f"TLS verification failed ({reason}). The Warroom cert is not publicly "
+                f"trusted. Fix: install a Let's Encrypt cert on the proxy, or set "
+                f"HONEYPOT_CA=/path/to/ca.pem, or (quick, less secure) HONEYPOT_TLS_VERIFY=0.")
+        raise RuntimeError(f"cannot reach {WARROOM_URL}{path}: {reason}")
+    try:
+        return json.loads(body or "{}")
+    except ValueError:
+        raise RuntimeError(
+            f"non-JSON response from {path} (is WARROOM_URL correct / not an error page?): "
+            f"{body[:120]!r}")
 
 
 async def _heartbeat_loop():
