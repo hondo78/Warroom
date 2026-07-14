@@ -54,6 +54,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('anHours').addEventListener('change', anomalyRefresh);
     document.getElementById('anMinFlows').addEventListener('change', anomalyRefresh);
     document.getElementById('anRole').addEventListener('change', anomalyRefresh);
+    // Connection-anomaly controls reload only that table (not the whole forest).
+    document.getElementById('connAnKind')?.addEventListener('change', loadConnAnomalies);
+    document.getElementById('connAnMinScore')?.addEventListener('change', loadConnAnomalies);
     const ipInput = document.getElementById('anIp');
     ipInput.addEventListener('change', anomalyRefresh);
     ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); anomalyRefresh(); } });
@@ -257,6 +260,8 @@ async function anomalyRefresh() {
         renderScatter(_anScatterData);
         render3d(_anScatterData);
         renderTable(d.anomalies || []);
+        // Per-connection anomalies share the verdict map; load in parallel.
+        loadConnAnomalies();
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
     }
@@ -265,6 +270,126 @@ async function anomalyRefresh() {
 function renderTable(items) {
     _anItems = items || [];
     _anRenderRows();
+}
+
+// ---- Per-connection anomalies (primary view): C2 beaconing & atypical uploads
+// Scores individual src→dst connections against a 30-day baseline. Verdicts +
+// watchlist are keyed on the external destination IP, so all the shared verdict
+// helpers (verdictCell/watchlistBadge/openVerdictModal) apply with dst as the IP.
+let _connAnItems = [];
+
+const CONN_KIND_META = {
+    c2:    { cls: 'text-bg-danger',    key: 'fwAnomalies.conn2_kind_c2' },
+    exfil: { cls: 'text-bg-warning',   key: 'fwAnomalies.conn2_kind_exfil' },
+    new:   { cls: 'text-bg-secondary', key: 'fwAnomalies.conn2_kind_new' },
+};
+
+async function loadConnAnomalies() {
+    const hours = document.getElementById('anHours').value || '24';
+    const minScore = document.getElementById('connAnMinScore')?.value || '0.5';
+    const kind = document.getElementById('connAnKind')?.value || '';
+    const tbody = document.getElementById('connAnTable');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center text-secondary py-3">${t('fwAnomalies.analyzing')}</td></tr>`;
+    try {
+        const params = new URLSearchParams({ hours, min_flows: '5', min_score: minScore, limit: '300' });
+        if (kind) params.set('kind', kind);
+        const r = await fetch('/api/firewall/connection-anomalies?' + params.toString());
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+        const d = await r.json();
+        _connAnItems = d.anomalies || [];
+        _renderConnAnStats(d);
+        _renderConnAnRows();
+    } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+function _renderConnAnStats(d) {
+    const el = document.getElementById('connAnStats');
+    if (!el) return;
+    const bk = d.by_kind || {};
+    const chip = (key, n, cls) => `<span class="badge ${cls}" style="font-size:.75rem">${t(key)}: ${(n || 0).toLocaleString(AN_LOCALE)}</span>`;
+    el.innerHTML =
+        chip('fwAnomalies.conn2_kind_c2', bk.c2, 'text-bg-danger') + ' '
+        + chip('fwAnomalies.conn2_kind_exfil', bk.exfil, 'text-bg-warning') + ' '
+        + chip('fwAnomalies.conn2_kind_new', bk.new, 'text-bg-secondary')
+        + ` <span class="text-secondary" style="font-size:.72rem">`
+        + t('fwAnomalies.conn2_meta', {
+            c: (d.analyzed || 0).toLocaleString(AN_LOCALE),
+            b: (d.baseline_pairs || 0).toLocaleString(AN_LOCALE),
+        }) + '</span>';
+}
+
+// One coloured badge per interpretable signal that flagged the connection.
+function connSignalChips(signals) {
+    return (signals || []).map(s => {
+        let label = s.code, cls = 'text-bg-light text-dark', title = '';
+        switch (s.code) {
+            case 'new_pair':      label = t('fwAnomalies.sig_new'); cls = 'text-bg-danger'; break;
+            case 'uncommon_pair': label = t('fwAnomalies.sig_uncommon', { d: s.days }); cls = 'text-bg-secondary'; break;
+            case 'rare_dst':      label = t('fwAnomalies.sig_rare'); cls = 'text-bg-warning'; break;
+            case 'shared_dst':    label = t('fwAnomalies.sig_shared', { n: s.hosts }); cls = 'text-bg-success'; break;
+            case 'upload':        label = t('fwAnomalies.sig_upload', { b: fmtBytes(s.bytes), p: Math.round((s.ratio || 0) * 100) }); cls = 'text-bg-warning'; break;
+            case 'beacon':        label = t('fwAnomalies.sig_beacon', { s: s.period_s, n: s.count }); cls = 'text-bg-danger';
+                title = t('fwAnomalies.sig_beacon_title', { r: s.regularity, m: Math.round(s.span_min || 0), bpf: (s.bytes_per_flow || 0).toLocaleString(AN_LOCALE) }); break;
+            case 'offhours':      label = t('fwAnomalies.sig_offhours', { p: Math.round((s.ratio || 0) * 100) }); cls = 'text-bg-dark'; break;
+        }
+        return `<span class="badge ${cls}" style="font-size:.66rem" title="${escapeAttr(title || label)}">${escapeHtml(label)}</span>`;
+    }).join(' ');
+}
+
+function _renderConnAnRows() {
+    const tbody = document.getElementById('connAnTable');
+    if (!tbody) return;
+    if (!_connAnItems.length) {
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center text-secondary py-3">${t('fwAnomalies.conn2_none')}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = _connAnItems.map(a => {
+        const km = CONN_KIND_META[a.kind] || CONN_KIND_META.new;
+        const verdict = _anVerdicts[a.dst];
+        let bg = a.kind === 'c2' ? 'background:rgba(220,53,69,.08);'
+               : a.kind === 'exfil' ? 'background:rgba(255,193,7,.08);' : '';
+        if (verdict?.verdict === 'malicious') bg = 'background:rgba(220,53,69,.18);';
+        else if (verdict?.verdict === 'suspicious') bg = 'background:rgba(255,193,7,.14);';
+        else if (verdict?.verdict === 'benign') bg = 'background:rgba(120,144,170,.10);opacity:.7;';
+        const osint = typeof osintButton === 'function' ? osintButton(a.dst, 'osint-btn', 'ip') : '';
+        const country = a.country ? escapeHtml(a.country) : '<span class="text-secondary">—</span>';
+        const port = a.top_port ? `<span class="text-secondary" style="font-size:.7rem">:${a.top_port}</span>` : '';
+        const vol = `<span style="white-space:nowrap" title="${escapeAttr(t('fwAnomalies.conn2_vol_title'))}">`
+            + `<span class="text-warning">↑${fmtBytes(a.out_bytes)}</span> `
+            + `<span class="text-secondary">↓${fmtBytes(a.in_bytes)}</span></span>`;
+        return `<tr style="${bg}">
+            <td><span class="badge ${km.cls}">${t(km.key)}</span></td>
+            <td>${scoreBadge(a.score)}</td>
+            <td><code style="font-size:.8rem">${escapeHtml(a.src)}</code></td>
+            <td><code style="font-size:.8rem">${escapeHtml(a.dst)}</code>${watchlistBadge(a.dst)}${osint} ${port}</td>
+            <td>${country}</td>
+            <td>${vol}</td>
+            <td style="max-width:340px;white-space:normal">${connSignalChips(a.signals)}</td>
+            <td>${verdictCell(a.dst)}</td>
+            <td>${verdictCommentCell(a.dst)}</td>
+        </tr>`;
+    }).join('');
+    const f = document.querySelector('input[data-filter-for="connAnTable"]');
+    if (f && f.value.trim()) f.dispatchEvent(new Event('input'));
+}
+
+// Agent scan: assess C2/exfil now AND raise the configured Telegram/Teams alarms.
+async function connAnScanNow(btn) {
+    if (!confirm(t('fwAnomalies.conn2_scan_confirm'))) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/connection-anomalies/scan-now', { method: 'POST' });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+        await loadVerdicts();
+        await loadConnAnomalies();
+        _anRenderRows();
+    } catch (err) {
+        alert(t('fwAnomalies.conn2_scan_failed') + ': ' + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function _anSortVal(it, k) {
@@ -653,6 +778,7 @@ async function saveVerdict() {
             if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
             _anWatchlist.add(ip);
             _anRenderRows();   // show the watchlist badge immediately
+            _renderConnAnRows();
         } catch (err) {
             // Verdict is already saved — only the watchlist add failed.
             alert(t('fwAnomalies.verdict_watchlist_failed') + ': ' + err.message);
@@ -678,6 +804,7 @@ async function _postVerdict(ip, verdict, comment) {
         else delete _anVerdicts[ip];
         closeVerdict();
         _anRenderRows();
+        _renderConnAnRows();
         // Recolour the charts so the new verdict shows without a full refresh.
         renderScatter(_anScatterData);
         render3d(_anScatterData);

@@ -2466,6 +2466,121 @@ async def agent_anomaly_loop(force: bool = False, no_cap: bool = False) -> None:
         await _set_agent_verdict(ip, verdict, comment)
 
 
+# --- Per-connection C2/exfil loop (rule-based, alarming) ---
+
+
+def _fmt_bytes_short(b: int) -> str:
+    b = float(b or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if b < 1024 or unit == "TB":
+            return f"{b:.0f} {unit}" if unit == "B" else f"{b:.1f} {unit}"
+        b /= 1024
+
+
+def _connanom_texts(a: dict, lang: str) -> tuple[str, str]:
+    """Build (kind_label, detail) describing a connection anomaly, localized."""
+    de = lang == "de"
+    port = a.get("top_port") or 0
+    if a["kind"] == "c2":
+        kind = "C2-Beaconing" if de else "C2 beaconing"
+        bm = a.get("beacon") or {}
+        per = bm.get("period_s", 0)
+        if de:
+            detail = (f"Regelmäßige Verbindung alle ~{per}s · {a['flows']} Verbindungen · "
+                      f"Regularität {bm.get('regularity', 0)} · über {bm.get('span_min', 0):.0f} min · Port {port}")
+        else:
+            detail = (f"Regular connection every ~{per}s · {a['flows']} connections · "
+                      f"regularity {bm.get('regularity', 0)} · over {bm.get('span_min', 0):.0f} min · port {port}")
+    else:  # exfil
+        kind = "Untypischer Upload" if de else "Atypical upload"
+        up = int(round(a.get("upload_ratio", 0) * 100))
+        if de:
+            detail = (f"Upload {_fmt_bytes_short(a['out_bytes'])} ({up}% ausgehend) · "
+                      f"Download {_fmt_bytes_short(a['in_bytes'])} · Port {port}")
+        else:
+            detail = (f"Upload {_fmt_bytes_short(a['out_bytes'])} ({up}% outbound) · "
+                      f"download {_fmt_bytes_short(a['in_bytes'])} · port {port}")
+    if a.get("is_new"):
+        detail += " · " + ("Ziel neu" if de else "new destination")
+    elif a.get("dst_hosts", 9) <= 1:
+        detail += " · " + ("Ziel selten" if de else "rare destination")
+    return kind, detail
+
+
+def _connanom_comment(a: dict, lang: str) -> str:
+    kind, detail = _connanom_texts(a, lang)
+    return f"agent[Verbindung]: {kind} — {detail} (Score {a['score']:.2f})"
+
+
+def _connanom_alert_html(a: dict, lang: str) -> str:
+    de = lang == "de"
+    kind, detail = _connanom_texts(a, lang)
+    country = f" ({a['country']})" if a.get("country") else ""
+    head = "🚨 <b>" + (f"{kind} erkannt" if de else f"{kind} detected") + "</b>"
+    hostline = (f"Host <code>{a['src']}</code> → <code>{a['dst']}</code>{country}")
+    return (f"{head}\n{hostline}\n{detail}\n"
+            f"Score {a['score']:.2f}")
+
+
+async def agent_connection_anomaly_loop(force: bool = False) -> None:
+    """Per-connection C2/exfil detection with alarming.
+
+    Runs the connection-anomaly engine (see ``connection_anomaly``) and, for
+    high-confidence **C2 beaconing** / **atypical upload** connections, records a
+    ``suspicious`` agent verdict on the external destination and raises a
+    de-duplicated Telegram/Teams alarm. Dedup + cooldown come from the agent
+    verdict on the dst IP — never re-alarmed while a <24 h-fresh agent verdict
+    exists, and human verdicts are never touched. Notify-only (no auto-block);
+    the lower-severity "new/atypical" connections are surfaced on the dashboard
+    but never alarmed here."""
+    if (not settings.agent_enabled or not settings.agent_connanom_enabled) and not force:
+        return
+
+    hours = max(1, int(settings.agent_connanom_hours or 24))
+    min_score = float(settings.agent_connanom_min_score or 0.7)
+    cap = max(1, int(settings.agent_connanom_max_alerts or 10))
+    now = datetime.now(timezone.utc)
+
+    from app import connection_anomaly as conn_anom
+    async with async_session() as db:
+        res = await conn_anom.analyze(db, hours=hours, min_flows=5,
+                                      overrides={"min_score": min_score})
+
+    hits = [a for a in res["anomalies"]
+            if a["kind"] in ("c2", "exfil") and a["score"] >= min_score]
+    if not hits:
+        logger.info("agent[conn-anomaly]: no C2/exfil connections above threshold")
+        return
+
+    # Dedup/cooldown on the external destination (verdicts are keyed on dst IP).
+    dsts = list({a["dst"] for a in hits})
+    async with async_session() as db:
+        vrows = (await db.execute(
+            select(AnomalyVerdict.ip, AnomalyVerdict.created_by, AnomalyVerdict.updated_at)
+            .where(AnomalyVerdict.ip.in_(dsts))
+        )).all()
+    human = {r[0] for r in vrows if (r[1] or "human") != "agent"}
+    fresh = {r[0] for r in vrows
+             if (r[1] or "human") == "agent"
+             and r[2] is not None and (now - r[2]) < timedelta(hours=24)}
+
+    from app.notifications import notify
+    lang = _agent_lang()
+    sent = 0
+    processed = 0
+    for a in hits:
+        dst = a["dst"]
+        if dst in human or dst in fresh:
+            continue
+        await _set_agent_verdict(dst, "suspicious", _connanom_comment(a, lang))
+        fresh.add(dst)   # don't re-alarm the same dst twice in one sweep
+        processed += 1
+        if sent < cap:
+            await notify(_connanom_alert_html(a, lang), title="Warroom · C2/Exfil")
+            sent += 1
+    logger.info(f"agent[conn-anomaly]: {len(hits)} hit(s), {processed} new verdict(s), {sent} alarm(s)")
+
+
 # --- Failed-login loop (rule-based, brute-force detection) ---
 
 

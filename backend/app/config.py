@@ -188,6 +188,14 @@ class Settings(BaseSettings):
     agent_anomaly_hours: int = 24               # NetFlow window fed to the forest
     agent_anomaly_min_flows: int = 5            # ignore IPs below this flow count
     agent_anomaly_max_ips: int = 10             # OSINT/LLM cap per sweep
+    # Per-connection (src→dst pair) C2/exfil detection + alarming. Notify-only:
+    # marks the external destination 'suspicious' and raises a Telegram/Teams
+    # alarm for high-confidence C2 beaconing / atypical uploads. OFF by default.
+    agent_connanom_enabled: bool = False
+    agent_connanom_interval_seconds: int = 1800  # per-connection sweep cadence
+    agent_connanom_hours: int = 24               # NetFlow recent window
+    agent_connanom_min_score: float = 0.7        # alarm only at/above this score
+    agent_connanom_max_alerts: int = 10          # alarm cap per sweep
     # Central-Event loop — rule-based; analyses the Sophos Central *event* stream
     # (separate from alerts) filtered to security-relevant event_types. The
     # high-volume firewall ATP events are deliberately excluded (already covered

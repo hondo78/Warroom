@@ -84,8 +84,8 @@ async def lifespan(app: FastAPI):
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
-                           agent_anomaly_loop, agent_failed_login_loop,
-                           agent_user_login_alert_loop)
+                           agent_anomaly_loop, agent_connection_anomaly_loop,
+                           agent_failed_login_loop, agent_user_login_alert_loop)
     scheduler.add_job(
         agent_loop, "interval",
         seconds=max(30, settings.agent_interval_seconds),
@@ -111,6 +111,12 @@ async def lifespan(app: FastAPI):
         agent_anomaly_loop, "interval",
         seconds=max(60, settings.agent_anomaly_interval_seconds),
         id="agent_anomaly_loop",
+    )
+    # Per-connection C2/exfil detection + alarming (notify-only; off by default).
+    scheduler.add_job(
+        agent_connection_anomaly_loop, "interval",
+        seconds=max(60, settings.agent_connanom_interval_seconds),
+        id="agent_connection_anomaly_loop",
     )
     scheduler.add_job(
         agent_failed_login_loop, "interval",
@@ -3009,6 +3015,45 @@ async def firewall_anomalies(
     }
 
 
+@app.get("/api/firewall/connection-anomalies")
+@cached(ttl=300)
+async def firewall_connection_anomalies(
+    hours: int = Query(default=24, ge=1, le=168),
+    min_flows: int = Query(default=5, ge=1, le=100000),
+    min_score: float = Query(default=0.5, ge=0.0, le=1.0),
+    kind: str = Query(default="", description="Filter: 'c2', 'exfil', 'new' or empty for all."),
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-connection NetFlow anomaly detection (see ``connection_anomaly``).
+
+    Unlike ``/api/firewall/anomalies`` (Isolation Forest over whole IPs), this
+    scores **individual src→dst connections** — one internal host to one external
+    IP — against a 30-day baseline of the same pairs, targeting **C2 beaconing**
+    (regular small flows to a rare/new destination) and **atypical uploads /
+    exfiltration** (large, upload-skewed volume to a new/rare destination).
+    Normality comes from how many days the exact pair recurred and how many
+    internal hosts share the destination. Result is cached (300s)."""
+    from app import connection_anomaly as conn_anom
+    res = await conn_anom.analyze(
+        db, hours=hours, min_flows=min_flows, limit=limit,
+        overrides={"min_score": min_score},
+    )
+    if kind in ("c2", "exfil", "new"):
+        res["anomalies"] = [a for a in res["anomalies"] if a["kind"] == kind]
+    return res
+
+
+@app.post("/api/firewall/connection-anomalies/scan-now")
+async def firewall_connection_anomalies_scan_now():
+    """Run the per-connection C2/exfil agent once now (force). Marks the external
+    destinations of high-confidence C2/exfil connections and **raises the
+    configured Telegram/Teams alarms** — same as the scheduled sweep."""
+    from app.agent import agent_connection_anomaly_loop
+    await agent_connection_anomaly_loop(force=True)
+    return {"ok": True}
+
+
 # --- Analyst verdicts on anomalous IPs (schädlich / unschädlich + comment) ---
 
 _ANOMALY_VERDICTS = {"malicious", "suspicious", "benign"}
@@ -5077,6 +5122,11 @@ class AdminSettingsIn(BaseModel):
     agent_anomaly_min_flows: int | None = Field(default=None, ge=1, le=1000000)
     agent_anomaly_max_ips: int | None = Field(default=None, ge=1, le=200)
     agent_anomaly_system_prompt: str | None = Field(default=None, max_length=20000)
+    agent_connanom_enabled: bool | None = None
+    agent_connanom_interval_seconds: int | None = Field(default=None, ge=60, le=86400)
+    agent_connanom_hours: int | None = Field(default=None, ge=1, le=168)
+    agent_connanom_min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    agent_connanom_max_alerts: int | None = Field(default=None, ge=1, le=200)
     agent_failed_login_enabled: bool | None = None
     agent_failed_login_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
