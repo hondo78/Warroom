@@ -487,7 +487,13 @@ A detailed assessment including an improvement roadmap is in
 
 ## License
 
-Private project — no official support.
+Released under the **MIT License** — see [`LICENSE`](LICENSE). You may use, copy,
+modify and distribute this software, including commercially, provided the
+copyright notice and licence text are retained. The software is provided "as is",
+without warranty of any kind. Provided without official support.
+
+> Note: the optional MaxMind **GeoLite2** database (if you supply one under
+> `./geoip/`) is covered by MaxMind's own EULA, not this licence.
 
 ## Trademarks
 
