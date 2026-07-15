@@ -39,7 +39,7 @@ TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
 BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
 TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
 CA_FILE = os.environ.get("HONEYPOT_CA", "").strip()
-AGENT_VERSION = "1.2"
+AGENT_VERSION = "1.3"
 
 if not WARROOM_URL or not TOKEN:
     print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
@@ -281,23 +281,45 @@ _HANDLERS = {
 }
 
 
-# --- file honeypot (canary files, watched via inotify) -----------------------
+# --- file honeypot (canary files) --------------------------------------------
 # Any read/open/modify of a decoy file is an alarm — nothing legitimate should
-# ever touch it. Works as any user; identifying the accessing process is
-# best-effort (a /proc scan at event time).
+# ever touch it. The accessing user + process are captured reliably via fanotify
+# (the kernel hands us the PID in the event and FAN_OPEN_PERM suspends the
+# accessor until we answer, so even a fast `cat`/`cp` is still alive when we read
+# /proc). fanotify needs CAP_SYS_ADMIN (root); without it we fall back to inotify
+# with a best-effort /proc scan, which can miss fire-and-close reads.
 
 IN_ACCESS, IN_MODIFY, IN_ATTRIB = 0x1, 0x2, 0x4
 IN_CLOSE_WRITE, IN_OPEN = 0x8, 0x20
 IN_DELETE_SELF, IN_MOVE_SELF = 0x400, 0x800
 IN_NONBLOCK = 0x800
 _FILE_MASK = IN_ACCESS | IN_MODIFY | IN_ATTRIB | IN_OPEN | IN_DELETE_SELF | IN_MOVE_SELF
+# When fanotify handles open/read/modify, inotify only needs the events fanotify
+# doesn't cover well on older kernels: deletion/rename/attribute changes.
+_FILE_MASK_AUX = IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF
+
+# fanotify
+FAN_CLOEXEC, FAN_NONBLOCK = 0x1, 0x2
+FAN_CLASS_CONTENT = 0x4
+FAN_OPEN_PERM = 0x00010000
+FAN_ACCESS, FAN_MODIFY, FAN_CLOSE_WRITE, FAN_OPEN = 0x1, 0x2, 0x8, 0x20
+FAN_MARK_ADD, FAN_MARK_REMOVE = 0x1, 0x2
+FAN_ALLOW, FAN_DENY = 0x1, 0x2
+_FAN_METADATA_VERSION = 3
+_AT_FDCWD = -100
+_O_RDONLY_CLOEXEC = 0o2000000            # O_RDONLY(0) | O_CLOEXEC
+_FAN_MASK = FAN_OPEN_PERM | FAN_MODIFY | FAN_CLOSE_WRITE
+_FAN_META = struct.Struct("=IBBHQii")    # event_len,vers,reserved,metadata_len,mask,fd,pid (24 B)
 
 _libc = None
 _inotify_fd = -1
+_file_inotify_mask = _FILE_MASK
 _wd_path: dict[int, str] = {}
 _path_wd: dict[str, int] = {}
 _file_kind: dict[str, str] = {}
 _file_debounce: dict[str, float] = {}
+_fan_fd = -1
+_fan_paths: set = set()                  # literal bait paths marked via fanotify
 
 _BAIT = {
     "credentials": b"username=administrator\npassword=P@ssw0rd-2024!\nscope=prod domain admin\n",
@@ -413,6 +435,116 @@ def _find_actor(path):
     return {}
 
 
+# --- fanotify: reliable accessor capture (kernel gives us the PID) ------------
+
+def _fanotify_init():
+    global _libc, _fan_fd
+    if _fan_fd >= 0:
+        return True
+    if os.geteuid() != 0:
+        return False                      # fanotify needs CAP_SYS_ADMIN
+    try:
+        if _libc is None:
+            _libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        _libc.fanotify_init.restype = ctypes.c_int
+        _libc.fanotify_init.argtypes = [ctypes.c_uint, ctypes.c_uint]
+        fd = _libc.fanotify_init(FAN_CLASS_CONTENT | FAN_CLOEXEC | FAN_NONBLOCK,
+                                 _O_RDONLY_CLOEXEC)
+        if fd < 0:
+            raise OSError(ctypes.get_errno(), "fanotify_init")
+        _libc.fanotify_mark.restype = ctypes.c_int
+        _libc.fanotify_mark.argtypes = [ctypes.c_int, ctypes.c_uint,
+                                        ctypes.c_uint64, ctypes.c_int, ctypes.c_char_p]
+        _fan_fd = fd
+        asyncio.get_event_loop().add_reader(fd, _on_fanotify_readable)
+        return True
+    except Exception as e:
+        print(f"  ! fanotify unavailable ({e}); using inotify (best-effort actor)",
+              file=sys.stderr)
+        return False
+
+
+def _fanotify_mark(path, add=True):
+    flag = FAN_MARK_ADD if add else FAN_MARK_REMOVE
+    try:
+        r = _libc.fanotify_mark(_fan_fd, flag, ctypes.c_uint64(_FAN_MASK),
+                                _AT_FDCWD, path.encode())
+        if r < 0:
+            raise OSError(ctypes.get_errno(), "fanotify_mark")
+        (_fan_paths.add if add else _fan_paths.discard)(path)
+        return True
+    except Exception as e:
+        if add:
+            print(f"  ! honeyfile {path}: fanotify mark failed ({e})", file=sys.stderr)
+        return False
+
+
+def _fan_respond_close(fd, mask):
+    # Permission events MUST be answered or the accessing process hangs — always
+    # allow (a honeypot observes, it doesn't block). Then release the event fd.
+    try:
+        if mask & FAN_OPEN_PERM and fd >= 0:
+            os.write(_fan_fd, struct.pack("=iI", fd, FAN_ALLOW))
+    except Exception:
+        pass
+    try:
+        if fd >= 0:
+            os.close(fd)
+    except Exception:
+        pass
+
+
+def _on_fanotify_readable():
+    try:
+        data = os.read(_fan_fd, 16384)
+    except (BlockingIOError, InterruptedError):
+        return
+    except Exception:
+        return
+    off, n = 0, len(data)
+    while off + _FAN_META.size <= n:
+        event_len, vers, _res, _mlen, mask, fd, pid = _FAN_META.unpack_from(data, off)
+        if event_len < _FAN_META.size:
+            break
+        off += event_len
+        if vers != _FAN_METADATA_VERSION:
+            _fan_respond_close(fd, mask)
+            continue
+        # The event fd points at the accessed file → resolve its path. The
+        # process is still suspended (perm event), so /proc read is reliable.
+        evpath = ""
+        if fd >= 0:
+            try:
+                evpath = os.readlink(f"/proc/self/fd/{fd}")
+            except Exception:
+                evpath = ""
+        actor = _proc_detail(pid) if pid and pid != os.getpid() else {}
+        _fan_respond_close(fd, mask)      # release the accessor ASAP
+        # Map the canonical event path back to the configured bait path.
+        match = None
+        for p in _fan_paths:
+            if p == evpath or os.path.realpath(p) == evpath:
+                match = p
+                break
+        if not match:
+            continue
+        now = time.time()
+        if now - _file_debounce.get(match, 0) < 2.0:
+            continue
+        _file_debounce[match] = now
+        access = "modify" if (mask & (FAN_MODIFY | FAN_CLOSE_WRITE)) else "read"
+        payload = {"path": match, "access": access, "kind": _file_kind.get(match)}
+        payload.update(actor)
+        try:
+            _event_q.put_nowait({"service": "file", "event_type": "file_" + access,
+                                 "source_ip": None, "dest_port": None, "payload": payload})
+        except asyncio.QueueFull:
+            pass
+        who = (f" by {actor.get('user')}:{actor.get('process')}"
+               + (f" [{actor['cmdline'][:80]}]" if actor.get("cmdline") else "")) if actor else " (actor unknown)"
+        print(f"[file] {access} {match}{who} (fanotify)")
+
+
 def _access_label(mask):
     if mask & (IN_DELETE_SELF | IN_MOVE_SELF):
         return "delete"
@@ -480,7 +612,7 @@ def _inotify_init():
 def _watch_file(path):
     if path in _path_wd:
         return
-    wd = _libc.inotify_add_watch(_inotify_fd, path.encode(), _FILE_MASK)
+    wd = _libc.inotify_add_watch(_inotify_fd, path.encode(), _file_inotify_mask)
     if wd < 0:
         print(f"  ! honeyfile {path}: watch failed", file=sys.stderr)
         return
@@ -501,16 +633,30 @@ def _unwatch_file(path):
 
 
 async def _reconcile_files(files):
+    global _file_inotify_mask
     want = {f["path"]: f.get("kind", "credentials") for f in (files or []) if f.get("path")}
-    if want and not _inotify_init():
-        return
+
+    # Prefer fanotify (reliable actor); inotify then only needs delete/attrib.
+    use_fan = _fanotify_init() if want else (_fan_fd >= 0)
+    _file_inotify_mask = _FILE_MASK_AUX if use_fan else _FILE_MASK
+    inotify_ok = _inotify_init() if want else (_inotify_fd >= 0)
+
+    # Remove marks/watches for files no longer wanted.
+    for path in list(_fan_paths):
+        if path not in want:
+            _fanotify_mark(path, add=False)
+            _file_kind.pop(path, None)
     for path in list(_path_wd):
         if path not in want:
             _unwatch_file(path)
+
     for path, kind in want.items():
         _file_kind[path] = kind
         _create_decoy(path, kind)
-        _watch_file(path)
+        if use_fan:
+            _fanotify_mark(path, add=True)
+        if inotify_ok:
+            _watch_file(path)
 
 
 async def _start_service(service, port):
@@ -611,8 +757,7 @@ async def _heartbeat_loop():
             else:
                 for s in list(_servers):
                     await _stop_service(s)
-                for pth in list(_path_wd):
-                    _unwatch_file(pth)
+                await _reconcile_files([])   # drops all fanotify marks + inotify watches
             interval = max(10, int(resp.get("heartbeat_seconds") or 30))
         except Exception as e:
             print(f"heartbeat failed: {e}", file=sys.stderr)
