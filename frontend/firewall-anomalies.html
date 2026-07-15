@@ -160,15 +160,15 @@
                         </div>
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
-                                <thead><tr>
-                                    <th data-i18n="fwAnomalies.conn2_col_type">Typ</th>
-                                    <th data-i18n="common.score">Score</th>
-                                    <th data-i18n="fwAnomalies.conn2_col_src">Quelle (intern)</th>
-                                    <th data-i18n="fwAnomalies.conn2_col_dst">Ziel (extern)</th>
-                                    <th data-i18n="common.country">Land</th>
-                                    <th data-i18n="fwAnomalies.conn2_col_volume">Volumen ↑/↓</th>
+                                <thead><tr id="connAnSortRow">
+                                    <th data-sort="kind" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_type">Typ</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="score" style="cursor:pointer;user-select:none"><span data-i18n="common.score">Score</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="src" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_src">Quelle (intern)</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="dst" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_dst">Ziel (extern)</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="country" style="cursor:pointer;user-select:none"><span data-i18n="common.country">Land</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="out" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_volume">Volumen ↑/↓</span> <span class="sort-ind"></span></th>
                                     <th data-i18n="fwAnomalies.conn2_col_signals">Signale</th>
-                                    <th data-i18n="fwAnomalies.verdict_col">Bewertung</th>
+                                    <th data-sort="verdict" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.verdict_col">Bewertung</span> <span class="sort-ind"></span></th>
                                     <th data-i18n="fwAnomalies.verdict_comment_col">Kommentar</th>
                                 </tr></thead>
                                 <tbody id="connAnTable"></tbody>

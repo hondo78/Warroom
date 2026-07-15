@@ -57,6 +57,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Connection-anomaly controls reload only that table (not the whole forest).
     document.getElementById('connAnKind')?.addEventListener('change', loadConnAnomalies);
     document.getElementById('connAnMinScore')?.addEventListener('change', loadConnAnomalies);
+    // Sortable columns for the connection-anomaly table (client-side re-sort).
+    document.querySelectorAll('#connAnSortRow th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (_connAnSort.key === key) {
+                _connAnSort.dir = _connAnSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _connAnSort.key = key;
+                _connAnSort.dir = ['src', 'dst', 'country', 'kind', 'verdict'].includes(key) ? 'asc' : 'desc';
+            }
+            _renderConnAnRows();
+        });
+    });
     const ipInput = document.getElementById('anIp');
     ipInput.addEventListener('change', anomalyRefresh);
     ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); anomalyRefresh(); } });
@@ -277,6 +290,27 @@ function renderTable(items) {
 // watchlist are keyed on the external destination IP, so all the shared verdict
 // helpers (verdictCell/watchlistBadge/openVerdictModal) apply with dst as the IP.
 let _connAnItems = [];
+const _connAnSort = { key: 'score', dir: 'desc' };
+
+function _connAnSortVal(a, k) {
+    switch (k) {
+        case 'kind': return a.kind || '';
+        case 'src': return a.src || '';
+        case 'dst': return a.dst || '';
+        case 'country': return a.country || '';
+        case 'out': return a.out_bytes || 0;
+        case 'verdict': return _anVerdicts[a.dst]?.verdict || '';
+        case 'score':
+        default: return a.score || 0;
+    }
+}
+
+function _connAnUpdateSortIndicators() {
+    document.querySelectorAll('#connAnSortRow th[data-sort]').forEach(th => {
+        const ind = th.querySelector('.sort-ind');
+        if (ind) ind.textContent = th.dataset.sort === _connAnSort.key ? (_connAnSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    });
+}
 
 const CONN_KIND_META = {
     c2:    { cls: 'text-bg-danger',    key: 'fwAnomalies.conn2_kind_c2' },
@@ -341,11 +375,21 @@ function connSignalChips(signals) {
 function _renderConnAnRows() {
     const tbody = document.getElementById('connAnTable');
     if (!tbody) return;
+    _connAnUpdateSortIndicators();
     if (!_connAnItems.length) {
         tbody.innerHTML = `<tr><td colspan="9" class="text-center text-secondary py-3">${t('fwAnomalies.conn2_none')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = _connAnItems.map(a => {
+    const mul = _connAnSort.dir === 'asc' ? 1 : -1;
+    const skey = _connAnSort.key;
+    const sorted = _connAnItems.slice().sort((a, b) => {
+        const va = _connAnSortVal(a, skey), vb = _connAnSortVal(b, skey);
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return mul * String(va).localeCompare(String(vb), AN_LANG, { numeric: true });
+        }
+        return mul * (va - vb);
+    });
+    tbody.innerHTML = sorted.map(a => {
         const km = CONN_KIND_META[a.kind] || CONN_KIND_META.new;
         const verdict = _anVerdicts[a.dst];
         let bg = a.kind === 'c2' ? 'background:rgba(220,53,69,.08);'
