@@ -38,4 +38,8 @@ window.I18N.de.honeypot = {
     ack_all_confirm: "Alle aktuellen Honeypot-Alarme als gesehen markieren?",
     ack_failed: "Bestätigen fehlgeschlagen",
     no_open_events: "Keine offenen Alarme.",
+
+    // file-honeypot accessor (who + which process)
+    actor_unknown: "Prozess nicht erfasst — vor dem Scan bereits geschlossen",
+    parent_process: "Eltern-Prozess",
 };

@@ -38,4 +38,8 @@ window.I18N.en.honeypot = {
     ack_all_confirm: "Acknowledge all current honeypot alerts?",
     ack_failed: "Acknowledge failed",
     no_open_events: "No open alerts.",
+
+    // file-honeypot accessor (who + which process)
+    actor_unknown: "Process not captured — closed before the scan",
+    parent_process: "Parent process",
 };

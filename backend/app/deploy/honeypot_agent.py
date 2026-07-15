@@ -39,7 +39,7 @@ TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
 BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
 TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
 CA_FILE = os.environ.get("HONEYPOT_CA", "").strip()
-AGENT_VERSION = "1.1"
+AGENT_VERSION = "1.2"
 
 if not WARROOM_URL or not TOKEN:
     print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
@@ -337,24 +337,75 @@ def _create_decoy(path, kind):
         print(f"  ! honeyfile {path}: create failed: {e}", file=sys.stderr)
 
 
+def _read_text(p):
+    try:
+        with open(p) as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _proc_detail(pid):
+    """Full best-effort provenance for a /proc pid: the acting user (name+uid),
+    the process (comm + full command line + executable) and its parent."""
+    try:
+        uid = os.stat(f"/proc/{pid}").st_uid
+    except Exception:
+        return {}
+    try:
+        user = pwd.getpwuid(uid).pw_name
+    except Exception:
+        user = str(uid)
+    comm = _read_text(f"/proc/{pid}/comm")
+    # cmdline is a NUL-separated argv; join with spaces (raw NULs would be
+    # stripped server-side and glue the arguments together).
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmdline = f.read().replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+    except Exception:
+        cmdline = ""
+    try:
+        exe = os.readlink(f"/proc/{pid}/exe")
+    except Exception:
+        exe = ""
+    ppid, parent = 0, ""
+    try:
+        stat = _read_text(f"/proc/{pid}/stat")
+        # fields after the (comm) — comm may contain spaces/')' so split past it
+        rest = stat[stat.rfind(")") + 1:].split()
+        ppid = int(rest[1]) if len(rest) > 1 else 0
+        if ppid:
+            parent = _read_text(f"/proc/{ppid}/comm")
+    except Exception:
+        pass
+    d = {"process": comm or (exe.rsplit("/", 1)[-1] if exe else ""),
+         "pid": int(pid), "user": user, "uid": uid}
+    if cmdline:
+        d["cmdline"] = cmdline[:400]
+    if exe:
+        d["exe"] = exe
+    if ppid:
+        d["ppid"] = ppid
+    if parent:
+        d["parent"] = parent
+    return d
+
+
 def _find_actor(path):
-    """Best-effort: which process currently has the file open (via /proc)."""
+    """Best-effort: which process currently has the file open (via a /proc scan
+    at event time). Reliable for interactive access (cat/editor/scp/cp) which
+    holds the fd open at IN_OPEN; a fire-and-close read may still be missed."""
     try:
         rp = os.path.realpath(path)
+        mypid = os.getpid()
         for pid in os.listdir("/proc"):
-            if not pid.isdigit():
+            if not pid.isdigit() or int(pid) == mypid:
                 continue
             fddir = f"/proc/{pid}/fd"
             try:
                 for fd in os.listdir(fddir):
                     if os.path.realpath(os.path.join(fddir, fd)) == rp:
-                        comm = open(f"/proc/{pid}/comm").read().strip()
-                        uid = os.stat(f"/proc/{pid}").st_uid
-                        try:
-                            user = pwd.getpwuid(uid).pw_name
-                        except Exception:
-                            user = str(uid)
-                        return {"process": comm, "pid": int(pid), "user": user}
+                        return _proc_detail(pid)
             except Exception:
                 continue
     except Exception:
@@ -400,7 +451,13 @@ def _on_inotify_readable():
                                  "source_ip": None, "dest_port": None, "payload": payload})
         except asyncio.QueueFull:
             pass
-        print(f"[file] {access} {path}" + (f" by {actor.get('process')}({actor.get('user')})" if actor else ""))
+        if actor:
+            who = f" by {actor.get('user')}:{actor.get('process')}"
+            if actor.get("cmdline"):
+                who += f" [{actor['cmdline'][:80]}]"
+        else:
+            who = " (actor not captured — process closed before scan)"
+        print(f"[file] {access} {path}{who}")
 
 
 def _inotify_init():

@@ -245,8 +245,18 @@ async function ackAllSources(btn) {
 function _payloadHtml(e) {
     const p = e.payload || {};
     if (e.service === 'file' || p.path) {
-        const who = (p.process || p.user) ? ` <span class="text-secondary" style="font-size:.72rem">(${escapeHtml(p.process || '?')} · ${escapeHtml(p.user || '?')})</span>` : '';
-        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${who}`;
+        const bits = [];
+        if (p.user) bits.push(`<i class="bi bi-person"></i> ${escapeHtml(p.user)}${p.uid != null ? ` <span class="text-secondary">(uid ${p.uid})</span>` : ''}`);
+        if (p.process) bits.push(`<i class="bi bi-gear"></i> <code>${escapeHtml(p.process)}</code>${p.pid ? ` <span class="text-secondary">[${p.pid}]</span>` : ''}`);
+        if (p.parent) bits.push(`<span class="text-secondary" title="${escapeAttr(t('honeypot.parent_process'))}"><i class="bi bi-arrow-return-right"></i> ${escapeHtml(p.parent)}</span>`);
+        const tip = [p.cmdline ? 'cmd: ' + p.cmdline : '', p.exe ? 'exe: ' + p.exe : ''].filter(Boolean).join('\n');
+        const who = bits.length
+            ? `<div class="mt-1" style="font-size:.76rem"${tip ? ` title="${escapeAttr(tip)}"` : ''}>${bits.join(' &nbsp;·&nbsp; ')}</div>`
+            : ` <span class="text-secondary" style="font-size:.72rem">(${t('honeypot.actor_unknown')})</span>`;
+        const cmd = p.cmdline
+            ? `<div class="text-secondary" style="font-size:.72rem;word-break:break-all"><code>${escapeHtml(p.cmdline.slice(0, 140))}</code></div>`
+            : '';
+        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${who}${cmd}`;
     }
     if (p.username || p.password) return `${t('honeypot.login')}: <code>${escapeHtml(p.username || '')}</code> / <code>${escapeHtml(p.password || '')}</code>`;
     if (p.http_method) return `<code>${escapeHtml(p.http_method)} ${escapeHtml((p.path || '').slice(0, 80))}</code>${p.user_agent ? ' <span class="text-secondary" style="font-size:.7rem">' + escapeHtml(p.user_agent.slice(0, 40)) + '</span>' : ''}`;
