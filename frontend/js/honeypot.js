@@ -256,7 +256,24 @@ function _payloadHtml(e) {
         const cmd = p.cmdline
             ? `<div class="text-secondary" style="font-size:.72rem;word-break:break-all"><code>${escapeHtml(p.cmdline.slice(0, 140))}</code></div>`
             : '';
-        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${who}${cmd}`;
+        // Attacker IP (root cause: interactive-SSH client or an established
+        // remote peer up the process chain).
+        const atk = p.attacker_ip
+            ? `<div class="mt-1"><span class="badge text-bg-danger"><i class="bi bi-crosshair"></i> ${t('honeypot.attacker_ip')}: <code style="color:inherit">${escapeHtml(p.attacker_ip)}</code></span>`
+              + (p.attacker_via ? ` <span class="text-secondary" style="font-size:.7rem">(${t('honeypot.via_' + p.attacker_via) || escapeHtml(p.attacker_via)})</span>` : '') + '</div>'
+            : '';
+        // Process tree (root → accessor) = how the access came to be.
+        let tree = '';
+        if (Array.isArray(p.tree) && p.tree.length) {
+            const chain = p.tree.slice().reverse();   // root first
+            const nodes = chain.map((n, i) =>
+                `<div style="font-size:.72rem;padding-left:${i * 14}px">${i ? '└ ' : ''}`
+                + `<code>${escapeHtml(n.process || '?')}</code> <span class="text-secondary">[${n.pid}] ${escapeHtml(n.user || '')}</span>`
+                + (n.cmdline ? ` <span class="text-secondary" title="${escapeAttr(n.cmdline)}">${escapeHtml(n.cmdline.slice(0, 70))}</span>` : '')
+                + `</div>`).join('');
+            tree = `<details class="mt-1"><summary style="font-size:.72rem;cursor:pointer" class="text-secondary">${t('honeypot.proc_tree')}</summary><div class="mt-1">${nodes}</div></details>`;
+        }
+        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${atk}${who}${cmd}${tree}`;
     }
     if (p.username || p.password) return `${t('honeypot.login')}: <code>${escapeHtml(p.username || '')}</code> / <code>${escapeHtml(p.password || '')}</code>`;
     if (p.http_method) return `<code>${escapeHtml(p.http_method)} ${escapeHtml((p.path || '').slice(0, 80))}</code>${p.user_agent ? ' <span class="text-secondary" style="font-size:.7rem">' + escapeHtml(p.user_agent.slice(0, 40)) + '</span>' : ''}`;

@@ -39,7 +39,7 @@ TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
 BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
 TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
 CA_FILE = os.environ.get("HONEYPOT_CA", "").strip()
-AGENT_VERSION = "1.3"
+AGENT_VERSION = "1.4"
 
 if not WARROOM_URL or not TOKEN:
     print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
@@ -413,6 +413,142 @@ def _proc_detail(pid):
     return d
 
 
+# --- root-cause: process ancestry + the attacker's IP ------------------------
+
+def _ppid_of(pid):
+    try:
+        stat = _read_text(f"/proc/{pid}/stat")
+        rest = stat[stat.rfind(")") + 1:].split()
+        return int(rest[1]) if len(rest) > 1 else 0
+    except Exception:
+        return 0
+
+
+def _proc_min(pid):
+    try:
+        uid = os.stat(f"/proc/{pid}").st_uid
+    except Exception:
+        return None
+    try:
+        user = pwd.getpwuid(uid).pw_name
+    except Exception:
+        user = str(uid)
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+    except Exception:
+        cmd = ""
+    return {"pid": int(pid), "process": _read_text(f"/proc/{pid}/comm"),
+            "user": user, "cmdline": cmd[:200]}
+
+
+def _proc_ancestry(pid, max_depth=12):
+    """Walk the PPID chain from the accessor up to init — the root cause of the
+    access (e.g. cat ← bash ← sshd)."""
+    chain, seen, cur = [], set(), int(pid)
+    for _ in range(max_depth):
+        if cur <= 0 or cur in seen:
+            break
+        seen.add(cur)
+        info = _proc_min(cur)
+        if not info:
+            break
+        chain.append(info)
+        if cur == 1:
+            break
+        cur = _ppid_of(cur)
+    return chain
+
+
+def _hex_ip(h):
+    try:
+        if len(h) == 8:                       # IPv4, little-endian
+            return ".".join(str(b) for b in bytes.fromhex(h)[::-1])
+        if len(h) == 32:                      # IPv6, 4 little-endian words
+            raw = b"".join(bytes.fromhex(h[i:i + 8])[::-1] for i in range(0, 32, 8))
+            return socket.inet_ntop(socket.AF_INET6, raw)
+    except Exception:
+        pass
+    return ""
+
+
+def _established_peers():
+    """socket-inode -> remote IP for established, non-local TCP connections
+    (catches reverse shells / nc where an ancestor holds a network socket)."""
+    peers = {}
+    for fn in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(fn) as f:
+                next(f, None)
+                for line in f:
+                    p = line.split()
+                    if len(p) < 10 or p[3] != "01":       # 01 = ESTABLISHED
+                        continue
+                    ip = _hex_ip(p[2].split(":")[0])
+                    if not ip or ip.startswith("127.") or ip in ("::1", "0.0.0.0", "::"):
+                        continue
+                    peers[p[9]] = ip
+        except Exception:
+            continue
+    return peers
+
+
+def _pid_socket_inodes(pid):
+    out = []
+    try:
+        for fd in os.listdir(f"/proc/{pid}/fd"):
+            try:
+                link = os.readlink(f"/proc/{pid}/fd/{fd}")
+                if link.startswith("socket:["):
+                    out.append(link[8:-1])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _ssh_client(pid):
+    """The remote client IP from a process's SSH_CONNECTION/SSH_CLIENT env —
+    the attacker's IP for an interactive SSH session."""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            env = f.read()
+    except Exception:
+        return ""
+    for kv in env.split(b"\x00"):
+        if kv.startswith(b"SSH_CONNECTION=") or kv.startswith(b"SSH_CLIENT="):
+            val = kv.split(b"=", 1)[1].decode("utf-8", "replace").split()
+            if val:
+                return val[0]
+    return ""
+
+
+def _root_cause(pid):
+    """Process ancestry + best-effort attacker IP (interactive SSH client, else
+    an established remote TCP peer held anywhere up the chain)."""
+    tree = _proc_ancestry(pid)
+    attacker_ip, via = "", ""
+    for node in tree:                          # 1) interactive SSH (closest wins)
+        ip = _ssh_client(node["pid"])
+        if ip:
+            attacker_ip, via = ip, "ssh"
+            break
+    if not attacker_ip:                        # 2) established remote socket
+        peers = _established_peers()
+        if peers:
+            for node in tree:
+                hit = next((peers[i] for i in _pid_socket_inodes(node["pid"]) if i in peers), "")
+                if hit:
+                    attacker_ip, via = hit, "socket"
+                    break
+    rc = {"tree": tree}
+    if attacker_ip:
+        rc["attacker_ip"] = attacker_ip
+        rc["attacker_via"] = via
+    return rc
+
+
 def _find_actor(path):
     """Best-effort: which process currently has the file open (via a /proc scan
     at event time). Reliable for interactive access (cat/editor/scp/cp) which
@@ -518,7 +654,9 @@ def _on_fanotify_readable():
                 evpath = os.readlink(f"/proc/self/fd/{fd}")
             except Exception:
                 evpath = ""
-        actor = _proc_detail(pid) if pid and pid != os.getpid() else {}
+        live = pid and pid != os.getpid()
+        actor = _proc_detail(pid) if live else {}
+        rc = _root_cause(pid) if live else {"tree": []}   # capture while suspended
         _fan_respond_close(fd, mask)      # release the accessor ASAP
         # Map the canonical event path back to the configured bait path.
         match = None
@@ -535,14 +673,17 @@ def _on_fanotify_readable():
         access = "modify" if (mask & (FAN_MODIFY | FAN_CLOSE_WRITE)) else "read"
         payload = {"path": match, "access": access, "kind": _file_kind.get(match)}
         payload.update(actor)
+        payload.update(rc)
         try:
             _event_q.put_nowait({"service": "file", "event_type": "file_" + access,
-                                 "source_ip": None, "dest_port": None, "payload": payload})
+                                 "source_ip": rc.get("attacker_ip"),
+                                 "dest_port": None, "payload": payload})
         except asyncio.QueueFull:
             pass
         who = (f" by {actor.get('user')}:{actor.get('process')}"
                + (f" [{actor['cmdline'][:80]}]" if actor.get("cmdline") else "")) if actor else " (actor unknown)"
-        print(f"[file] {access} {match}{who} (fanotify)")
+        atk = f" attacker={rc['attacker_ip']}({rc.get('attacker_via')})" if rc.get("attacker_ip") else ""
+        print(f"[file] {access} {match}{who}{atk} (fanotify)")
 
 
 def _access_label(mask):
@@ -575,12 +716,15 @@ def _on_inotify_readable():
         _file_debounce[path] = now
         access = _access_label(mask)
         actor = _find_actor(path)
+        rc = _root_cause(actor["pid"]) if actor.get("pid") else {"tree": []}
         payload = {"path": path, "access": access, "kind": _file_kind.get(path)}
         payload.update(actor)
-        # source_ip left empty → Warroom stamps the pod's transport IP.
+        payload.update(rc)
+        # source_ip = attacker IP when found, else empty → Warroom stamps the pod IP.
         try:
             _event_q.put_nowait({"service": "file", "event_type": "file_" + access,
-                                 "source_ip": None, "dest_port": None, "payload": payload})
+                                 "source_ip": rc.get("attacker_ip"),
+                                 "dest_port": None, "payload": payload})
         except asyncio.QueueFull:
             pass
         if actor:

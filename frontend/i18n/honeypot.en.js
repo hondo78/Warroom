@@ -42,4 +42,8 @@ window.I18N.en.honeypot = {
     // file-honeypot accessor (who + which process)
     actor_unknown: "Process not captured — closed before the scan",
     parent_process: "Parent process",
+    attacker_ip: "Attacker IP",
+    proc_tree: "Process tree (root cause)",
+    via_ssh: "via SSH session",
+    via_socket: "via open network connection",
 };
