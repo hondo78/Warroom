@@ -35,14 +35,29 @@ Env: `WARROOM_URL`, `HONEYPOT_TOKEN` (required); `HONEYPOT_BIND` (default
 `0.0.0.0`), `HONEYPOT_TLS_VERIFY` (default `1`; set `0` for a self-signed
 Warroom cert).
 
-## Run as a service (systemd)
+## Run as a service (systemd) — installer script
+
+The installer sets the agent up as the `warroom-honeypot` systemd service and
+can also update and remove it. It is served by Warroom too:
 
 ```bash
-sudo curl -fsSL https://<warroom>/api/honeypot/agent/download -o /usr/local/bin/honeypot_agent.py
-sudo cp honeypot-agent.service /etc/systemd/system/
-sudoedit /etc/systemd/system/honeypot-agent.service   # set WARROOM_URL + HONEYPOT_TOKEN
-sudo systemctl daemon-reload && sudo systemctl enable --now honeypot-agent
+curl -fsSL https://<warroom>/api/honeypot/agent/install -o honeypot_install.sh
+sudo WARROOM_URL=https://<warroom> HONEYPOT_TOKEN=hp_xxxxx bash honeypot_install.sh install
 ```
+
+```bash
+sudo bash honeypot_install.sh update      # pull the latest agent + restart
+sudo bash honeypot_install.sh uninstall   # stop + remove the service
+sudo bash honeypot_install.sh status      # service state + recent logs
+```
+
+For a self-signed Warroom proxy append `--insecure` (or `--ca /path/to/ca.pem`).
+It installs to `/opt/warroom-honeypot/`, keeps config in `/etc/warroom-honeypot.env`
+(chmod 600), and runs as root — the honeypot needs to plant decoy files anywhere
+and use fanotify (`CAP_SYS_ADMIN`) for reliable file-access attribution.
+
+The bundled `honeypot-agent.service` unit remains for a manual setup, but the
+installer is the recommended path.
 
 > ⚠️ Deploy on a **dedicated/isolated host** you don't mind exposing. A honeypot
 > is meant to be reached by attackers — segregate it from production.

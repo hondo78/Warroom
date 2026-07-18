@@ -1024,6 +1024,17 @@ async def honeypot_agent_download():
     return FileResponse(path, media_type="text/x-python", filename="honeypot_agent.py")
 
 
+@app.get("/api/honeypot/agent/install")
+async def honeypot_agent_install():
+    """Serve the installer script that sets up the agent as a systemd service
+    (install / update / uninstall). No secret in the file — WARROOM_URL + token
+    are passed at runtime."""
+    from fastapi.responses import FileResponse
+    import os
+    path = os.path.join(os.path.dirname(__file__), "deploy", "honeypot_install.sh")
+    return FileResponse(path, media_type="text/x-shellscript", filename="honeypot_install.sh")
+
+
 # --- management (normal auth, used by the UI) ---
 
 class HoneypotIn(BaseModel):
@@ -1055,10 +1066,15 @@ def _deploy_snippet(request: Request, token: str) -> str:
     else:
         base = str(request.base_url).rstrip("/")
     return (
-        f"# Run on the remote Linux honeypot host (needs root for ports < 1024):\n"
-        f"curl -fsSL {base}/api/honeypot/agent/download -o honeypot_agent.py\n"
-        f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} python3 honeypot_agent.py\n"
-        f"# Self-signed reverse proxy? add HONEYPOT_TLS_VERIFY=0 (or HONEYPOT_CA=/path/to/ca.pem)"
+        f"# Install as a service (recommended) — on the remote Linux honeypot host:\n"
+        f"curl -fsSL {base}/api/honeypot/agent/install -o honeypot_install.sh\n"
+        f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} bash honeypot_install.sh install\n"
+        f"# later:  sudo bash honeypot_install.sh update   |   sudo bash honeypot_install.sh uninstall\n"
+        f"# Self-signed reverse proxy? append --insecure (or --ca /path/to/ca.pem)\n"
+        f"#\n"
+        f"# Or run once in the foreground instead:\n"
+        f"# curl -fsSL {base}/api/honeypot/agent/download -o honeypot_agent.py\n"
+        f"# sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} python3 honeypot_agent.py"
     )
 
 
