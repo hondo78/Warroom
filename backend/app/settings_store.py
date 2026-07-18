@@ -40,6 +40,14 @@ MANAGED_KEYS: dict[str, type] = {
     "hostname_netbios_enabled": bool,
     "hostname_cache_ttl_hours": int,
     "hostname_negative_ttl_hours": int,
+    "firewall_api_enabled": bool,
+    "firewall_api_host": str,
+    "firewall_api_port": int,
+    "firewall_api_user": str,
+    "firewall_api_password": str,
+    "firewall_api_verify_tls": bool,
+    "firewall_dhcp_entity": str,
+    "firewall_dhcp_refresh_seconds": int,
     "entra_block_enabled": bool,
     "entra_named_location_id": str,
     "entra_ca_policy_id": str,
@@ -157,6 +165,7 @@ SECRET_KEYS: set[str] = {
     "shodan_api_key",
     "sophos_intelix_client_secret",
     "agent_api_key",
+    "firewall_api_password",
 }
 
 

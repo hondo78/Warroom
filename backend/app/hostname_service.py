@@ -128,12 +128,43 @@ def _netbios_name(ip: str, timeout: float = 1.5) -> str | None:
         return None
 
 
+import time as _time
+_dhcp_cache: dict = {"map": {}, "at": 0.0}
+
+
+async def get_dhcp_map(force: bool = False) -> dict[str, str]:
+    """Cached IP→hostname map from the Sophos Firewall DHCP config (XML API).
+    Returns {} when the firewall API is disabled; keeps the last good map on a
+    transient fetch error."""
+    if not settings.firewall_api_enabled:
+        return {}
+    now = _time.monotonic()
+    ttl = max(60, int(settings.firewall_dhcp_refresh_seconds or 600))
+    if not force and _dhcp_cache["map"] and (now - _dhcp_cache["at"]) < ttl:
+        return _dhcp_cache["map"]
+    try:
+        from app.sfos_client import fetch_dhcp_map
+        m = await fetch_dhcp_map()
+        _dhcp_cache["map"] = m
+        _dhcp_cache["at"] = now
+        logger.info(f"DHCP map from firewall: {len(m)} IP↔hostname mapping(s)")
+        return m
+    except Exception as e:
+        logger.warning(f"DHCP map fetch failed: {e}")
+        return _dhcp_cache["map"]
+
+
 async def _resolve_one(ip: str) -> tuple[str | None, str | None]:
     """Return (hostname, source) for one internal IP, trying each source."""
     # 1) Sophos endpoints
     ep = await _from_endpoints([ip])
     if ep.get(ip):
         return ep[ip], "sophos"
+    # 2) Firewall DHCP mapping (reserved/lease client names)
+    if settings.firewall_api_enabled:
+        dm = await get_dhcp_map()
+        if dm.get(ip):
+            return dm[ip], "dhcp"
     loop = asyncio.get_event_loop()
     # 2) reverse DNS (off-thread — it blocks)
     dns_name = await loop.run_in_executor(None, _reverse_dns, ip)

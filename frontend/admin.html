@@ -143,6 +143,33 @@
                             <div class="col-md-4"><label class="form-label" data-i18n="admin.hostnameNegTtl">Negativ-TTL (Stunden)</label></div>
                             <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="hostname_negative_ttl_hours"></div>
                         </div>
+
+                        <hr>
+                        <h5 data-i18n="admin.fwDhcpTitle">Firewall DHCP (SFOS XML-API)</h5>
+                        <p class="admin-hint" data-i18n="admin.fwDhcpHint">Liest DHCP-Zuordnungen (IP → Client-Name) von der Sophos-Firewall und ergänzt sie als Hostname-Quelle „dhcp". Der API-Benutzer muss in der Firewall API-berechtigt und dessen Zugriff für Warrooms IP freigegeben sein.</p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwDhcpEnabled">DHCP-Abgleich aktiv</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="firewall_api_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiHost">Firewall-Host</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="firewall_api_host" placeholder="z.B. 172.16.0.1" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiPort">API-Port</label></div>
+                            <div class="col-md-8"><input type="number" min="1" max="65535" class="form-control form-control-sm" data-key="firewall_api_port" placeholder="4444"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiUser">API-Benutzer</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="firewall_api_user" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiPassword">API-Passwort</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="firewall_api_password" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiVerifyTls">TLS-Zertifikat prüfen</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="firewall_api_verify_tls" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwDhcpEntity">DHCP-Entity</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="firewall_dhcp_entity" placeholder="DHCPStaticEntry"><small class="admin-hint" data-i18n="admin.fwDhcpEntityHint">XML-API-Entity (kommagetrennt möglich). Firmware-abhängig; Standard liefert reservierte Zuordnungen.</small></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwDhcpRefresh">Aktualisierung (Sek.)</label></div>
+                            <div class="col-md-8"><input type="number" min="60" class="form-control form-control-sm" data-key="firewall_dhcp_refresh_seconds" placeholder="600"></div>
+                        </div>
+                        <div class="mt-2">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="testFirewallDhcp(this)" data-i18n="admin.fwDhcpTest"><i class="bi bi-plug"></i> Verbindung testen</button>
+                            <span id="fwDhcpTestResult" class="ms-2 small"></span>
+                        </div>
+
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('hostnames')" data-i18n="admin.saveHostnames">Hostname-Settings speichern</button>
                         </div>

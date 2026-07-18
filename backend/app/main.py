@@ -979,7 +979,14 @@ async def resolve_internal_hosts_now(
     all internal IPs in the inventory, refreshing even already-named ones —
     operator-set (manual) names are still preserved."""
     import asyncio
-    from app.hostname_service import _resolve_one, _upsert, is_internal
+    from app.hostname_service import _resolve_one, _upsert, is_internal, get_dhcp_map
+
+    # Pull a fresh DHCP map from the firewall so new leases are picked up now.
+    if settings.firewall_api_enabled:
+        try:
+            await get_dhcp_map(force=True)
+        except Exception:
+            pass
 
     agg = await _internal_netflow_agg(days)
     ips = {a["ip"] for a in agg if is_internal(a["ip"])}
@@ -1000,6 +1007,23 @@ async def resolve_internal_hosts_now(
 
     results = await asyncio.gather(*[_do(ip) for ip in ips]) if ips else []
     return {"ok": True, "processed": len(ips), "resolved": sum(results)}
+
+
+@app.post("/api/firewall/dhcp/test")
+async def test_firewall_dhcp():
+    """Test the Sophos Firewall XML API DHCP read with the saved settings.
+    Returns how many IP↔hostname mappings were found + a small sample, or the
+    error — so the operator can validate the connection/credentials/entity."""
+    if not settings.firewall_api_enabled:
+        return {"ok": False, "error": "firewall API is disabled (enable it in Admin)"}
+    try:
+        from app.sfos_client import fetch_dhcp_map
+        m = await fetch_dhcp_map()
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:400]}
+    sample = [{"ip": ip, "hostname": hn} for ip, hn in list(m.items())[:10]]
+    return {"ok": True, "count": len(m), "sample": sample,
+            "entity": settings.firewall_dhcp_entity}
 
 
 # --- Honeypot: remote decoy pods managed by Warroom -------------------------
@@ -5185,6 +5209,14 @@ class AdminSettingsIn(BaseModel):
     hostname_netbios_enabled: bool | None = None
     hostname_cache_ttl_hours: int | None = Field(default=None, ge=1, le=8760)
     hostname_negative_ttl_hours: int | None = Field(default=None, ge=1, le=168)
+    firewall_api_enabled: bool | None = None
+    firewall_api_host: str | None = Field(default=None, max_length=255)
+    firewall_api_port: int | None = Field(default=None, ge=1, le=65535)
+    firewall_api_user: str | None = Field(default=None, max_length=128)
+    firewall_api_password: str | None = Field(default=None, max_length=256)
+    firewall_api_verify_tls: bool | None = None
+    firewall_dhcp_entity: str | None = Field(default=None, max_length=200)
+    firewall_dhcp_refresh_seconds: int | None = Field(default=None, ge=60, le=86400)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None

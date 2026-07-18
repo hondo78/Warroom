@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     hostname_netbios_enabled: bool = True        # NetBIOS NBSTAT fallback (UDP 137)
     hostname_cache_ttl_hours: int = 168          # keep a positive hit for a week
     hostname_negative_ttl_hours: int = 6         # retry a miss after 6h
+    # Sophos Firewall (SFOS) XML API — read DHCP IP↔hostname mappings to enrich
+    # the internal-hosts inventory (an extra name source: 'dhcp'). The admin port
+    # uses a self-signed cert, so TLS verification is off by default.
+    firewall_api_enabled: bool = False
+    firewall_api_host: str = ""                   # SFOS admin IP/hostname
+    firewall_api_port: int = 4444                 # SFOS admin/API port
+    firewall_api_user: str = ""                   # API user (must be API-enabled + IP-allowed)
+    firewall_api_password: str = ""
+    firewall_api_verify_tls: bool = False
+    firewall_dhcp_entity: str = "DHCPStaticEntry"  # XML API entity(ies), comma-separated
+    firewall_dhcp_refresh_seconds: int = 600       # cache TTL for the lease map
 
     # --- M365 login watch ---
     # Alerts (with a revoke-sessions option) when a user signs in from a device

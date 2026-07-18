@@ -1,7 +1,8 @@
 const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
     o365: ['o365_tenant_id', 'o365_client_id', 'o365_client_secret'],
-    hostnames: ['hostname_resolve_enabled', 'internal_dns_servers', 'hostname_netbios_enabled', 'hostname_cache_ttl_hours', 'hostname_negative_ttl_hours'],
+    hostnames: ['hostname_resolve_enabled', 'internal_dns_servers', 'hostname_netbios_enabled', 'hostname_cache_ttl_hours', 'hostname_negative_ttl_hours',
+        'firewall_api_enabled', 'firewall_api_host', 'firewall_api_port', 'firewall_api_user', 'firewall_api_password', 'firewall_api_verify_tls', 'firewall_dhcp_entity', 'firewall_dhcp_refresh_seconds'],
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],
@@ -170,6 +171,29 @@ function applyToForm(data) {
 function setText(id, txt) {
     const el = document.getElementById(id);
     if (el) el.textContent = txt;
+}
+
+// Test the Sophos Firewall DHCP read with the currently SAVED settings.
+async function testFirewallDhcp(btn) {
+    const out = document.getElementById('fwDhcpTestResult');
+    if (out) { out.className = 'ms-2 small text-secondary'; out.textContent = t('admin.fwDhcpTesting'); }
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/dhcp/test', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) {
+            const s = (d.sample || []).map(x => x.ip + '→' + x.hostname).slice(0, 3).join(', ');
+            out.className = 'ms-2 small text-success';
+            out.textContent = t('admin.fwDhcpOk', { n: d.count }) + (s ? ' · ' + s : '');
+        } else {
+            out.className = 'ms-2 small text-danger';
+            out.textContent = (d.error || ('HTTP ' + r.status));
+        }
+    } catch (err) {
+        if (out) { out.className = 'ms-2 small text-danger'; out.textContent = err.message; }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 async function saveSection(section) {
