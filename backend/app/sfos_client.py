@@ -72,23 +72,36 @@ def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
     return out, None
 
 
-async def fetch_dhcp_map() -> dict[str, str]:
-    """Fetch the firewall's DHCP IP→hostname mapping. Raises on config/transport
-    errors so the caller can surface them (the resolver swallows + logs)."""
+async def _post_reqxml(entity: str) -> tuple[int, str]:
+    """POST a <Get><entity/></Get> request to the SFOS API. SFOS expects the
+    request as a multipart form field 'reqxml' (like curl -F), not urlencoded.
+    Returns (http_status, response_text)."""
     host = (settings.firewall_api_host or "").strip()
     if not host:
         raise RuntimeError("firewall_api_host is not set")
     port = int(settings.firewall_api_port or 4444)
     if not (settings.firewall_api_user and settings.firewall_api_password):
         raise RuntimeError("firewall_api_user / firewall_api_password not set")
-
     url = f"https://{host}:{port}/webconsole/APIController"
-    reqxml = _build_reqxml(settings.firewall_dhcp_entity or "DHCPStaticEntry")
+    reqxml = _build_reqxml(entity)
     verify = bool(settings.firewall_api_verify_tls)
-    async with httpx.AsyncClient(verify=verify, timeout=15) as client:
-        r = await client.post(url, data={"reqxml": reqxml})
-        r.raise_for_status()
-        mapping, err = parse_dhcp(r.text)
-        if err:
-            raise RuntimeError(f"SFOS API: {err}")
-        return mapping
+    async with httpx.AsyncClient(verify=verify, timeout=20) as client:
+        r = await client.post(url, files={"reqxml": (None, reqxml, "text/xml")})
+        return r.status_code, r.text
+
+
+async def fetch_dhcp_raw() -> tuple[int, str]:
+    """Diagnostic: the raw firewall response for the configured DHCP entity."""
+    return await _post_reqxml(settings.firewall_dhcp_entity or "DHCPStaticEntry")
+
+
+async def fetch_dhcp_map() -> dict[str, str]:
+    """Fetch the firewall's DHCP IP→hostname mapping. Raises on config/transport
+    errors so the caller can surface them (the resolver swallows + logs)."""
+    status, text = await _post_reqxml(settings.firewall_dhcp_entity or "DHCPStaticEntry")
+    if status >= 400:
+        raise RuntimeError(f"firewall returned HTTP {status}")
+    mapping, err = parse_dhcp(text)
+    if err:
+        raise RuntimeError(f"SFOS API: {err}")
+    return mapping

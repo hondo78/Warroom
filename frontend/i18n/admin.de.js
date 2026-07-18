@@ -53,6 +53,7 @@ window.I18N.de.admin = {
     fwDhcpTest: "Verbindung testen",
     fwDhcpTesting: "Teste…",
     fwDhcpOk: "OK — {n} Zuordnung(en)",
+    fwDhcpZero: "Verbindung OK, aber 0 Zuordnungen — siehe Rohantwort unten (evtl. anderer Entity-Name oder keine statischen DHCP-Reservierungen).",
     o365Hint: "Entra-ID-App-Registrierung mit Admin-Consent. Der Collector holt Login-Ereignisse (UserLoggedIn / UserLoginFailed); Fehlversuche landen zusätzlich als Alerts auf der Attack-Map. Anzeige unter <a href=\"/o365.html\" class=\"osint-link\">Microsoft 365</a>.<br><strong>Benötigte Application-Berechtigungen:</strong><br>• <code>ActivityFeed.Read</code> (<em>Office 365 Management APIs</em>) — Login-Audit-Log.<br>• <code>User.RevokeSessions.All</code> (<em>Microsoft Graph</em>) — für die Login-Überwachung: Session-Widerruf bei Anmeldung von neuem Gerät/Standort.",
     tenantId: "Tenant ID",
     saveO365: "M365-Settings speichern",

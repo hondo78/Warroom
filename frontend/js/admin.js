@@ -174,20 +174,29 @@ function setText(id, txt) {
 }
 
 // Test the Sophos Firewall DHCP read with the currently SAVED settings.
+// Always requests debug so we can show the firewall's raw response when nothing
+// (or an error) comes back — that's what reveals the right entity/schema.
 async function testFirewallDhcp(btn) {
     const out = document.getElementById('fwDhcpTestResult');
+    const raw = document.getElementById('fwDhcpRaw');
+    if (raw) { raw.style.display = 'none'; raw.textContent = ''; }
     if (out) { out.className = 'ms-2 small text-secondary'; out.textContent = t('admin.fwDhcpTesting'); }
     if (btn) btn.disabled = true;
     try {
-        const r = await fetch('/api/firewall/dhcp/test', { method: 'POST' });
+        const r = await fetch('/api/firewall/dhcp/test?debug=1', { method: 'POST' });
         const d = await r.json().catch(() => ({}));
-        if (d.ok) {
+        const ok = d.ok && (d.count > 0);
+        if (ok) {
             const s = (d.sample || []).map(x => x.ip + '→' + x.hostname).slice(0, 3).join(', ');
             out.className = 'ms-2 small text-success';
             out.textContent = t('admin.fwDhcpOk', { n: d.count }) + (s ? ' · ' + s : '');
         } else {
-            out.className = 'ms-2 small text-danger';
-            out.textContent = (d.error || ('HTTP ' + r.status));
+            out.className = 'ms-2 small text-warning';
+            out.textContent = d.ok ? t('admin.fwDhcpZero') : (d.error || ('HTTP ' + r.status));
+            if (raw && (d.raw || d.http_status != null)) {
+                raw.style.display = 'block';
+                raw.textContent = `HTTP ${d.http_status ?? '?'} · entity=${d.entity || '-'}\n\n${d.raw || '(no body)'}`;
+            }
         }
     } catch (err) {
         if (out) { out.className = 'ms-2 small text-danger'; out.textContent = err.message; }

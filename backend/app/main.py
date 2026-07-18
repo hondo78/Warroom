@@ -1010,20 +1010,30 @@ async def resolve_internal_hosts_now(
 
 
 @app.post("/api/firewall/dhcp/test")
-async def test_firewall_dhcp():
+async def test_firewall_dhcp(debug: bool = Query(default=False)):
     """Test the Sophos Firewall XML API DHCP read with the saved settings.
     Returns how many IP↔hostname mappings were found + a small sample, or the
-    error — so the operator can validate the connection/credentials/entity."""
+    error. ``debug=1`` also returns the firewall's raw response so the entity /
+    schema can be diagnosed (it may contain credentials-adjacent config — keep it
+    to troubleshooting)."""
     if not settings.firewall_api_enabled:
         return {"ok": False, "error": "firewall API is disabled (enable it in Admin)"}
+    from app.sfos_client import fetch_dhcp_map, fetch_dhcp_raw
+    raw_info = {}
+    if debug:
+        try:
+            status, text = await fetch_dhcp_raw()
+            raw_info = {"http_status": status, "raw": text[:4000],
+                        "entity": settings.firewall_dhcp_entity}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:400]}
     try:
-        from app.sfos_client import fetch_dhcp_map
         m = await fetch_dhcp_map()
     except Exception as e:
-        return {"ok": False, "error": str(e)[:400]}
+        return {"ok": False, "error": str(e)[:400], **raw_info}
     sample = [{"ip": ip, "hostname": hn} for ip, hn in list(m.items())[:10]]
     return {"ok": True, "count": len(m), "sample": sample,
-            "entity": settings.firewall_dhcp_entity}
+            "entity": settings.firewall_dhcp_entity, **raw_info}
 
 
 # --- Honeypot: remote decoy pods managed by Warroom -------------------------
