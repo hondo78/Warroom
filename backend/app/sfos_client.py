@@ -46,11 +46,31 @@ def _build_reqxml(entity: str) -> str:
             f"<Password>{pw}</Password></Login><Get>{gets}</Get></Request>")
 
 
+def _is_host_ip(ip: str) -> bool:
+    """A real host address — not a netmask / network / broadcast (which appear in
+    the DHCPServer config record alongside the server name)."""
+    o = ip.split(".")
+    if len(o) != 4:
+        return False
+    try:
+        a, b, c, d = (int(x) for x in o)
+    except ValueError:
+        return False
+    if not all(0 <= x <= 255 for x in (a, b, c, d)):
+        return False
+    if a in (0, 255):          # 0.0.0.0 / 255.x netmask
+        return False
+    if d in (0, 255):          # network / broadcast address
+        return False
+    return True
+
+
 def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
     """Parse an SFOS API response into {ip: hostname}. Returns (map, error).
 
-    Generic: any element whose children include an IPv4 value and a name-ish
-    value is treated as a host record. This survives firmware schema drift."""
+    Generic: any element whose children include a host IPv4 value and a name-ish
+    value is treated as a host record. This survives firmware schema drift;
+    netmask/network/broadcast IPs (from DHCPServer config) are skipped."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
@@ -65,7 +85,7 @@ def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
         kids = {c.tag.lower(): (c.text or "").strip() for c in list(rec)}
         if not kids:
             continue
-        ip = next((v for v in kids.values() if _IP_RE.match(v)), "")
+        ip = next((v for v in kids.values() if _IP_RE.match(v) and _is_host_ip(v)), "")
         name = next((kids[k] for k in _NAME_KEYS if kids.get(k)), "")
         if ip and name and name not in ("-", "0.0.0.0"):
             out.setdefault(ip, name[:255])
