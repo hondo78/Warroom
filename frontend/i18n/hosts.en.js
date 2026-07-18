@@ -2,7 +2,7 @@
 window.I18N = window.I18N || {}; window.I18N.en = window.I18N.en || {};
 window.I18N.en.hosts = {
     title: "Internal hosts",
-    intro: "Auto-fed from NetFlow (the internal IPs we see) and the Sophos endpoints. Hostnames are resolved via <strong>Sophos → reverse DNS → NetBIOS</strong>. When nothing resolves, you can <strong>enter the hostname manually</strong> — manual names are never overwritten.",
+    intro: "Auto-fed from NetFlow (the internal IPs we see) and the Sophos endpoints. Hostnames are resolved via <strong>Sophos → DNS → DHCP → NetBIOS</strong>. When nothing resolves, you can <strong>enter the hostname manually</strong> — manual names are never overwritten.",
     stat_total: "Internal hosts",
     stat_named: "With hostname",
     stat_unnamed: "Without hostname",

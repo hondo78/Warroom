@@ -155,24 +155,23 @@ async def get_dhcp_map(force: bool = False) -> dict[str, str]:
 
 
 async def _resolve_one(ip: str) -> tuple[str | None, str | None]:
-    """Return (hostname, source) for one internal IP, trying each source."""
+    """Return (hostname, source) for one internal IP, trying each source in order:
+    Sophos endpoints → reverse DNS → firewall DHCP → NetBIOS."""
     # 1) Sophos endpoints
     ep = await _from_endpoints([ip])
     if ep.get(ip):
         return ep[ip], "sophos"
-    # 2) Firewall DHCP mapping (reserved/lease client names)
+    loop = asyncio.get_event_loop()
+    # 2) reverse DNS (off-thread — it blocks). Keep the FQDN; the UI can shorten.
+    dns_name = await loop.run_in_executor(None, _reverse_dns, ip)
+    if dns_name:
+        return dns_name, "dns"
+    # 3) Firewall DHCP mapping (reserved/lease client names)
     if settings.firewall_api_enabled:
         dm = await get_dhcp_map()
         if dm.get(ip):
             return dm[ip], "dhcp"
-    loop = asyncio.get_event_loop()
-    # 2) reverse DNS (off-thread — it blocks)
-    dns_name = await loop.run_in_executor(None, _reverse_dns, ip)
-    if dns_name:
-        # Strip a trailing internal domain suffix down to the short name for display?
-        # Keep the FQDN — more informative; the UI can shorten if it wants.
-        return dns_name, "dns"
-    # 3) NetBIOS
+    # 4) NetBIOS
     nb = await loop.run_in_executor(None, _netbios_name, ip)
     if nb:
         return nb, "netbios"

@@ -31,7 +31,7 @@ window.I18N.en.admin = {
 
     // M365
     hostnamesTitle: "Internal hostnames",
-    hostnamesHint: "Resolves hostnames for internal (private) IPs and shows them wherever an internal IP appears. Sources in order: <strong>Sophos endpoints</strong> → <strong>reverse DNS (PTR)</strong> → <strong>NetBIOS</strong>. For PTR of private ranges, enter your internal DNS server IP (the container's default resolver usually can't).",
+    hostnamesHint: "Resolves hostnames for internal (private) IPs and shows them wherever an internal IP appears. Sources in order: <strong>Sophos endpoints</strong> → <strong>reverse DNS (PTR)</strong> → <strong>firewall DHCP</strong> → <strong>NetBIOS</strong>. For PTR of private ranges, enter your internal DNS server IP (the container's default resolver usually can't).",
     hostnamesEnabled: "Resolution active",
     internalDnsServers: "Internal DNS servers",
     internalDnsServersHint: "Comma-separated. Empty ⇒ system resolver. PTR records must exist.",
