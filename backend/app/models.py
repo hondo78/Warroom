@@ -406,6 +406,36 @@ class IpHostname(Base):
     resolved_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class HostIdentity(Base):
+    """Long-term record of an observed IP↔MAC↔hostname combination, so identity
+    changes (e.g. an IP suddenly on a different MAC) can be detected across
+    NetFlow retention."""
+    __tablename__ = "host_identities"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False)
+    mac = Column(String(17), nullable=False)
+    hostname = Column(String(255))
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now())
+    times_seen = Column(Integer, nullable=False, default=1)
+
+
+class HostIdentityEvent(Base):
+    """A detected change to a host identity (IP↔MAC↔hostname) — audit + alarm."""
+    __tablename__ = "host_identity_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45))
+    mac = Column(String(17))
+    hostname = Column(String(255))
+    event_type = Column(String(30))      # ip_mac_change | mac_moved | new_device | hostname_change
+    severity = Column(String(10))        # low | medium | high
+    detail = Column(Text)
+    detected_at = Column(DateTime(timezone=True), server_default=func.now())
+    notified = Column(Boolean, nullable=False, default=False)
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 

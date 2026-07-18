@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     firewall_api_verify_tls: bool = False
     firewall_dhcp_entity: str = "DHCPStaticEntry"  # XML API entity(ies), comma-separated
     firewall_dhcp_refresh_seconds: int = 600       # cache TTL for the lease map
+    # Host-identity monitoring: store IP↔MAC↔hostname combinations long-term and
+    # alarm (Telegram/Teams) when a binding changes (e.g. an IP moves to a new
+    # MAC — possible spoofing). The first scan seeds the baseline silently.
+    host_identity_monitor_enabled: bool = True
+    host_identity_alarm: bool = True
+    host_identity_scan_interval_seconds: int = 900
 
     # --- M365 login watch ---
     # Alerts (with a revoke-sessions option) when a user signs in from a device

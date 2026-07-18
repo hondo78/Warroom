@@ -88,6 +88,28 @@ const _SRC_BADGE = {
     manual:  'text-bg-success',
 };
 
+// Host-identity changes (IP↔MAC↔hostname). Card stays hidden when there are none.
+const _ID_SEV = { high: 'text-bg-danger', medium: 'text-bg-warning', low: 'text-bg-secondary' };
+const _ID_TYPE = { ip_mac_change: 'identity_ipmac', hostname_change: 'identity_hostname', mac_moved: 'identity_moved', new_device: 'identity_new' };
+async function loadIdentityEvents() {
+    const card = document.getElementById('hIdentityCard');
+    const tb = document.getElementById('hIdentityTable');
+    if (!card || !tb) return;
+    try {
+        const r = await fetch('/api/hosts/identity/events?limit=50');
+        if (!r.ok) return;
+        const evs = (await r.json()).events || [];
+        if (!evs.length) { card.style.display = 'none'; return; }
+        card.style.display = '';
+        tb.innerHTML = evs.map(e => `<tr>
+            <td style="white-space:nowrap">${fmtTime(e.detected_at)}</td>
+            <td><span class="badge ${_ID_SEV[e.severity] || 'text-bg-secondary'}">${escapeHtml(e.severity || '')}</span></td>
+            <td>${escapeHtml(t('hosts.' + (_ID_TYPE[e.event_type] || '')) || e.event_type)}</td>
+            <td style="font-size:.85rem">${escapeHtml(e.detail || '')}</td>
+        </tr>`).join('');
+    } catch (e) { /* ignore */ }
+}
+
 // Reconcile names: re-resolve every internal host now (DNS/NetBIOS/Sophos/DHCP),
 // then refresh the table.
 async function resolveHostsNow(btn) {
@@ -119,6 +141,7 @@ async function refreshHosts() {
         const d = await r.json();
         _hostsItems = d.items || [];
         renderHosts();
+        loadIdentityEvents();
 
         const named = _hostsItems.filter(h => h.hostname).length;
         document.getElementById('hTotal').textContent = _hostsItems.length.toLocaleString(HOSTS_LOCALE);

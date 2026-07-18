@@ -418,6 +418,37 @@ _MIGRATIONS = [
     # MAC address for the internal IP, when known (mainly from firewall DHCP
     # reservations, else the NetBIOS adapter status).
     "ALTER TABLE ip_hostnames ADD COLUMN IF NOT EXISTS mac VARCHAR(17)",
+    # Long-term store of every observed IP↔MAC↔hostname combination, so identity
+    # changes can be detected across NetFlow retention.
+    """
+    CREATE TABLE IF NOT EXISTS host_identities (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        mac VARCHAR(17) NOT NULL,
+        hostname VARCHAR(255),
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        times_seen INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (ip, mac)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_identities_ip ON host_identities(ip)",
+    "CREATE INDEX IF NOT EXISTS idx_host_identities_mac ON host_identities(mac)",
+    # Detected identity changes (audit log + alarm source).
+    """
+    CREATE TABLE IF NOT EXISTS host_identity_events (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45),
+        mac VARCHAR(17),
+        hostname VARCHAR(255),
+        event_type VARCHAR(30),
+        severity VARCHAR(10),
+        detail TEXT,
+        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        notified BOOLEAN NOT NULL DEFAULT FALSE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_identity_events_at ON host_identity_events(detected_at DESC)",
     # Honeypot pods (remote decoy agents managed by Warroom) + their events.
     """
     CREATE TABLE IF NOT EXISTS honeypots (

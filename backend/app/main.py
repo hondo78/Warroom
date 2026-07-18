@@ -190,6 +190,15 @@ async def lifespan(app: FastAPI):
         hostname_resolve_worker, "interval",
         seconds=20, id="hostname_resolve_worker",
     )
+    # Host-identity monitor: detects IP↔MAC↔hostname changes + alarms. First run
+    # seeds the baseline silently.
+    from app.host_identity import scan as host_identity_scan
+    scheduler.add_job(
+        host_identity_scan, "interval",
+        seconds=max(60, settings.host_identity_scan_interval_seconds),
+        id="host_identity_scan",
+    )
+    scheduler.add_job(host_identity_scan, "date", id="initial_host_identity_scan")
     # M365 login watch — alerts (with revoke option) on sign-ins from new
     # devices / locations. First pass seeds the baseline silently.
     from app.m365_watch import m365_login_watch
@@ -1007,7 +1016,31 @@ async def resolve_internal_hosts_now(
                 return 0
 
     results = await asyncio.gather(*[_do(ip) for ip in ips]) if ips else []
+    # Check for identity changes right after refreshing the bindings.
+    try:
+        from app.host_identity import scan as _hi_scan
+        await _hi_scan()
+    except Exception:
+        pass
     return {"ok": True, "processed": len(ips), "resolved": sum(results)}
+
+
+@app.get("/api/hosts/identity/events")
+async def list_host_identity_events(
+    limit: int = Query(default=50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent host-identity changes (IP↔MAC↔hostname), newest first."""
+    from app.models import HostIdentityEvent
+    rows = (await db.execute(
+        select(HostIdentityEvent).order_by(HostIdentityEvent.detected_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"events": [
+        {"id": e.id, "ip": e.ip, "mac": e.mac, "hostname": e.hostname,
+         "event_type": e.event_type, "severity": e.severity, "detail": e.detail,
+         "detected_at": e.detected_at.isoformat() if e.detected_at else None}
+        for e in rows
+    ]}
 
 
 @app.post("/api/firewall/dhcp/test")
@@ -5253,6 +5286,9 @@ class AdminSettingsIn(BaseModel):
     firewall_api_verify_tls: bool | None = None
     firewall_dhcp_entity: str | None = Field(default=None, max_length=200)
     firewall_dhcp_refresh_seconds: int | None = Field(default=None, ge=60, le=86400)
+    host_identity_monitor_enabled: bool | None = None
+    host_identity_alarm: bool | None = None
+    host_identity_scan_interval_seconds: int | None = Field(default=None, ge=60, le=86400)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None
