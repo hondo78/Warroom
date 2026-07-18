@@ -156,7 +156,7 @@ async def get_dhcp_map(force: bool = False) -> dict[str, str]:
 
 async def _resolve_one(ip: str) -> tuple[str | None, str | None]:
     """Return (hostname, source) for one internal IP, trying each source in order:
-    Sophos endpoints → reverse DNS → firewall DHCP → NetBIOS."""
+    Sophos endpoints → reverse DNS → NetBIOS → firewall DHCP."""
     # 1) Sophos endpoints
     ep = await _from_endpoints([ip])
     if ep.get(ip):
@@ -166,15 +166,15 @@ async def _resolve_one(ip: str) -> tuple[str | None, str | None]:
     dns_name = await loop.run_in_executor(None, _reverse_dns, ip)
     if dns_name:
         return dns_name, "dns"
-    # 3) Firewall DHCP mapping (reserved/lease client names)
+    # 3) NetBIOS
+    nb = await loop.run_in_executor(None, _netbios_name, ip)
+    if nb:
+        return nb, "netbios"
+    # 4) Firewall DHCP mapping (reserved/lease client names)
     if settings.firewall_api_enabled:
         dm = await get_dhcp_map()
         if dm.get(ip):
             return dm[ip], "dhcp"
-    # 4) NetBIOS
-    nb = await loop.run_in_executor(None, _netbios_name, ip)
-    if nb:
-        return nb, "netbios"
     return None, None
 
 

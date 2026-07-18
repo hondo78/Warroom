@@ -2,7 +2,7 @@
 window.I18N = window.I18N || {}; window.I18N.de = window.I18N.de || {};
 window.I18N.de.hosts = {
     title: "Interne Hosts",
-    intro: "Automatisch befüllt aus dem NetFlow (interne IPs, die wir sehen) und den Sophos-Endpoints. Der Hostname wird über <strong>Sophos → DNS → DHCP → NetBIOS</strong> ermittelt. Fehlt eine Auflösung, kannst du den Hostnamen <strong>manuell eintragen</strong> — manuelle Namen werden nie überschrieben.",
+    intro: "Automatisch befüllt aus dem NetFlow (interne IPs, die wir sehen) und den Sophos-Endpoints. Der Hostname wird über <strong>Sophos → DNS → NetBIOS → DHCP</strong> ermittelt. Fehlt eine Auflösung, kannst du den Hostnamen <strong>manuell eintragen</strong> — manuelle Namen werden nie überschrieben.",
     stat_total: "Interne Hosts",
     stat_named: "Mit Hostname",
     stat_unnamed: "Ohne Hostname",
