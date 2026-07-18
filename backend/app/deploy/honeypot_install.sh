@@ -32,11 +32,26 @@ need_root() { [ "$(id -u)" = "0" ] || die "run as root (use sudo)"; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
 
 # curl that honours the same TLS knobs as the agent (self-signed Warroom proxy).
+# When pinning, the one-time download trusts-on-first-use (-k); the persistent
+# agent channel is then secured by the pin.
 curl_tls() {
   local args=()
-  [ "${HONEYPOT_TLS_VERIFY:-1}" = "0" ] && args+=(-k)
-  [ -n "${HONEYPOT_CA:-}" ] && args+=(--cacert "${HONEYPOT_CA}")
+  if [ -n "${PIN:-}" ] || [ "${HONEYPOT_TLS_VERIFY:-1}" = "0" ]; then
+    args+=(-k)
+  elif [ -n "${HONEYPOT_CA:-}" ]; then
+    args+=(--cacert "${HONEYPOT_CA}")
+  fi
   curl "${args[@]}" "$@"
+}
+
+# SHA-256 of the Warroom server's leaf certificate (matches the agent's pin).
+server_pin() {
+  local hp="${WARROOM_URL#*://}"; hp="${hp%%/*}"
+  local host="${hp%%:*}" port="${hp##*:}"
+  [ "$port" = "$host" ] && port=443
+  echo | openssl s_client -connect "${host}:${port}" -servername "${host}" 2>/dev/null \
+    | openssl x509 -outform DER 2>/dev/null | openssl dgst -sha256 2>/dev/null \
+    | sed 's/^.*= *//; s/://g' | tr 'A-Z' 'a-z'
 }
 
 download_agent() {
@@ -56,6 +71,7 @@ write_env() {
   {
     echo "WARROOM_URL=${WARROOM_URL}"
     echo "HONEYPOT_TOKEN=${HONEYPOT_TOKEN}"
+    [ -n "${PIN:-}" ] && echo "HONEYPOT_PIN=${PIN}"
     [ -n "${HONEYPOT_TLS_VERIFY:-}" ] && echo "HONEYPOT_TLS_VERIFY=${HONEYPOT_TLS_VERIFY}"
     [ -n "${HONEYPOT_CA:-}" ] && echo "HONEYPOT_CA=${HONEYPOT_CA}"
     [ -n "${HONEYPOT_BIND:-}" ] && echo "HONEYPOT_BIND=${HONEYPOT_BIND}"
@@ -91,6 +107,13 @@ cmd_install() {
   need_root; need_cmd curl; need_cmd python3; need_cmd systemctl
   [ -n "${WARROOM_URL:-}" ] || die "WARROOM_URL not set (env or --url)"
   [ -n "${HONEYPOT_TOKEN:-}" ] || die "HONEYPOT_TOKEN not set (env or --token)"
+  # Resolve --pin auto to the live server cert fingerprint (trust-on-first-use).
+  if [ "${PIN:-}" = "auto" ]; then
+    need_cmd openssl
+    PIN="$(server_pin)"
+    [ -n "${PIN}" ] || die "could not fetch the server certificate to pin (is WARROOM_URL reachable?)"
+    echo "pinned server cert (sha256): ${PIN}"
+  fi
   mkdir -p "${APP_DIR}"
   download_agent
   write_env
@@ -130,12 +153,24 @@ cmd_status() {
   journalctl -u "${SVC}" --no-pager --lines=20 2>/dev/null || true
 }
 
+cmd_pin() {
+  need_cmd openssl
+  if [ -z "${WARROOM_URL:-}" ] && [ -f "${ENV_FILE}" ]; then
+    set -a; . "${ENV_FILE}"; set +a
+  fi
+  [ -n "${WARROOM_URL:-}" ] || die "WARROOM_URL not set (env, --url, or install first)"
+  local fp; fp="$(server_pin)"
+  [ -n "${fp}" ] || die "could not fetch the server certificate from ${WARROOM_URL}"
+  echo "${fp}"
+}
+
 # --- parse: <command> [flags] -------------------------------------------------
 CMD="${1:-}"; shift || true
 while [ $# -gt 0 ]; do
   case "$1" in
     --url)      WARROOM_URL="$2"; shift 2 ;;
     --token)    HONEYPOT_TOKEN="$2"; shift 2 ;;
+    --pin)      PIN="$2"; shift 2 ;;
     --ca)       HONEYPOT_CA="$2"; shift 2 ;;
     --bind)     HONEYPOT_BIND="$2"; shift 2 ;;
     --insecure) HONEYPOT_TLS_VERIFY="0"; shift ;;
@@ -148,6 +183,7 @@ case "${CMD}" in
   update)    cmd_update ;;
   uninstall) cmd_uninstall ;;
   status)    cmd_status ;;
+  pin)       cmd_pin ;;
   *) cat >&2 <<USAGE
 Warroom honeypot installer.
 
@@ -158,12 +194,20 @@ Usage: honeypot_install.sh <install|update|uninstall|status> [options]
   update      Download the latest agent from Warroom and restart the service.
   uninstall   Stop and remove the service (leaves planted decoy files).
   status      Show the service state and recent logs.
+  pin         Print the Warroom server's current cert fingerprint (sha256).
 
-Options: --url URL  --token hp_…  --insecure  --ca PATH  --bind ADDR
+Options:
+  --url URL       Warroom base URL
+  --token hp_…    per-pod token
+  --pin auto      pin the server's current cert (secure; trust-on-first-use)
+  --pin <sha256>  pin a known fingerprint (most secure; verify out-of-band)
+  --ca PATH       verify against the proxy's CA cert instead of pinning
+  --insecure      skip TLS verification (least secure)
+  --bind ADDR     listen address (default 0.0.0.0)
 
-Example:
+Example (self-signed Warroom proxy, pinned):
   sudo WARROOM_URL=https://warroom.example.com HONEYPOT_TOKEN=hp_xxxx \\
-       bash honeypot_install.sh install
+       bash honeypot_install.sh install --pin auto
 USAGE
      exit 2 ;;
 esac

@@ -1070,7 +1070,7 @@ def _deploy_snippet(request: Request, token: str) -> str:
         f"curl -fsSL {base}/api/honeypot/agent/install -o honeypot_install.sh\n"
         f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} bash honeypot_install.sh install\n"
         f"# later:  sudo bash honeypot_install.sh update   |   sudo bash honeypot_install.sh uninstall\n"
-        f"# Self-signed reverse proxy? append --insecure (or --ca /path/to/ca.pem)\n"
+        f"# Self-signed reverse proxy? append --pin auto (pins the cert — secure, no valid CA needed)\n"
         f"#\n"
         f"# Or run once in the foreground instead:\n"
         f"# curl -fsSL {base}/api/honeypot/agent/download -o honeypot_agent.py\n"

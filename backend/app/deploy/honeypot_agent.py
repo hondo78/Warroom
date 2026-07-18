@@ -16,9 +16,10 @@ Stdlib only (asyncio + urllib) — no pip install. Run as root to bind ports < 1
     sudo WARROOM_URL=https://<warroom> HONEYPOT_TOKEN=hp_xxxx python3 honeypot_agent.py
 
 Env: WARROOM_URL, HONEYPOT_TOKEN (required); HONEYPOT_BIND (default 0.0.0.0).
-TLS: HONEYPOT_TLS_VERIFY (default 1) — set 0 to skip cert verification when
-Warroom sits behind a self-signed reverse proxy; or HONEYPOT_CA=/path/to/ca.pem
-to verify against that proxy's CA instead (preferred over disabling).
+TLS (for a self-signed reverse proxy, in order of preference):
+  HONEYPOT_PIN=<sha256>  pin the server's exact leaf cert (secure, no CA chain);
+  HONEYPOT_CA=/path.pem  verify against the proxy's CA;
+  HONEYPOT_TLS_VERIFY=0  skip verification (quick, least secure).
 """
 import asyncio
 import ctypes
@@ -27,6 +28,8 @@ import os
 import platform
 import pwd
 import socket
+import hashlib
+import http.client
 import ssl
 import struct
 import sys
@@ -39,7 +42,11 @@ TOKEN = os.environ.get("HONEYPOT_TOKEN", "")
 BIND = os.environ.get("HONEYPOT_BIND", "0.0.0.0")
 TLS_VERIFY = os.environ.get("HONEYPOT_TLS_VERIFY", "1") not in ("0", "false", "no")
 CA_FILE = os.environ.get("HONEYPOT_CA", "").strip()
-AGENT_VERSION = "1.4"
+# Certificate pinning: SHA-256 of the server's leaf cert (DER). When set, the
+# agent trusts EXACTLY that cert regardless of CA validity — the secure way to
+# talk to a self-signed reverse proxy (no CA chain, no disabled verification).
+PIN = os.environ.get("HONEYPOT_PIN", "").strip().replace(":", "").lower()
+AGENT_VERSION = "1.5"
 
 if not WARROOM_URL or not TOKEN:
     print("ERROR: set WARROOM_URL and HONEYPOT_TOKEN", file=sys.stderr)
@@ -847,7 +854,9 @@ async def _reconcile(listen: list[dict]):
 # --- Warroom transport (blocking urllib, run off the event loop) --------------
 
 def _ctx():
-    if not TLS_VERIFY:
+    if PIN or not TLS_VERIFY:
+        # Pinning does its own check post-handshake, so the TLS layer must not
+        # reject the (untrusted) chain first.
         c = ssl.create_default_context()
         c.check_hostname = False
         c.verify_mode = ssl.CERT_NONE
@@ -859,24 +868,62 @@ def _ctx():
     return None
 
 
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS with certificate pinning: after the handshake, require the server's
+    leaf cert to match HONEYPOT_PIN (SHA-256 of its DER)."""
+    def connect(self):
+        super().connect()
+        der = self.sock.getpeercert(binary_form=True) if self.sock else None
+        got = hashlib.sha256(der).hexdigest() if der else ""
+        if got != PIN:
+            self.close()
+            raise ssl.SSLError(
+                f"certificate pin mismatch: server presented {got or '?'}, pinned {PIN}")
+
+
+class _PinnedHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PinnedHTTPSConnection, req, context=self._context)
+
+
+_opener = None
+
+
+def _get_opener():
+    global _opener
+    if _opener is None and PIN:
+        _opener = urllib.request.build_opener(_PinnedHandler(context=_ctx()))
+    return _opener
+
+
+def _open(req):
+    op = _get_opener()
+    return op.open(req, timeout=15) if op else urllib.request.urlopen(req, timeout=15, context=_ctx())
+
+
 def _post(path, obj):
     req = urllib.request.Request(
         WARROOM_URL + path, data=json.dumps(obj).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + TOKEN},
         method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+        with _open(req) as r:
             body = r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
         raise RuntimeError(f"HTTP {e.code} from {path}: {detail or e.reason}")
+    except ssl.SSLError as e:
+        raise RuntimeError(
+            f"TLS pin check failed ({e}). The server cert changed (renewed?) or this "
+            f"is a MITM. Re-capture the pin: honeypot_install.sh pin")
     except urllib.error.URLError as e:
         reason = e.reason
         if isinstance(reason, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(reason):
             raise RuntimeError(
                 f"TLS verification failed ({reason}). The Warroom cert is not publicly "
-                f"trusted. Fix: install a Let's Encrypt cert on the proxy, or set "
-                f"HONEYPOT_CA=/path/to/ca.pem, or (quick, less secure) HONEYPOT_TLS_VERIFY=0.")
+                f"trusted. Fix: pin it (HONEYPOT_PIN / install.sh --pin auto), install a "
+                f"Let's Encrypt cert on the proxy, set HONEYPOT_CA=/path/to/ca.pem, or "
+                f"(quick, less secure) HONEYPOT_TLS_VERIFY=0.")
         raise RuntimeError(f"cannot reach {WARROOM_URL}{path}: {reason}")
     try:
         return json.loads(body or "{}")

@@ -51,7 +51,11 @@ sudo bash honeypot_install.sh uninstall   # stop + remove the service
 sudo bash honeypot_install.sh status      # service state + recent logs
 ```
 
-For a self-signed Warroom proxy append `--insecure` (or `--ca /path/to/ca.pem`).
+For a self-signed Warroom proxy, **pin the certificate** — secure and needs no
+valid CA chain: append `--pin auto` to trust the cert the server presents now
+(trust-on-first-use), or `--pin <sha256>` with a fingerprint you verified
+out-of-band (run `honeypot_install.sh pin` to print it). `--ca /path/to/ca.pem`
+(verify against the proxy CA) and `--insecure` (skip verification) also work.
 It installs to `/opt/warroom-honeypot/`, keeps config in `/etc/warroom-honeypot.env`
 (chmod 600), and runs as root — the honeypot needs to plant decoy files anywhere
 and use fanotify (`CAP_SYS_ADMIN`) for reliable file-access attribution.
