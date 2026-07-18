@@ -969,6 +969,39 @@ async def set_internal_hostname(body: HostnameSetIn):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/hosts/internal/resolve")
+async def resolve_internal_hosts_now(
+    days: int = Query(default=7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-resolve the hostnames of every internal host now (the 'reconcile names'
+    button). Re-runs DNS / NetBIOS / Sophos-inventory / DHCP-lease resolution for
+    all internal IPs in the inventory, refreshing even already-named ones —
+    operator-set (manual) names are still preserved."""
+    import asyncio
+    from app.hostname_service import _resolve_one, _upsert, is_internal
+
+    agg = await _internal_netflow_agg(days)
+    ips = {a["ip"] for a in agg if is_internal(a["ip"])}
+    ep = (await db.execute(select(Endpoint.ipv4).where(Endpoint.ipv4.isnot(None)))).scalars().all()
+    ips |= {i for i in ep if i and is_internal(i)}
+    ips = sorted(ips)[:1000]   # bound the work per click
+
+    sem = asyncio.Semaphore(16)
+
+    async def _do(ip):
+        async with sem:
+            try:
+                hn, src = await _resolve_one(ip)
+                await _upsert(ip, hn, src)
+                return 1 if hn else 0
+            except Exception:
+                return 0
+
+    results = await asyncio.gather(*[_do(ip) for ip in ips]) if ips else []
+    return {"ok": True, "processed": len(ips), "resolved": sum(results)}
+
+
 # --- Honeypot: remote decoy pods managed by Warroom -------------------------
 
 def _client_ip(request: Request) -> str | None:

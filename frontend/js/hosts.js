@@ -87,6 +87,29 @@ const _SRC_BADGE = {
     manual:  'text-bg-success',
 };
 
+// Reconcile names: re-resolve every internal host now (DNS/NetBIOS/Sophos/DHCP),
+// then refresh the table.
+async function resolveHostsNow(btn) {
+    const label = btn?.querySelector('span');
+    const orig = label?.textContent;
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = t('hosts.resolving_now');
+    try {
+        const days = document.getElementById('hostsDays')?.value || '7';
+        const r = await fetch('/api/hosts/internal/resolve?days=' + encodeURIComponent(days), { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        await refreshHosts();
+        if (label) label.textContent = t('hosts.resolved_n', { n: d.resolved || 0, total: d.processed || 0 });
+        setTimeout(() => { if (label && orig) label.textContent = orig; }, 4000);
+    } catch (err) {
+        alert(t('hosts.resolve_failed') + ': ' + err.message);
+        if (label && orig) label.textContent = orig;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function refreshHosts() {
     const days = document.getElementById('hostsDays').value || '7';
     try {
