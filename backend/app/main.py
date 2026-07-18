@@ -944,6 +944,7 @@ async def list_internal_hosts(
             **base,
             "hostname": nm.get("hostname"),
             "source": nm.get("source"),
+            "mac": nm.get("mac"),
             "os": meta.get("os"),
             "device_type": meta.get("device_type"),
         })
@@ -999,8 +1000,8 @@ async def resolve_internal_hosts_now(
     async def _do(ip):
         async with sem:
             try:
-                hn, src = await _resolve_one(ip)
-                await _upsert(ip, hn, src)
+                hn, src, mac = await _resolve_one(ip)
+                await _upsert(ip, hn, src, mac)
                 return 1 if hn else 0
             except Exception:
                 return 0

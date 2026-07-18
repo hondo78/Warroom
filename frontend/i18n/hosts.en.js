@@ -17,6 +17,7 @@ window.I18N.en.hosts = {
     col_ip: "IP",
     col_hostname: "Hostname",
     col_source: "Source",
+    col_mac: "MAC",
     col_os: "OS / type",
     col_last: "Last activity",
     col_traffic: "Traffic",

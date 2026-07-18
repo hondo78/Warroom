@@ -415,6 +415,9 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_ip_hostnames_resolved ON ip_hostnames(resolved_at DESC)",
+    # MAC address for the internal IP, when known (mainly from firewall DHCP
+    # reservations, else the NetBIOS adapter status).
+    "ALTER TABLE ip_hostnames ADD COLUMN IF NOT EXISTS mac VARCHAR(17)",
     # Honeypot pods (remote decoy agents managed by Warroom) + their events.
     """
     CREATE TABLE IF NOT EXISTS honeypots (

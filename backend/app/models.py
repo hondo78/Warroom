@@ -402,6 +402,7 @@ class IpHostname(Base):
     ip = Column(String(45), primary_key=True)
     hostname = Column(String(255))       # NULL = resolved-but-nothing-found (negative)
     source = Column(String(20))
+    mac = Column(String(17))             # MAC when known (firewall DHCP / NetBIOS)
     resolved_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

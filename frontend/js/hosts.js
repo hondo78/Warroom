@@ -41,6 +41,7 @@ function _hostsSortVal(h, key) {
         case 'ip': return _ipNum(h.ip);
         case 'hostname': return (h.hostname || '').toLowerCase();
         case 'source': return h.source || '';
+        case 'mac': return h.mac || '';
         case 'os': return [h.os, h.device_type].filter(Boolean).join(' ').toLowerCase();
         case 'last_seen': return h.last_seen || '';
         case 'bytes': return h.bytes || 0;
@@ -165,10 +166,14 @@ function renderHosts() {
             ? `${fmtBytes(h.bytes)} <span class="text-secondary" style="font-size:.72rem">· ${(h.flows || 0).toLocaleString(HOSTS_LOCALE)} Flows</span>`
             : '<span class="text-secondary">—</span>';
         // data-hn="skip" keeps the global annotator from double-labelling the IP.
+        const mac = h.mac
+            ? `<code style="font-size:.78rem">${escapeHtml(h.mac)}</code>`
+            : '<span class="text-secondary">—</span>';
         return `<tr>
             <td><code data-hn="skip" style="font-size:.82rem">${escapeHtml(h.ip)}</code></td>
             <td>${name}</td>
             <td>${src}</td>
+            <td>${mac}</td>
             <td>${osType}</td>
             <td style="white-space:nowrap">${fmtTime(h.last_seen)}</td>
             <td style="white-space:nowrap">${traffic}</td>

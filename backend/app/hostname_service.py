@@ -85,11 +85,12 @@ def _reverse_dns(ip: str, timeout: float = 2.0) -> str | None:
         socket.setdefaulttimeout(None)
 
 
-def _netbios_name(ip: str, timeout: float = 1.5) -> str | None:
-    """NetBIOS node-status (NBSTAT) query → the host's UNIQUE workstation name.
-    Skips group names (e.g. the workgroup) via the NAME_FLAGS group bit."""
+def _netbios_name(ip: str, timeout: float = 1.5) -> tuple[str | None, str | None]:
+    """NetBIOS node-status (NBSTAT) query → (hostname, mac). The name is the
+    host's UNIQUE workstation name (group names skipped); the MAC comes from the
+    adapter-status statistics that follow the name list. Either may be None."""
     if not settings.hostname_netbios_enabled:
-        return None
+        return None, None
     # NBSTAT query for the wildcard name "*" (encoded as 'CKAA…').
     header = struct.pack(">HHHHHH", 0x4741, 0x0000, 1, 0, 0, 0)
     q = header + b"\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00" + struct.pack(">HH", 0x0021, 0x0001)
@@ -99,83 +100,104 @@ def _netbios_name(ip: str, timeout: float = 1.5) -> str | None:
         s.sendto(q, (ip, 137))
         data, _ = s.recvfrom(2048)
     except Exception:
-        return None
+        return None, None
     finally:
         s.close()
     try:
         if len(data) < 57:
-            return None
+            return None, None
         n = data[56]
         off = 57
-        fallback = None
+        name = fallback = None
         for _ in range(n):
             if off + 18 > len(data):
                 break
-            name = data[off:off + 15].decode("ascii", "replace").strip().strip("\x00").strip()
+            nm = data[off:off + 15].decode("ascii", "replace").strip().strip("\x00").strip()
             suffix = data[off + 15]
             flags = int.from_bytes(data[off + 16:off + 18], "big")
             is_group = bool(flags & 0x8000)
             off += 18
-            if not name or name == "__MSBROWSE__" or not name.isprintable():
+            if not nm or nm == "__MSBROWSE__" or not nm.isprintable():
                 continue
             # Workstation service (suffix 0x00), unique (not a group) → the host name.
-            if suffix == 0x00 and not is_group:
-                return name
-            if fallback is None and not is_group:
-                fallback = name
-        return fallback
+            if suffix == 0x00 and not is_group and name is None:
+                name = nm
+            elif fallback is None and not is_group:
+                fallback = nm
+        # The 6-byte adapter MAC (unit ID) opens the statistics block after names.
+        mac = None
+        if off + 6 <= len(data):
+            b = data[off:off + 6]
+            if any(b):
+                mac = ":".join(f"{x:02x}" for x in b)
+        return (name or fallback), mac
     except Exception:
-        return None
+        return None, None
 
 
 import time as _time
-_dhcp_cache: dict = {"map": {}, "at": 0.0}
+_dhcp_cache: dict = {"records": {}, "at": 0.0}
 
 
-async def get_dhcp_map(force: bool = False) -> dict[str, str]:
-    """Cached IP→hostname map from the Sophos Firewall DHCP config (XML API).
-    Returns {} when the firewall API is disabled; keeps the last good map on a
-    transient fetch error."""
+async def get_dhcp_records(force: bool = False) -> dict[str, dict]:
+    """Cached {ip: {hostname, mac}} from the Sophos Firewall DHCP config (XML
+    API). Returns {} when the firewall API is disabled; keeps the last good set
+    on a transient fetch error."""
     if not settings.firewall_api_enabled:
         return {}
     now = _time.monotonic()
     ttl = max(60, int(settings.firewall_dhcp_refresh_seconds or 600))
-    if not force and _dhcp_cache["map"] and (now - _dhcp_cache["at"]) < ttl:
-        return _dhcp_cache["map"]
+    if not force and _dhcp_cache["records"] and (now - _dhcp_cache["at"]) < ttl:
+        return _dhcp_cache["records"]
     try:
-        from app.sfos_client import fetch_dhcp_map
-        m = await fetch_dhcp_map()
-        _dhcp_cache["map"] = m
+        from app.sfos_client import fetch_dhcp_records
+        recs = await fetch_dhcp_records()
+        _dhcp_cache["records"] = recs
         _dhcp_cache["at"] = now
-        logger.info(f"DHCP map from firewall: {len(m)} IP↔hostname mapping(s)")
-        return m
+        logger.info(f"DHCP from firewall: {len(recs)} record(s) "
+                    f"({sum(1 for r in recs.values() if r.get('mac'))} with MAC)")
+        return recs
     except Exception as e:
-        logger.warning(f"DHCP map fetch failed: {e}")
-        return _dhcp_cache["map"]
+        logger.warning(f"DHCP fetch failed: {e}")
+        return _dhcp_cache["records"]
 
 
-async def _resolve_one(ip: str) -> tuple[str | None, str | None]:
-    """Return (hostname, source) for one internal IP, trying each source in order:
-    Sophos endpoints → reverse DNS → NetBIOS → firewall DHCP."""
+async def get_dhcp_map(force: bool = False) -> dict[str, str]:
+    """Cached IP→hostname map (derived from the DHCP records)."""
+    return {ip: r["hostname"] for ip, r in (await get_dhcp_records(force)).items()
+            if r.get("hostname")}
+
+
+async def _resolve_one(ip: str) -> tuple[str | None, str | None, str | None]:
+    """Return (hostname, source, mac) for one internal IP. Hostname order:
+    Sophos endpoints → reverse DNS → NetBIOS → firewall DHCP. The MAC is captured
+    independently (firewall DHCP reservation, else NetBIOS) so it is logged even
+    when the name comes from another source or can't be resolved."""
+    # DHCP record up front — its MAC applies regardless of who names the host.
+    dhcp_rec: dict = {}
+    if settings.firewall_api_enabled:
+        dhcp_rec = (await get_dhcp_records()).get(ip) or {}
+    mac = dhcp_rec.get("mac")
+
     # 1) Sophos endpoints
     ep = await _from_endpoints([ip])
     if ep.get(ip):
-        return ep[ip], "sophos"
+        return ep[ip], "sophos", mac
     loop = asyncio.get_event_loop()
     # 2) reverse DNS (off-thread — it blocks). Keep the FQDN; the UI can shorten.
     dns_name = await loop.run_in_executor(None, _reverse_dns, ip)
     if dns_name:
-        return dns_name, "dns"
-    # 3) NetBIOS
-    nb = await loop.run_in_executor(None, _netbios_name, ip)
-    if nb:
-        return nb, "netbios"
-    # 4) Firewall DHCP mapping (reserved/lease client names)
-    if settings.firewall_api_enabled:
-        dm = await get_dhcp_map()
-        if dm.get(ip):
-            return dm[ip], "dhcp"
-    return None, None
+        return dns_name, "dns", mac
+    # 3) NetBIOS (also yields the adapter MAC)
+    nb_name, nb_mac = await loop.run_in_executor(None, _netbios_name, ip)
+    if nb_mac and not mac:
+        mac = nb_mac
+    if nb_name:
+        return nb_name, "netbios", mac
+    # 4) Firewall DHCP reservation name
+    if dhcp_rec.get("hostname"):
+        return dhcp_rec["hostname"], "dhcp", mac
+    return None, None, mac
 
 
 # --- cache + queue -------------------------------------------------------------
@@ -206,17 +228,18 @@ async def lookup_cached(ips: list[str]) -> dict[str, dict]:
     for ip in internal:
         r = cache.get(ip)
         if r is not None and _fresh(r, now):
-            if r.hostname:
-                out[ip] = {"hostname": r.hostname, "source": r.source}
+            if r.hostname or r.mac:
+                out[ip] = {"hostname": r.hostname, "source": r.source, "mac": r.mac}
             continue
         unresolved.append(ip)
 
     # Sophos inventory is authoritative + instant — fold it in directly (also
-    # covers first-seen IPs before the worker runs).
+    # covers first-seen IPs before the worker runs). Keep any MAC already known.
     if unresolved:
         ep = await _from_endpoints(unresolved)
         for ip, hn in ep.items():
-            out[ip] = {"hostname": hn, "source": "sophos"}
+            out[ip] = {"hostname": hn, "source": "sophos",
+                       "mac": (out.get(ip) or {}).get("mac")}
     return out
 
 
@@ -235,16 +258,23 @@ async def queue_for_resolution(ips: list[str]) -> None:
             logger.debug(f"hostname queue failed: {e}")
 
 
-async def _upsert(ip: str, hostname: str | None, source: str | None) -> None:
+async def _upsert(ip: str, hostname: str | None, source: str | None,
+                  mac: str | None = None) -> None:
     now = datetime.now(timezone.utc)
     async with async_session() as db:
         row = await db.get(IpHostname, ip)
         if row is not None and row.source == "manual":
+            if mac and not row.mac:      # still record a newly-learned MAC
+                row.mac = mac
+                await db.commit()
             return                       # never overwrite an operator-set name
         if row is None:
-            db.add(IpHostname(ip=ip, hostname=hostname, source=source, resolved_at=now))
+            db.add(IpHostname(ip=ip, hostname=hostname, source=source,
+                              mac=mac, resolved_at=now))
         else:
             row.hostname, row.source, row.resolved_at = hostname, source, now
+            if mac:                      # keep last-known MAC; don't clobber with None
+                row.mac = mac
         await db.commit()
 
 
@@ -292,8 +322,8 @@ async def hostname_resolve_worker() -> dict:
 
     async def _do(ip):
         async with sem:
-            hn, src = await _resolve_one(ip)
-            await _upsert(ip, hn, src)
+            hn, src, mac = await _resolve_one(ip)
+            await _upsert(ip, hn, src, mac)
             return 1 if hn else 0
 
     results = await asyncio.gather(*[_do(ip) for ip in ips])

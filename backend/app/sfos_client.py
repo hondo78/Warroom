@@ -27,6 +27,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _IP_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+_MAC_RE = re.compile(r"^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 # Child tags (lowercased) that hold the client/host name in the various DHCP
 # entities across SFOS firmware versions.
 _NAME_KEYS = ("hostname", "host_name", "name", "host", "clientname",
@@ -65,12 +66,13 @@ def _is_host_ip(ip: str) -> bool:
     return True
 
 
-def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
-    """Parse an SFOS API response into {ip: hostname}. Returns (map, error).
+def parse_dhcp_records(xml_text: str) -> tuple[dict[str, dict], str | None]:
+    """Parse an SFOS API response into {ip: {"hostname", "mac"}}. Returns
+    (records, error).
 
     Generic: any element whose children include a host IPv4 value and a name-ish
-    value is treated as a host record. This survives firmware schema drift;
-    netmask/network/broadcast IPs (from DHCPServer config) are skipped."""
+    value is a host record; the MAC (if present) is captured too. Survives
+    firmware schema drift; netmask/network/broadcast IPs are skipped."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
@@ -80,16 +82,24 @@ def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
     if st is not None and "success" not in (st.text or "").lower():
         return {}, (st.text or "authentication failed").strip()
 
-    out: dict[str, str] = {}
+    out: dict[str, dict] = {}
     for rec in root.iter():
         kids = {c.tag.lower(): (c.text or "").strip() for c in list(rec)}
         if not kids:
             continue
         ip = next((v for v in kids.values() if _IP_RE.match(v) and _is_host_ip(v)), "")
         name = next((kids[k] for k in _NAME_KEYS if kids.get(k)), "")
+        mac = next((v for v in kids.values() if _MAC_RE.match(v)), "")
         if ip and name and name not in ("-", "0.0.0.0"):
-            out.setdefault(ip, name[:255])
+            out.setdefault(ip, {"hostname": name[:255],
+                                "mac": mac.lower().replace("-", ":") or None})
     return out, None
+
+
+def parse_dhcp(xml_text: str) -> tuple[dict[str, str], str | None]:
+    """Parse into {ip: hostname} (compat wrapper over parse_dhcp_records)."""
+    recs, err = parse_dhcp_records(xml_text)
+    return {ip: r["hostname"] for ip, r in recs.items()}, err
 
 
 async def _post_reqxml(entity: str) -> tuple[int, str]:
@@ -153,13 +163,18 @@ def probe_entities(xml_text: str) -> dict[str, dict]:
     return out
 
 
-async def fetch_dhcp_map() -> dict[str, str]:
-    """Fetch the firewall's DHCP IP→hostname mapping. Raises on config/transport
-    errors so the caller can surface them (the resolver swallows + logs)."""
+async def fetch_dhcp_records() -> dict[str, dict]:
+    """Fetch the firewall's DHCP {ip: {hostname, mac}} records. Raises on
+    config/transport errors so the caller can surface them."""
     status, text = await _post_reqxml(_entities())
     if status >= 400:
         raise RuntimeError(f"firewall returned HTTP {status}")
-    mapping, err = parse_dhcp(text)
+    recs, err = parse_dhcp_records(text)
     if err:
         raise RuntimeError(f"SFOS API: {err}")
-    return mapping
+    return recs
+
+
+async def fetch_dhcp_map() -> dict[str, str]:
+    """Fetch the firewall's DHCP IP→hostname mapping (hostname-only)."""
+    return {ip: r["hostname"] for ip, r in (await fetch_dhcp_records()).items()}
