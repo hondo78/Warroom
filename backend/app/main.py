@@ -1018,13 +1018,14 @@ async def test_firewall_dhcp(debug: bool = Query(default=False)):
     to troubleshooting)."""
     if not settings.firewall_api_enabled:
         return {"ok": False, "error": "firewall API is disabled (enable it in Admin)"}
-    from app.sfos_client import fetch_dhcp_map, fetch_dhcp_raw
+    from app.sfos_client import fetch_dhcp_map, fetch_dhcp_raw, probe_entities
     raw_info = {}
     if debug:
         try:
             status, text = await fetch_dhcp_raw()
             raw_info = {"http_status": status, "raw": text[:4000],
-                        "entity": settings.firewall_dhcp_entity}
+                        "entity": settings.firewall_dhcp_entity,
+                        "entities": probe_entities(text)}
         except Exception as e:
             return {"ok": False, "error": str(e)[:400]}
     try:

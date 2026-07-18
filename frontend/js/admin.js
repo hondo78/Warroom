@@ -195,7 +195,12 @@ async function testFirewallDhcp(btn) {
             out.textContent = d.ok ? t('admin.fwDhcpZero') : (d.error || ('HTTP ' + r.status));
             if (raw && (d.raw || d.http_status != null)) {
                 raw.style.display = 'block';
-                raw.textContent = `HTTP ${d.http_status ?? '?'} · entity=${d.entity || '-'}\n\n${d.raw || '(no body)'}`;
+                let ent = '';
+                if (d.entities) {
+                    ent = 'Entities:\n' + Object.entries(d.entities).map(([k, v]) =>
+                        `  ${k}: ${v.count > 0 ? v.count + ' record(s)' : (v.code ? 'code ' + v.code + ' ' + (v.status || '') : '—')}`).join('\n') + '\n\n';
+                }
+                raw.textContent = `HTTP ${d.http_status ?? '?'}\n\n${ent}${d.raw || '(no body)'}`;
             }
         }
     } catch (err) {

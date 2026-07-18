@@ -90,15 +90,53 @@ async def _post_reqxml(entity: str) -> tuple[int, str]:
         return r.status_code, r.text
 
 
+# Candidate DHCP entity names across SFOS firmware versions. We query the
+# configured entity plus these; invalid ones just return a harmless per-entity
+# 529 while valid ones return their records in the same response.
+_DHCP_CANDIDATES = ("DHCPServer", "DHCPStaticMACEntry", "DHCPStaticEntry",
+                    "DHCPLease", "DHCPRelay")
+
+
+def _entities() -> str:
+    ordered: list[str] = []
+    for e in [x.strip() for x in (settings.firewall_dhcp_entity or "").split(",") if x.strip()] \
+            + list(_DHCP_CANDIDATES):
+        if e not in ordered:
+            ordered.append(e)
+    return ",".join(ordered)
+
+
 async def fetch_dhcp_raw() -> tuple[int, str]:
-    """Diagnostic: the raw firewall response for the configured DHCP entity."""
-    return await _post_reqxml(settings.firewall_dhcp_entity or "DHCPStaticEntry")
+    """Diagnostic: the raw firewall response for the queried DHCP entities."""
+    return await _post_reqxml(_entities())
+
+
+def probe_entities(xml_text: str) -> dict[str, dict]:
+    """Per top-level entity tag: its Status code/text and how many child fields —
+    so the operator sees which entity name is valid + carries records."""
+    out: dict[str, dict] = {}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return out
+    for child in root:
+        if child.tag == "Login":
+            continue
+        st = child.find("Status")
+        info = out.setdefault(child.tag, {"count": 0, "status": None, "code": None})
+        if st is not None:
+            info["status"] = (st.text or "").strip()
+            info["code"] = st.get("code")
+        # a real record has field children beyond a lone <Status>
+        if any(c.tag != "Status" for c in child):
+            info["count"] += 1
+    return out
 
 
 async def fetch_dhcp_map() -> dict[str, str]:
     """Fetch the firewall's DHCP IP→hostname mapping. Raises on config/transport
     errors so the caller can surface them (the resolver swallows + logs)."""
-    status, text = await _post_reqxml(settings.firewall_dhcp_entity or "DHCPStaticEntry")
+    status, text = await _post_reqxml(_entities())
     if status >= 400:
         raise RuntimeError(f"firewall returned HTTP {status}")
     mapping, err = parse_dhcp(text)
