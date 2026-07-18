@@ -1124,7 +1124,7 @@ def _pod_online(pod: Honeypot) -> bool:
     return (datetime.now(timezone.utc) - pod.last_seen) < timedelta(seconds=90)
 
 
-def _deploy_snippet(request: Request, token: str) -> str:
+def _deploy_snippet(request: Request, token: str, reinstall: bool = False) -> str:
     # Prefer the externally-visible host (behind nginx the backend sees localhost),
     # so the deploy command shows the URL the operator actually reaches Warroom at.
     fwd_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
@@ -1133,8 +1133,16 @@ def _deploy_snippet(request: Request, token: str) -> str:
         base = f"{fwd_proto or 'https'}://{fwd_host}".rstrip("/")
     else:
         base = str(request.base_url).rstrip("/")
+    if reinstall:
+        header = (
+            "# RE-DEPLOY — run on the honeypot host to (re)install this pod with the new\n"
+            "# token. Safe to re-run where it's already installed: the 'install' command\n"
+            "# overwrites the token and restarts the service. The old token is now invalid.\n"
+        )
+    else:
+        header = "# Install as a service (recommended) — on the remote Linux honeypot host:\n"
     return (
-        f"# Install as a service (recommended) — on the remote Linux honeypot host:\n"
+        header +
         f"curl -fsSL {base}/api/honeypot/agent/install -o honeypot_install.sh\n"
         f"sudo WARROOM_URL={base} HONEYPOT_TOKEN={token} bash honeypot_install.sh install\n"
         f"# later:  sudo bash honeypot_install.sh update   |   sudo bash honeypot_install.sh uninstall\n"
@@ -1204,6 +1212,22 @@ async def update_honeypot(pod_id: str, body: HoneypotPatch, db: AsyncSession = D
         pod.files = hp.normalize_files(body.files)
     await db.commit()
     return {"ok": True}
+
+
+@app.post("/api/honeypot/pods/{pod_id}/redeploy")
+async def redeploy_honeypot(pod_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Rotate the pod's token and return a fresh deploy command, so an existing
+    pod can be re-deployed (rebuilt/new host, lost token/command). The previous
+    token stops working immediately — re-run the command on the host."""
+    from app import honeypot as hp
+    pod = await db.get(Honeypot, pod_id)
+    if pod is None:
+        raise HTTPException(status_code=404, detail="honeypot not found")
+    token, token_hash = hp.new_token()
+    pod.token_hash = token_hash
+    await db.commit()
+    return {"id": pod.id, "name": pod.name, "token": token,
+            "deploy": _deploy_snippet(request, token, reinstall=True)}
 
 
 @app.delete("/api/honeypot/pods/{pod_id}")

@@ -156,6 +156,7 @@ function renderPods() {
             <td>
                 <button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openEditPod('${escapeAttr(p.id)}')"><i class="bi bi-gear"></i> ${t('honeypot.edit')}</button>
                 <button class="btn btn-sm ${p.enabled ? 'btn-outline-warning' : 'btn-outline-success'} py-0" style="font-size:.72rem" onclick="togglePod('${escapeAttr(p.id)}', ${p.enabled ? 'false' : 'true'})">${p.enabled ? t('honeypot.pause') : t('honeypot.resume')}</button>
+                <button class="btn btn-sm btn-outline-primary py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.redeploy_title'))}" onclick="redeployPod('${escapeAttr(p.id)}')"><i class="bi bi-arrow-repeat"></i> ${t('honeypot.redeploy')}</button>
             </td>
         </tr>`;
     }).join('');
@@ -395,6 +396,21 @@ async function createPod() {
     } catch (err) { alert(t('honeypot.create_failed') + ': ' + err.message); }
 }
 function closeDeploy() { document.getElementById('deployModal').classList.remove('active'); }
+
+// Re-deploy an existing pod: rotate its token and show a fresh deploy command
+// (for a rebuilt/new host or a lost token). The old token stops working.
+async function redeployPod(id) {
+    const p = _hpPods.find(x => x.id === id);
+    if (!confirm(t('honeypot.redeploy_confirm', { name: (p && p.name) || id }))) return;
+    try {
+        const r = await fetch(`/api/honeypot/pods/${encodeURIComponent(id)}/redeploy`, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        document.getElementById('deployToken').value = d.token;
+        document.getElementById('deploySnippet').textContent = d.deploy;
+        document.getElementById('deployModal').classList.add('active');
+    } catch (err) { alert(t('honeypot.redeploy_failed') + ': ' + err.message); }
+}
 
 // ---- edit / toggle / delete --------------------------------------------------
 function openEditPod(id) {
