@@ -47,6 +47,8 @@ window.I18N.en.admin = {
     fwApiUser: "API user",
     fwApiPassword: "API password",
     fwApiVerifyTls: "Verify TLS certificate",
+    fwCentralSync: "Firewall pins from Sophos Central",
+    fwCentralSyncHint: "Off: firewall info comes from the XML API. On: also creates a map pin per Central firewall (can produce duplicates).",
     fwDhcpEntity: "DHCP entity",
     fwDhcpEntityHint: "XML API entity (comma-separated allowed). Firmware-dependent; the default returns reserved mappings.",
     fwDhcpRefresh: "Refresh (sec)",

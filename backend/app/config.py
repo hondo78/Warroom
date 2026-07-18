@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     firewall_api_user: str = ""                   # API user (must be API-enabled + IP-allowed)
     firewall_api_password: str = ""
     firewall_api_verify_tls: bool = False
+    # Auto-create firewall map pins from the Sophos Central firewall inventory.
+    # OFF by default: the SFOS XML API (firewall_api_host) is now the source of
+    # truth about the device, and the Central sync otherwise re-creates a
+    # duplicate pin per Central-listed firewall on every collection cycle.
+    firewall_central_sync_enabled: bool = False
     firewall_dhcp_entity: str = "DHCPStaticEntry"  # XML API entity(ies), comma-separated
     firewall_dhcp_refresh_seconds: int = 600       # cache TTL for the lease map
     # Host-identity monitoring: store IP↔MAC↔hostname combinations long-term and

@@ -46,6 +46,7 @@ MANAGED_KEYS: dict[str, type] = {
     "firewall_api_user": str,
     "firewall_api_password": str,
     "firewall_api_verify_tls": bool,
+    "firewall_central_sync_enabled": bool,
     "firewall_dhcp_entity": str,
     "firewall_dhcp_refresh_seconds": int,
     "host_identity_monitor_enabled": bool,

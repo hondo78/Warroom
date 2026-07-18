@@ -118,11 +118,15 @@ async def collect_all():
         except Exception as e:
             logger.error(f"Failed to collect detections: {e}")
 
-        try:
-            firewalls = await sophos_client.get_firewalls()
-            await _sync_firewalls(db, firewalls)
-        except Exception as e:
-            logger.error(f"Failed to sync firewalls: {e}")
+        # The SFOS XML API (firewall_api_host) is the source of truth about the
+        # firewall now; the Central inventory sync only re-creates duplicate map
+        # pins, so it's opt-in and off by default.
+        if settings.firewall_central_sync_enabled:
+            try:
+                firewalls = await sophos_client.get_firewalls()
+                await _sync_firewalls(db, firewalls)
+            except Exception as e:
+                logger.error(f"Failed to sync firewalls: {e}")
 
         try:
             endpoints = await sophos_client.get_endpoints()

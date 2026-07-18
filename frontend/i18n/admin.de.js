@@ -47,6 +47,8 @@ window.I18N.de.admin = {
     fwApiUser: "API-Benutzer",
     fwApiPassword: "API-Passwort",
     fwApiVerifyTls: "TLS-Zertifikat prüfen",
+    fwCentralSync: "Firewall-Pins aus Sophos Central",
+    fwCentralSyncHint: "Aus: Firewall-Infos kommen aus der XML-API. An: legt zusätzlich pro Central-Firewall einen Karten-Pin an (kann Dubletten erzeugen).",
     fwDhcpEntity: "DHCP-Entity",
     fwDhcpEntityHint: "XML-API-Entity (kommagetrennt möglich). Firmware-abhängig; Standard liefert reservierte Zuordnungen.",
     fwDhcpRefresh: "Aktualisierung (Sek.)",

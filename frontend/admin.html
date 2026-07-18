@@ -180,6 +180,8 @@
                             <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="firewall_api_password" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
                             <div class="col-md-4"><label class="form-label" data-i18n="admin.fwApiVerifyTls">TLS-Zertifikat prüfen</label></div>
                             <div class="col-md-8"><input type="checkbox" data-key="firewall_api_verify_tls" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.fwCentralSync">Firewall-Pins aus Sophos Central</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="firewall_central_sync_enabled" data-bool="1"><small class="admin-hint" data-i18n="admin.fwCentralSyncHint">Aus: Firewall-Infos kommen aus der XML-API. An: legt zusätzlich pro Central-Firewall einen Karten-Pin an (kann Dubletten erzeugen).</small></div>
                             <div class="col-md-4"><label class="form-label" data-i18n="admin.fwDhcpEntity">DHCP-Entity</label></div>
                             <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="firewall_dhcp_entity" placeholder="DHCPStaticEntry"><small class="admin-hint" data-i18n="admin.fwDhcpEntityHint">XML-API-Entity (kommagetrennt möglich). Firmware-abhängig; Standard liefert reservierte Zuordnungen.</small></div>
                             <div class="col-md-4"><label class="form-label" data-i18n="admin.fwDhcpRefresh">Aktualisierung (Sek.)</label></div>

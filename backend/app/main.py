@@ -5332,6 +5332,7 @@ class AdminSettingsIn(BaseModel):
     firewall_api_user: str | None = Field(default=None, max_length=128)
     firewall_api_password: str | None = Field(default=None, max_length=256)
     firewall_api_verify_tls: bool | None = None
+    firewall_central_sync_enabled: bool | None = None
     firewall_dhcp_entity: str | None = Field(default=None, max_length=200)
     firewall_dhcp_refresh_seconds: int | None = Field(default=None, ge=60, le=86400)
     host_identity_monitor_enabled: bool | None = None
