@@ -173,7 +173,7 @@ function renderEvents(events) {
             <td>${typeBadge}</td>
             <td><code>${escapeHtml(e.host)}</code></td>
             <td>${dirBadge(e.direction)}</td>
-            <td>${ipLink(e.monitored_ip)}</td>
+            <td>${ipLink(e.monitored_ip)}${typeof osintButton === 'function' ? osintButton(e.monitored_ip, 'osint-btn', 'ip') : ''}</td>
             <td>${portProto}</td>
             <td>${escapeHtml(e.country || '-')}</td>
             <td>${notif}</td>
@@ -218,7 +218,8 @@ async function openConnModal(ip) {
             <td style="white-space:nowrap">${fmtTime(c.first_seen)}</td>
             <td style="white-space:nowrap">${fmtTime(c.last_seen)}</td>
         </tr>`).join('');
-        body.innerHTML = `<p class="admin-hint" style="margin:0 0 .75rem">${t('monitored.conn_intro', { n: rows.length, ip: escapeHtml(ip) })}</p>
+        const osintIp = typeof osintButton === 'function' ? osintButton(ip, 'osint-btn', 'ip') : '';
+        body.innerHTML = `<p class="admin-hint" style="margin:0 0 .75rem">${t('monitored.conn_intro', { n: rows.length, ip: escapeHtml(ip) })}${osintIp}</p>
             <div class="table-scroll"><table class="table table-sm table-hover align-middle">
             <thead><tr>
                 <th>${t('monitored.col_host')}</th><th>${t('monitored.col_direction')}</th><th>${t('monitored.col_portproto')}</th>

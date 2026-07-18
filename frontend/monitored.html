@@ -166,16 +166,34 @@
     </div>
 </div>
 
+<!-- OSINT Modal -->
+<div class="modal-overlay" id="osintModal">
+    <div class="modal alert-detail-modal">
+        <div class="alert-detail-header">
+            <h3 id="osintModalTitle" data-i18n="blocked.osint_title">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" data-i18n-title="common.close" title="Schliessen">×</button>
+        </div>
+        <div id="osintModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
+        <div class="modal-actions">
+            <button onclick="reloadOsint()" data-i18n="blocked.osint_recheck">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()" data-i18n="common.close">Schliessen</button>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/i18n/de.js"></script>
     <script src="/i18n/en.js"></script>
     <script src="/i18n/blocked.de.js"></script>
     <script src="/i18n/blocked.en.js"></script>
+    <script src="/i18n/osint.de.js"></script>
+    <script src="/i18n/osint.en.js"></script>
     <script src="/i18n/monitored.de.js"></script>
     <script src="/i18n/monitored.en.js"></script>
     <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="/js/common.js"></script>
+<script src="/js/osint.js"></script>
 <script src="/js/monitored.js"></script>
 <script src="/js/hostnames.js"></script>
 </body>
