@@ -30,3 +30,6 @@ Thumbs.db
 # Docker volumes / runtime data
 postgres_data/
 *.log
+
+# graphify generated knowledge graph (local artifact)
+graphify-out/
