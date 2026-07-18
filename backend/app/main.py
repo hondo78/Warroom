@@ -2923,10 +2923,27 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
         rec["last_flow"] = last.isoformat() if last else None
         rec["sources"] = list(set((rec.get("sources") or []) + ["netflow"]))
 
+    # Ask the firewall itself (XML API) which IPs are its own interfaces/VLANs,
+    # so every one of them collapses into a SINGLE firewall keyed by the device
+    # hostname — instead of one "firewall" per interface IP. Best-effort: if the
+    # API is unreachable we fall back to the previous name/IP grouping.
+    device_hostname: str | None = None
+    device_ip_set: set[str] = set()
+    try:
+        from app.sfos_client import fetch_device_info, device_ips
+        dev = await fetch_device_info()
+        device_hostname = (dev.get("hostname") or "").strip() or None
+        device_ip_set = device_ips(dev)
+    except Exception as e:
+        logger.warning(f"extended firewalls: device info unavailable: {e}")
+
     # --- Step 2: collapse per IP records into firewalls (keyed by name) ---
     grouped: dict[str, dict] = {}
     for ip, rec in by_ip.items():
         name = (rec.get("name") or "").strip()
+        # Any IP that belongs to the physical firewall groups under its hostname.
+        if device_hostname and ip in device_ip_set:
+            name = device_hostname
         # Firewalls without a name (only seen in NetFlow) get bucketed under
         # their IP so the user can still see + name them later.
         key = name.lower() if name else f"__ip__{ip}"
@@ -3712,6 +3729,23 @@ async def get_recent_detections(
 
 # --- Firewall Locations ---
 
+@app.get("/api/firewall/device")
+@cached(ttl=300)
+async def get_firewall_device():
+    """The firewall's own identity + interfaces, read live from its XML API.
+
+    This is the authoritative source of truth about the physical device: one
+    firewall (its hostname) and the IPs configured on its interfaces/VLANs —
+    unlike the log/netflow-derived overview, which used to show each interface
+    IP as a separate 'firewall'."""
+    from app.sfos_client import fetch_device_info
+    try:
+        info = await fetch_device_info()
+        return {"ok": True, **info}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "hostname": None, "interfaces": []}
+
+
 @app.get("/api/firewalls")
 async def get_firewalls(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(FirewallLocation))
@@ -3746,6 +3780,20 @@ async def add_firewall(
     await db.commit()
     await db.refresh(fw)
     return {"id": fw.id, "name": fw.name}
+
+
+@app.patch("/api/firewalls/{fw_id}")
+async def update_firewall(fw_id: int, data: FirewallLocationIn, db: AsyncSession = Depends(get_db)):
+    fw = (await db.execute(
+        select(FirewallLocation).where(FirewallLocation.id == fw_id)
+    )).scalar_one_or_none()
+    if fw is None:
+        raise HTTPException(status_code=404, detail="firewall not found")
+    fw.name, fw.ip = data.name, data.ip
+    fw.lat, fw.lon = data.lat, data.lon
+    fw.country, fw.city = data.country, data.city
+    await db.commit()
+    return {"ok": True, "id": fw.id, "name": fw.name}
 
 
 @app.delete("/api/firewalls/{fw_id}")

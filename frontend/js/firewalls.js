@@ -5,7 +5,111 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(refreshFirewalls, 120000);
 });
 
+// --- Live device view: the firewall reporting on itself via the XML API -------
+async function loadDeviceInfo(force) {
+    const body = document.getElementById('fwDeviceBody');
+    if (!body) return;
+    if (force) body.innerHTML = `<span class="text-secondary">${t('common.loading')}</span>`;
+    try {
+        const r = await fetch('/api/firewall/device');
+        const d = await r.json();
+        if (!d.ok) {
+            body.innerHTML = `<div class="text-secondary">${t('firewalls.deviceUnavailable')}${d.error ? ' — <code>' + escapeHtml(d.error) + '</code>' : ''}</div>`;
+            return;
+        }
+        const ifaces = (d.interfaces || []).filter(i => i.ip);
+        const rows = ifaces.map(i => `<tr>
+            <td><strong>${escapeHtml(i.name)}</strong>${i.hardware && i.hardware !== i.name ? ' <span class="text-secondary" style="font-size:.75rem">(' + escapeHtml(i.hardware) + ')</span>' : ''}</td>
+            <td><span class="ip-country" style="font-size:.72rem">${escapeHtml(i.zone || '—')}</span></td>
+            <td><code>${escapeHtml(i.ip)}</code></td>
+            <td class="text-secondary" style="font-size:.8rem">${escapeHtml(i.netmask || '')}</td>
+            <td><span class="ip-country" style="font-size:.7rem">${escapeHtml(i.kind || '')}</span></td>
+        </tr>`).join('');
+        body.innerHTML = `
+            <div class="mb-2"><i class="bi bi-hdd-network"></i> <strong style="font-size:1.05rem">${escapeHtml(d.hostname || t('firewalls.deviceNoHostname'))}</strong>
+                <span class="ip-country" style="font-size:.72rem;margin-left:.4rem">${ifaces.length} ${t('firewalls.deviceIfacesWithIp')}</span></div>
+            <div class="table-scroll"><table class="table table-sm table-hover align-middle">
+                <thead><tr>
+                    <th data-i18n="firewalls.deviceIface">Interface</th>
+                    <th data-i18n="firewalls.deviceZone">Zone</th>
+                    <th>IP</th>
+                    <th data-i18n="firewalls.deviceNetmask">Netzmaske</th>
+                    <th data-i18n="firewalls.deviceKind">Typ</th>
+                </tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="text-center text-secondary py-2">${t('firewalls.deviceNoIfaces')}</td></tr>`}</tbody>
+            </table></div>`;
+        if (window.i18nApply) window.i18nApply(body);
+    } catch (e) {
+        body.innerHTML = `<div class="text-secondary">${t('firewalls.deviceUnavailable')}</div>`;
+    }
+}
+
+// --- Manage manually-added firewalls (locations: name, IP, coordinates) -------
+let _fwManual = [];
+async function loadManualFirewalls() {
+    const tb = document.getElementById('fwManageTable');
+    if (!tb) return;
+    try {
+        const r = await fetch('/api/firewalls');
+        if (!r.ok) return;
+        _fwManual = (await r.json()) || [];
+        if (!_fwManual.length) {
+            tb.innerHTML = `<tr><td colspan="5" class="text-center text-secondary py-3">${t('firewalls.manageEmpty')}</td></tr>`;
+            return;
+        }
+        tb.innerHTML = _fwManual.map(f => `<tr>
+            <td><strong>${escapeHtml(f.name || '')}</strong></td>
+            <td>${f.ip ? '<code>' + escapeHtml(f.ip) + '</code>' : '<span class="text-secondary">—</span>'}</td>
+            <td>${escapeHtml([f.country, f.city].filter(Boolean).join(', ') || '—')}</td>
+            <td class="text-secondary" style="font-size:.8rem">${(f.lat != null && f.lon != null) ? (f.lat.toFixed(4) + ', ' + f.lon.toFixed(4)) : '—'}</td>
+            <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openFwModal(${f.id})"><i class="bi bi-pencil"></i> ${t('common.edit')}</button>
+                <button class="block-link" onclick="deleteFw(${f.id}, '${escapeAttr(f.name || '')}', this)">${t('firewalls.removeLocation')}</button>
+            </td>
+        </tr>`).join('');
+    } catch (e) { /* ignore */ }
+}
+
+function openFwModal(id) {
+    const f = id ? _fwManual.find(x => x.id === id) : null;
+    document.getElementById('fwEditId').value = f ? f.id : '';
+    document.getElementById('fwModalTitle').textContent = t(f ? 'firewalls.editTitle' : 'firewalls.addTitle');
+    document.getElementById('fwName').value = f?.name || '';
+    document.getElementById('fwIp').value = f?.ip || '';
+    document.getElementById('fwLat').value = (f && f.lat != null) ? f.lat : '';
+    document.getElementById('fwLon').value = (f && f.lon != null) ? f.lon : '';
+    document.getElementById('fwCountry').value = f?.country || '';
+    document.getElementById('fwCity').value = f?.city || '';
+    document.getElementById('fwModal').classList.add('active');
+}
+function closeFwModal() { document.getElementById('fwModal').classList.remove('active'); }
+
+async function saveFw() {
+    const id = document.getElementById('fwEditId').value;
+    const data = {
+        name: document.getElementById('fwName').value.trim(),
+        ip: document.getElementById('fwIp').value.trim() || null,
+        lat: parseFloat(document.getElementById('fwLat').value),
+        lon: parseFloat(document.getElementById('fwLon').value),
+        country: document.getElementById('fwCountry').value.trim() || null,
+        city: document.getElementById('fwCity').value.trim() || null,
+    };
+    if (!data.name || isNaN(data.lat) || isNaN(data.lon)) { alert(t('firewalls.requiredFields')); return; }
+    try {
+        const r = await fetch(id ? `/api/firewalls/${id}` : '/api/firewalls', {
+            method: id ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+        closeFwModal();
+        await refreshFirewalls();
+    } catch (err) { alert(t('firewalls.saveFailed') + ': ' + err.message); }
+}
+
 async function refreshFirewalls() {
+    loadDeviceInfo();
+    loadManualFirewalls();
     try {
         const r = await fetch('/api/firewalls/extended');
         const d = await r.json();

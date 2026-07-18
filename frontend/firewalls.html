@@ -19,6 +19,7 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
+                <button class="btn btn-primary btn-sm" onclick="openFwModal()"><i class="bi bi-plus-lg"></i> <span data-i18n="firewalls.addFirewall">Firewall</span></button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="refreshFirewalls()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
                 <button class="btn btn-success btn-sm" onclick="refreshWhitelistFromHere()"><i class="bi bi-shield-check"></i> <span data-i18n="firewalls.whitelistAutoFill">Whitelist auto-fill</span></button>
             </div>
@@ -95,6 +96,39 @@
                 </div>
 
                 <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0"><i class="bi bi-hdd-network"></i> <span data-i18n="firewalls.deviceTitle">Firewall (live via XML-API)</span></h3>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="loadDeviceInfo(true)"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="firewalls.deviceHint">Identität und Interfaces direkt vom Gerät über die SFOS XML-API gelesen — die verlässliche Quelle: genau eine Firewall mit ihren Interface-/VLAN-IPs.</p>
+                        <div id="fwDeviceBody"></div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="firewalls.manageTitle">Firewalls verwalten</h3>
+                        <button class="btn btn-primary btn-sm" onclick="openFwModal()"><i class="bi bi-plus-lg"></i> <span data-i18n="firewalls.addFirewall">Firewall</span></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="firewalls.manageHint">Manuell hinterlegte Firewalls (Name, IP, Standort/Koordinaten). Die IP wird als eigene Firewall erkannt und der Standort auf der Attack-Map angezeigt.</p>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.firewall">Firewall</th>
+                                    <th>IP</th>
+                                    <th data-i18n="firewalls.colLocation">Standort</th>
+                                    <th data-i18n="firewalls.manageCoords">Koordinaten</th>
+                                    <th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="fwManageTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="firewalls.firewallList">Firewall-Liste</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
@@ -133,6 +167,24 @@
             </div>
         </div>
     </main>
+</div>
+
+<!-- Add / edit firewall modal -->
+<div class="modal-overlay" id="fwModal">
+    <div class="modal alert-detail-modal" style="max-width:480px">
+        <h3 id="fwModalTitle" data-i18n="firewalls.addTitle">Firewall hinzufügen</h3>
+        <input type="hidden" id="fwEditId">
+        <label data-i18n="firewalls.fwName">Name</label><input type="text" id="fwName" placeholder="z.B. HQ Firewall">
+        <label data-i18n="firewalls.fwIp">IP-Adresse</label><input type="text" id="fwIp" placeholder="203.0.113.1">
+        <label data-i18n="firewalls.fwLat">Breitengrad (Lat)</label><input type="number" id="fwLat" step="0.0001" placeholder="51.1657">
+        <label data-i18n="firewalls.fwLon">Längengrad (Lon)</label><input type="number" id="fwLon" step="0.0001" placeholder="10.4515">
+        <label data-i18n="common.country">Land</label><input type="text" id="fwCountry" placeholder="DE">
+        <label data-i18n="common.city">Stadt</label><input type="text" id="fwCity" placeholder="Frankfurt">
+        <div class="modal-actions">
+            <button onclick="closeFwModal()" data-i18n="common.cancel">Abbrechen</button>
+            <button class="primary" onclick="saveFw()" data-i18n="common.save">Speichern</button>
+        </div>
+    </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

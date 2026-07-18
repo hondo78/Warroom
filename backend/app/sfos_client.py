@@ -178,3 +178,83 @@ async def fetch_dhcp_records() -> dict[str, dict]:
 async def fetch_dhcp_map() -> dict[str, str]:
     """Fetch the firewall's DHCP IP→hostname mapping (hostname-only)."""
     return {ip: r["hostname"] for ip, r in (await fetch_dhcp_records()).items()}
+
+
+# --- Device identity + interfaces (the firewall reporting on itself) ----------
+
+def _iface_zone(el: ET.Element) -> str:
+    return (el.findtext("NetworkZone") or el.findtext("Zone") or "").strip()
+
+
+async def fetch_device_info() -> dict:
+    """Read the firewall's own identity + interfaces directly from the XML API.
+
+    Returns ``{"hostname": str|None, "interfaces": [{name, hardware, zone, ip,
+    netmask, status, kind}]}``. Each entity is fetched best-effort, so a firmware
+    that hides one (Interface/VLAN/AdminSettings) still yields the rest. Raises
+    only when the API is not configured/reachable at all."""
+    host = (settings.firewall_api_host or "").strip()
+    if not host:
+        raise RuntimeError("firewall_api_host is not set")
+
+    hostname: str | None = None
+    interfaces: list[dict] = []
+
+    # 1) hostname from AdminSettings → HostnameSettings/HostName
+    try:
+        _, txt = await _post_reqxml("AdminSettings")
+        root = ET.fromstring(txt)
+        hn = (root.findtext(".//HostnameSettings/HostName")
+              or root.findtext(".//HostName") or "").strip()
+        hostname = hn or None
+    except Exception as e:
+        logger.warning(f"device info: AdminSettings failed: {e}")
+
+    # 2) physical interfaces
+    try:
+        _, txt = await _post_reqxml("Interface")
+        root = ET.fromstring(txt)
+        for el in root.findall("Interface"):
+            name = (el.findtext("Name") or el.findtext("Hardware") or "").strip()
+            if not name:
+                continue
+            ip = (el.findtext(".//IPAddress") or "").strip()
+            interfaces.append({
+                "name": name,
+                "hardware": (el.findtext("Hardware") or "").strip() or None,
+                "zone": _iface_zone(el),
+                "ip": ip if _IP_RE.match(ip) else None,
+                "netmask": (el.findtext(".//Netmask") or "").strip() or None,
+                "status": (el.findtext("Status") or "").strip() or None,
+                "kind": "physical",
+            })
+    except Exception as e:
+        logger.warning(f"device info: Interface failed: {e}")
+
+    # 3) VLAN interfaces (carry their own IP/zone)
+    try:
+        _, txt = await _post_reqxml("VLAN")
+        root = ET.fromstring(txt)
+        for el in root.findall("VLAN"):
+            name = (el.findtext("Name") or "").strip()
+            if not name:
+                continue
+            ip = (el.findtext("IPAddress") or "").strip()
+            interfaces.append({
+                "name": name,
+                "hardware": (el.findtext("Hardware") or "").strip() or None,
+                "zone": (el.findtext("Zone") or "").strip(),
+                "ip": ip if _IP_RE.match(ip) else None,
+                "netmask": (el.findtext("Netmask") or "").strip() or None,
+                "status": None,
+                "kind": "vlan",
+            })
+    except Exception as e:
+        logger.warning(f"device info: VLAN failed: {e}")
+
+    return {"hostname": hostname, "interfaces": interfaces}
+
+
+def device_ips(info: dict) -> set[str]:
+    """The set of IPs configured on the firewall's own interfaces."""
+    return {i["ip"] for i in info.get("interfaces", []) if i.get("ip")}

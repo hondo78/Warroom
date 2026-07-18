@@ -30,7 +30,6 @@
                 </select>
                 <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="triggerCollection()"><i class="bi bi-cloud-download"></i> <span data-i18n="common.collect_data">Daten sammeln</span></button>
-                <button class="btn btn-primary btn-sm" onclick="showFirewallModal()"><i class="bi bi-plus-lg"></i> <span data-i18n="dashboard.add_firewall">Firewall</span></button>
             </div>
         </div>
     </nav>
@@ -442,23 +441,6 @@
         <div id="alertDetailBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
             <button onclick="closeAlertDetail()" data-i18n="common.close">Schliessen</button>
-        </div>
-    </div>
-</div>
-
-<!-- Firewall Location Modal -->
-<div class="modal-overlay" id="fwModal">
-    <div class="modal">
-        <h3 data-i18n="dash.fw_modal_title">Firewall-Standort hinzufuegen</h3>
-        <label data-i18n="dash.fw_name">Name</label><input type="text" id="fwName" data-i18n-placeholder="dash.fw_name_ph" placeholder="z.B. HQ Firewall">
-        <label data-i18n="dash.fw_ip">IP-Adresse</label><input type="text" id="fwIp" placeholder="203.0.113.1">
-        <label data-i18n="dash.fw_lat">Breitengrad (Lat)</label><input type="number" id="fwLat" step="0.0001" placeholder="51.1657">
-        <label data-i18n="dash.fw_lon">Laengengrad (Lon)</label><input type="number" id="fwLon" step="0.0001" placeholder="10.4515">
-        <label data-i18n="common.country">Land</label><input type="text" id="fwCountry" placeholder="DE">
-        <label data-i18n="common.city">Stadt</label><input type="text" id="fwCity" placeholder="Frankfurt">
-        <div class="modal-actions">
-            <button onclick="hideFirewallModal()" data-i18n="common.cancel">Abbrechen</button>
-            <button class="primary" onclick="addFirewall()" data-i18n="common.save">Speichern</button>
         </div>
     </div>
 </div>
