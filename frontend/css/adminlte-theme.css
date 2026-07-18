@@ -66,6 +66,10 @@
     color: inherit;
     margin-right: 0.5rem;
 }
+/* Indent sub-links (treeview) further to the right than their group heading. */
+.app-sidebar .nav-treeview .nav-link {
+    padding-left: 2.75rem;
+}
 
 .app-header.navbar {
     color: var(--text-primary);
