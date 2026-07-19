@@ -519,6 +519,86 @@ async def shodan_on_demand(ip: str) -> dict[str, Any]:
     return s
 
 
+# --- Tor exit-node list ------------------------------------------------------
+# Membership check against the Tor Project's published exit addresses
+# (https://check.torproject.org/exit-addresses). The list is fetched hourly and
+# cached in Redis; the per-lookup check is a cheap set lookup, no network call.
+TOR_EXIT_URL = "https://check.torproject.org/exit-addresses"
+TOR_REDIS_KEY = "tor:exit_nodes"
+_TOR_MEMO_TTL = 300  # seconds — cap on re-reading the set from Redis
+_TOR_MEMO: dict[str, Any] = {"ips": frozenset(), "ts": 0.0}
+
+
+async def refresh_tor_exit_nodes() -> dict[str, Any]:
+    """Fetch + parse the Tor exit-address list and cache it in Redis. Scheduled
+    hourly. Keeps the previous set on failure; returns {count, updated}."""
+    import time
+    from datetime import datetime, timezone
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(TOR_EXIT_URL)
+        if r.status_code != 200:
+            logger.warning(f"tor exit list: HTTP {r.status_code}")
+            return {"count": len(_TOR_MEMO["ips"]), "updated": None}
+        ips = set()
+        for line in r.text.splitlines():
+            # Format: "ExitAddress <ip> <ISO-timestamp>"
+            if line.startswith("ExitAddress "):
+                tok = line.split()
+                if len(tok) >= 2:
+                    try:
+                        ipaddress.ip_address(tok[1])
+                        ips.add(tok[1])
+                    except ValueError:
+                        pass
+        frozen = frozenset(ips)
+        if not frozen:
+            return {"count": len(_TOR_MEMO["ips"]), "updated": None}
+        _TOR_MEMO["ips"] = frozen
+        _TOR_MEMO["ts"] = time.time()
+        redis = await get_redis()
+        if redis:
+            await redis.set(TOR_REDIS_KEY, json.dumps(sorted(frozen)))
+            await redis.set(TOR_REDIS_KEY + ":updated", datetime.now(timezone.utc).isoformat())
+        logger.info(f"tor exit list refreshed: {len(frozen)} exit-node IPs")
+        return {"count": len(frozen), "updated": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.warning(f"tor exit list refresh failed: {e}")
+        return {"count": len(_TOR_MEMO["ips"]), "updated": None}
+
+
+async def _tor_exit_ips() -> frozenset[str]:
+    """Current Tor exit-node IP set: in-process memo → Redis → lazy fetch."""
+    import time
+    now = time.time()
+    if _TOR_MEMO["ips"] and now - _TOR_MEMO["ts"] < _TOR_MEMO_TTL:
+        return _TOR_MEMO["ips"]
+    ips: frozenset[str] = frozenset()
+    try:
+        redis = await get_redis()
+        if redis:
+            raw = await redis.get(TOR_REDIS_KEY)
+            if raw:
+                ips = frozenset(json.loads(raw))
+    except Exception as e:
+        logger.warning(f"tor exit list redis read failed: {e}")
+    if not ips:
+        await refresh_tor_exit_nodes()   # cold start — populate once
+        return _TOR_MEMO["ips"]
+    _TOR_MEMO["ips"] = ips
+    _TOR_MEMO["ts"] = now
+    return ips
+
+
+async def tor_check(ip: str) -> dict[str, Any]:
+    """Is `ip` a known Tor exit node? Cheap set membership; never raises."""
+    try:
+        ips = await _tor_exit_ips()
+        return {"available": bool(ips), "is_exit_node": ip in ips, "list_size": len(ips)}
+    except Exception as e:
+        return {"available": False, "reason": str(e)[:120]}
+
+
 async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> dict[str, Any]:
     """Run the OSINT providers and return a merged dict.
 
@@ -599,6 +679,7 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         "greynoise": gn,
         "ipinfo": ipi,
         "intelix": intelix,
+        "tor": await tor_check(ip),
         "cached": False,
     }
 

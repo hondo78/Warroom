@@ -157,6 +157,10 @@ window.I18N.de.osint = {
     l_classification: "Klassifikation",
     l_name: "Name",
     l_last_seen: "Letzte Sichtung",
+    l_tor: "Status",
+    tor_exit_yes: "Tor Exit-Node",
+    tor_exit_no: "Kein Tor Exit-Node",
+    open_tor: "In ExoneraTor prüfen",
     open_greynoise: "GreyNoise öffnen",
 
     // Intelix

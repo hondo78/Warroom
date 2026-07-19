@@ -239,6 +239,7 @@ function _osintRender(d, type) {
             ['VirusTotal', _osintRenderVT(d.virustotal)],
             ['Shodan', _osintRenderShodan(d.shodan)],
             ['GreyNoise', _osintRenderGN(d.greynoise)],
+            ['Tor', _osintRenderTor(d.tor, d.ip)],
             ['ipinfo.io', _osintRenderIpInfo(d.ipinfo)],
         ];
     }
@@ -503,6 +504,19 @@ function _osintRenderGN(p) {
         </dl>
         ${_osintLink(p.url, t('osint.open_greynoise'))}
     `;
+}
+
+function _osintRenderTor(p, ip) {
+    const head = _osintHead(p); if (head !== null) return head;
+    if (p.is_exit_node) {
+        return `
+            <dl class="detail-grid osint-dl">
+                ${_osintRow(t('osint.l_tor'), `<span class="osint-score osint-bad">${_osintEscape(t('osint.tor_exit_yes'))}</span>`)}
+            </dl>
+            ${_osintLink('https://metrics.torproject.org/exonerator.html?ip=' + encodeURIComponent(ip || ''), t('osint.open_tor'))}
+        `;
+    }
+    return `<div class="osint-na">${_osintEscape(t('osint.tor_exit_no'))}</div>`;
 }
 
 function _osintAsString(value) {

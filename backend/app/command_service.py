@@ -389,6 +389,11 @@ async def _h_osint(args, actor) -> str:
             parts.append(f"VirusTotal: {vt.get('malicious')} malicious")
         if gn.get("classification"):
             parts.append(f"GreyNoise: {gn.get('classification')}")
+        tor = (d.get("tor") or {})
+        if tor.get("is_exit_node"):
+            parts.append("TOR: **Exit-Node** ⚠️")
+        elif tor.get("available"):
+            parts.append("TOR: kein Exit-Node")
         parts.append("(Shodan/Ports/CVEs separat per Button im OSINT-Panel)")
     else:
         if vt.get("malicious") is not None:

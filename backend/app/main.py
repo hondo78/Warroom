@@ -87,6 +87,10 @@ async def lifespan(app: FastAPI):
     from app.map_rollup import refresh_map_rollup_job
     scheduler.add_job(refresh_map_rollup_job, "interval", seconds=30,
                       id="map_rollup", max_instances=1, coalesce=True)
+    # Keep the Tor exit-node list fresh for the OSINT tor check (free, no API key).
+    from app.osint import refresh_tor_exit_nodes
+    scheduler.add_job(refresh_tor_exit_nodes, "interval", minutes=60, id="tor_exit_refresh")
+    scheduler.add_job(refresh_tor_exit_nodes, "date", id="initial_tor_exit_refresh")
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
