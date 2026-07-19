@@ -2929,13 +2929,33 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
     # API is unreachable we fall back to the previous name/IP grouping.
     device_hostname: str | None = None
     device_ip_set: set[str] = set()
+    device_iface_by_ip: dict[str, dict] = {}
     try:
         from app.sfos_client import fetch_device_info, device_ips
         dev = await fetch_device_info()
         device_hostname = (dev.get("hostname") or "").strip() or None
         device_ip_set = device_ips(dev)
+        for i in dev.get("interfaces", []):
+            if i.get("ip"):
+                device_iface_by_ip[i["ip"]] = {"name": i.get("name"), "zone": i.get("zone")}
     except Exception as e:
         logger.warning(f"extended firewalls: device info unavailable: {e}")
+
+    # Seed EVERY interface/VLAN IP the firewall reports, so the overview lists all
+    # of the firewall's IPs — not only the few that happen to appear in syslog /
+    # netflow / a manual pin. IPs with no traffic just show 0 logs / 0 flows.
+    for ip in device_ip_set:
+        rec = by_ip.setdefault(ip, {
+            "ip": ip, "name": device_hostname, "location_id": None, "sources": [],
+            "lat": None, "lon": None, "country": None, "city": None,
+            "log_count": 0, "last_log": None,
+            "iface_count": 0, "last_flow": None,
+            "whitelisted": ip in whitelisted,
+        })
+        rec["sources"] = list(set((rec.get("sources") or []) + ["device"]))
+        info = device_iface_by_ip.get(ip) or {}
+        rec["iface_name"] = info.get("name")
+        rec["zone"] = info.get("zone")
 
     # --- Step 2: collapse per IP records into firewalls (keyed by name) ---
     grouped: dict[str, dict] = {}
@@ -2966,6 +2986,8 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
             "iface_count": rec["iface_count"],
             "last_log": rec["last_log"],
             "last_flow": rec["last_flow"],
+            "iface_name": rec.get("iface_name"),
+            "zone": rec.get("zone"),
         })
         fw["log_count"] += rec["log_count"]
         fw["iface_count"] += rec["iface_count"]

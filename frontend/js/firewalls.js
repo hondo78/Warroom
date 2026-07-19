@@ -134,9 +134,13 @@ async function refreshFirewalls() {
                     ? `<span title="${escapeAttr(t('firewalls.tipWhitelisted'))}" style="color:var(--accent-green)">🛡</span>`
                     : `<span title="${escapeAttr(t('firewalls.tipNotWhitelisted'))}" style="color:var(--accent-red);opacity:.5">⚠</span>`;
                 const sources = (ipObj.sources || []).map(s => {
-                    const lbl = ({location: 'loc', syslog: 'log', netflow: 'flow'})[s] || s;
+                    const lbl = ({location: 'loc', syslog: 'log', netflow: 'flow', device: 'fw'})[s] || s;
                     return `<span class="ip-country" style="font-size:.7rem;margin-left:.2rem">${lbl}</span>`;
                 }).join('');
+                // Interface/zone straight from the firewall (XML API)
+                const ifaceTag = ipObj.iface_name
+                    ? ` <span class="ip-country" style="font-size:.7rem;margin-left:.2rem" title="${escapeAttr((ipObj.iface_name || '') + (ipObj.zone ? ' · ' + ipObj.zone : ''))}">${escapeHtml(ipObj.iface_name)}${ipObj.zone ? ' · ' + escapeHtml(ipObj.zone) : ''}</span>`
+                    : '';
                 const stats = [];
                 if (ipObj.log_count) stats.push(`${ipObj.log_count.toLocaleString('de-DE')} logs`);
                 if (ipObj.iface_count) stats.push(`${ipObj.iface_count} ifaces`);
@@ -144,7 +148,7 @@ async function refreshFirewalls() {
                 const wlBtn = !ipObj.whitelisted
                     ? ` <button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="${escapeAttr(t('firewalls.tipWhitelistThisIp'))}">+wl</button>`
                     : '';
-                return `<div style="line-height:1.6">${wlIcon} <code style="font-size:.82rem">${escapeHtml(ipObj.ip)}</code>${sources}${statsTxt}${wlBtn}</div>`;
+                return `<div style="line-height:1.6">${wlIcon} <code style="font-size:.82rem">${escapeHtml(ipObj.ip)}</code>${ifaceTag}${sources}${statsTxt}${wlBtn}</div>`;
             }).join('');
 
             const locCell = escapeHtml([fw.country, fw.city].filter(Boolean).join(', ') || '—');
