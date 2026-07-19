@@ -495,6 +495,50 @@ _MIGRATIONS = [
         acknowledged_by VARCHAR(100)
     )
     """,
+    # --- Attack-map rollup ---------------------------------------------------
+    # Daily pre-aggregation of the geo-located firewall_logs that feed the attack
+    # map. The map used to aggregate 4-11M raw rows per request (13-30s cold);
+    # reading this rollup instead scans thousands. Maintained incrementally by
+    # id-watermark (see app/map_rollup.py). Actual first/last-seen timestamps are
+    # kept precise even though the bucket is a day.
+    """
+    CREATE TABLE IF NOT EXISTS fw_map_daily (
+        day DATE NOT NULL,
+        threat_ip TEXT NOT NULL,
+        lat DOUBLE PRECISION NOT NULL,
+        lon DOUBLE PRECISION NOT NULL,
+        country TEXT,
+        city TEXT,
+        cnt BIGINT NOT NULL DEFAULT 0,
+        max_severity TEXT,
+        first_seen TIMESTAMP WITH TIME ZONE NOT NULL,
+        last_seen TIMESTAMP WITH TIME ZONE NOT NULL,
+        asn TEXT,
+        org TEXT,
+        has_inbound BOOLEAN NOT NULL DEFAULT FALSE,
+        has_outbound BOOLEAN NOT NULL DEFAULT FALSE,
+        threats TEXT[] NOT NULL DEFAULT '{}',
+        actions TEXT[] NOT NULL DEFAULT '{}',
+        log_types TEXT[] NOT NULL DEFAULT '{}',
+        dest_ports TEXT[] NOT NULL DEFAULT '{}',
+        users TEXT[] NOT NULL DEFAULT '{}',
+        firewalls TEXT[] NOT NULL DEFAULT '{}',
+        PRIMARY KEY (day, threat_ip, lat, lon)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_fw_map_daily_day ON fw_map_daily(day)",
+    # Watermark store for incremental rollups (id of the last firewall_logs row
+    # folded into fw_map_daily).
+    """
+    CREATE TABLE IF NOT EXISTS rollup_state (
+        name TEXT PRIMARY KEY,
+        last_id BIGINT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    # Aggregate that concatenates arrays across grouped rows (Postgres has no
+    # built-in). Used to union the per-day metadata arrays at query time.
+    "CREATE OR REPLACE AGGREGATE array_cat_agg(anycompatiblearray) (sfunc = array_cat, stype = anycompatiblearray)",
 ]
 
 

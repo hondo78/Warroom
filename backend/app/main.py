@@ -81,6 +81,12 @@ async def lifespan(app: FastAPI):
     # @cached TTL (30s) so cache entries always overlap.
     scheduler.add_job(warm_dashboard_cache, "interval", seconds=25, id="cache_warmer")
     scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
+    # Keep the attack-map daily rollup (fw_map_daily) current — folds newly
+    # ingested firewall_logs in by id watermark. max_instances=1 so a slow catch-up
+    # never overlaps itself.
+    from app.map_rollup import refresh_map_rollup_job
+    scheduler.add_job(refresh_map_rollup_job, "interval", seconds=30,
+                      id="map_rollup", max_instances=1, coalesce=True)
     # AI agent — only fires if agent_enabled is set; the function itself
     # is the gate, so we always schedule it.
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
@@ -314,7 +320,7 @@ async def get_severity_distribution(
 
 
 @app.get("/api/stats/timeline")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_timeline(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -416,7 +422,7 @@ async def get_top_attackers(
 # --- Map Data ---
 
 @app.get("/api/map/attacks")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_attack_map(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -498,35 +504,54 @@ async def get_attack_map(
     """)
     alert_rows = (await db.execute(alert_sql, {"since": since})).all()
 
-    # Attackers from Firewall syslog
-    fw_sql = text(f"""
-        SELECT
-            ({fw_threat_expr}) AS threat_ip,
-            attacker_lat, attacker_lon,
-            attacker_country, attacker_city,
-            COUNT(*) AS cnt,
-            MAX(severity) AS max_severity,
-            MIN(created_at) AS first_seen,
-            MAX(created_at) AS last_seen,
-            MAX(attacker_asn) AS asn,
-            MAX(attacker_org) AS org,
-            array_agg(DISTINCT threat_name) FILTER (WHERE threat_name IS NOT NULL) AS threats,
-            array_agg(DISTINCT action)      FILTER (WHERE action IS NOT NULL)      AS actions,
-            array_agg(DISTINCT log_type)    FILTER (WHERE log_type IS NOT NULL)    AS log_types,
-            array_agg(DISTINCT destination_port::text) FILTER (WHERE destination_port IS NOT NULL) AS dest_ports,
-            array_agg(DISTINCT user_name)   FILTER (WHERE user_name IS NOT NULL)   AS users,
-            array_agg(DISTINCT firewall_name) FILTER (WHERE firewall_name IS NOT NULL) AS firewalls,
-            bool_or({fw_in_expr})  AS has_inbound,
-            bool_or({fw_out_expr}) AS has_outbound
-        FROM firewall_logs
-        WHERE created_at >= :since
-          AND attacker_lat IS NOT NULL
-          AND attacker_lon IS NOT NULL
-        GROUP BY threat_ip, attacker_lat, attacker_lon, attacker_country, attacker_city
+    # Attackers from firewall syslog — read the pre-aggregated daily rollup
+    # (app/map_rollup.py) instead of scanning millions of raw firewall_logs rows.
+    # Two steps: rank the top-500 attackers over the window, then union each
+    # one's per-day metadata. Columns are kept in the exact order the merge loop
+    # below reads (r[0]..r[18]). The rollup buckets by day, so the window starts
+    # at since's calendar day (a few boundary hours more inclusive than the exact
+    # timestamp — negligible for a map).
+    fw_sql = text("""
+        WITH top AS (
+            SELECT threat_ip, lat, lon, sum(cnt) AS c
+            FROM fw_map_daily
+            WHERE day >= :since_day
+            GROUP BY threat_ip, lat, lon
+            ORDER BY c DESC
+            LIMIT 500
+        ),
+        merged AS (
+            SELECT d.threat_ip, d.lat, d.lon,
+                   max(d.country) AS country, max(d.city) AS city,
+                   sum(d.cnt) AS cnt, max(d.max_severity) AS max_severity,
+                   min(d.first_seen) AS first_seen, max(d.last_seen) AS last_seen,
+                   max(d.asn) AS asn, max(d.org) AS org,
+                   array_cat_agg(d.threats) AS threats,
+                   array_cat_agg(d.actions) AS actions,
+                   array_cat_agg(d.log_types) AS log_types,
+                   array_cat_agg(d.dest_ports) AS dest_ports,
+                   array_cat_agg(d.users) AS users,
+                   array_cat_agg(d.firewalls) AS firewalls,
+                   bool_or(d.has_inbound) AS has_inbound,
+                   bool_or(d.has_outbound) AS has_outbound
+            FROM fw_map_daily d
+            JOIN top USING (threat_ip, lat, lon)
+            WHERE d.day >= :since_day
+            GROUP BY d.threat_ip, d.lat, d.lon
+        )
+        SELECT threat_ip, lat, lon, country, city, cnt, max_severity,
+               first_seen, last_seen, asn, org,
+               (SELECT array_agg(DISTINCT e) FROM unnest(threats) e)    AS threats,
+               (SELECT array_agg(DISTINCT e) FROM unnest(actions) e)    AS actions,
+               (SELECT array_agg(DISTINCT e) FROM unnest(log_types) e)  AS log_types,
+               (SELECT array_agg(DISTINCT e) FROM unnest(dest_ports) e) AS dest_ports,
+               (SELECT array_agg(DISTINCT e) FROM unnest(users) e)      AS users,
+               (SELECT array_agg(DISTINCT e) FROM unnest(firewalls) e)  AS firewalls,
+               has_inbound, has_outbound
+        FROM merged
         ORDER BY cnt DESC
-        LIMIT 500
     """)
-    fw_rows = (await db.execute(fw_sql, {"since": since})).all()
+    fw_rows = (await db.execute(fw_sql, {"since_day": since.date()})).all()
 
     firewalls = await db.execute(select(FirewallLocation))
 
@@ -1441,7 +1466,7 @@ async def get_shodan_hosts(
 # --- Firewall Stats ---
 
 @app.get("/api/stats/firewall-events")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_firewall_event_stats(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -3926,7 +3951,7 @@ async def get_fw_log_top_attackers(
 
 
 @app.get("/api/firewall-logs/failed-logins")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_failed_logins(
     days: int = Query(default=7, ge=1, le=90),
     limit: int = Query(default=200, ge=1, le=1000),
@@ -4055,7 +4080,7 @@ _WAF_ATTACK_FILTER_SQL = """(
 
 
 @app.get("/api/firewall-logs/waf/stats")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_waf_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -4303,7 +4328,7 @@ _IPS_FILTER_SQL = """(
 
 
 @app.get("/api/firewall-logs/ips/stats")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_ips_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -4475,7 +4500,7 @@ _BLOCKED_OUTBOUND_WHERE = (
 
 
 @app.get("/api/firewall-logs/blocked-outbound/stats")
-@cached(ttl=60)
+@cached(ttl=300)
 async def get_blocked_outbound_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -6343,6 +6368,9 @@ _WARM_TARGETS: list[tuple[str, dict]] = [
     ("get_top_attackers", {"days": 7, "limit": 20}),
     ("get_firewall_event_stats", {"days": 7}),
     ("get_attack_map", {"days": 7}),
+    # The map now reads the daily rollup, so warming the 30-day range is cheap.
+    ("get_attack_map", {"days": 30}),
+    ("get_blocked_outbound_stats", {"days": 7}),
     ("get_recent_alerts", {"limit": 200}),
     ("get_recent_events", {"limit": 200}),
     ("get_recent_detections", {"limit": 200}),
