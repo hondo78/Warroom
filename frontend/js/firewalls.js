@@ -129,34 +129,51 @@ async function refreshFirewalls() {
             return;
         }
         tbody.innerHTML = items.map(fw => {
-            const ipBlocks = (fw.ips || []).map(ipObj => {
+            const ipsCsv = (fw.ips || []).map(x => x.ip).join(',');
+            const wanIps = (fw.ips || []).filter(x => (x.zone || '').toUpperCase() === 'WAN');
+
+            // --- Detail: one tidy row per IP (already WAN-first from the backend) ---
+            const ipRows = (fw.ips || []).map(ipObj => {
+                const isWan = (ipObj.zone || '').toUpperCase() === 'WAN';
                 const wlIcon = ipObj.whitelisted
                     ? `<span title="${escapeAttr(t('firewalls.tipWhitelisted'))}" style="color:var(--accent-green)">🛡</span>`
-                    : `<span title="${escapeAttr(t('firewalls.tipNotWhitelisted'))}" style="color:var(--accent-red);opacity:.5">⚠</span>`;
+                    : `<span title="${escapeAttr(t('firewalls.tipNotWhitelisted'))}" style="color:var(--accent-red);opacity:.6">⚠</span>`;
                 const sources = (ipObj.sources || []).map(s => {
                     const lbl = ({location: 'loc', syslog: 'log', netflow: 'flow', device: 'fw'})[s] || s;
-                    return `<span class="ip-country" style="font-size:.7rem;margin-left:.2rem">${lbl}</span>`;
+                    return `<span class="ip-country" style="font-size:.66rem;margin-right:.2rem">${lbl}</span>`;
                 }).join('');
-                // Interface/zone straight from the firewall (XML API)
-                const ifaceTag = ipObj.iface_name
-                    ? ` <span class="ip-country" style="font-size:.7rem;margin-left:.2rem" title="${escapeAttr((ipObj.iface_name || '') + (ipObj.zone ? ' · ' + ipObj.zone : ''))}">${escapeHtml(ipObj.iface_name)}${ipObj.zone ? ' · ' + escapeHtml(ipObj.zone) : ''}</span>`
-                    : '';
-                const stats = [];
-                if (ipObj.log_count) stats.push(`${ipObj.log_count.toLocaleString('de-DE')} logs`);
-                if (ipObj.iface_count) stats.push(`${ipObj.iface_count} ifaces`);
-                const statsTxt = stats.length ? ` <span class="ip-country" style="font-size:.7rem">· ${stats.join(' · ')}</span>` : '';
-                const wlBtn = !ipObj.whitelisted
-                    ? ` <button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="${escapeAttr(t('firewalls.tipWhitelistThisIp'))}">+wl</button>`
-                    : '';
-                return `<div style="line-height:1.6">${wlIcon} <code style="font-size:.82rem">${escapeHtml(ipObj.ip)}</code>${ifaceTag}${sources}${statsTxt}${wlBtn}</div>`;
+                const zoneBadge = ipObj.zone
+                    ? `<span class="ip-country" style="font-size:.7rem${isWan ? ';background:rgba(239,68,68,.16);color:var(--accent-red)' : ''}">${escapeHtml(ipObj.zone)}</span>`
+                    : '<span style="color:var(--text-secondary)">—</span>';
+                const activity = [];
+                if (ipObj.log_count) activity.push(`${ipObj.log_count.toLocaleString('de-DE')} logs`);
+                if (ipObj.iface_count) activity.push(`${ipObj.iface_count} ifaces`);
+                const wlCell = !ipObj.whitelisted
+                    ? `<button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="${escapeAttr(t('firewalls.tipWhitelistThisIp'))}">+wl</button>`
+                    : `<span style="color:var(--accent-green);font-size:.8rem">✓</span>`;
+                return `<tr${isWan ? ' style="background:rgba(239,68,68,.05)"' : ''}>
+                    <td>${wlIcon} <code style="font-size:.85rem">${escapeHtml(ipObj.ip)}</code></td>
+                    <td>${ipObj.iface_name ? '<strong>' + escapeHtml(ipObj.iface_name) + '</strong>' : '<span style="color:var(--text-secondary)">—</span>'}</td>
+                    <td>${zoneBadge}</td>
+                    <td>${sources || '<span style="color:var(--text-secondary)">—</span>'}</td>
+                    <td style="color:var(--text-secondary);font-size:.78rem">${activity.join(' · ') || '—'}</td>
+                    <td>${wlCell}</td>
+                </tr>`;
             }).join('');
 
+            const detailRow = `<tr class="fw-detail filter-hidden"><td colspan="9" style="background:rgba(0,0,0,.15);padding:.3rem .6rem .5rem 2.2rem">
+                <table class="table table-sm align-middle mb-0" style="font-size:.85rem">
+                    <thead><tr>
+                        <th>IP</th><th>${t('firewalls.deviceIface')}</th><th>${t('firewalls.deviceZone')}</th>
+                        <th>${t('firewalls.colSources')}</th><th>${t('firewalls.colActivity')}</th><th>${t('firewalls.colWhitelist')}</th>
+                    </tr></thead>
+                    <tbody>${ipRows}</tbody>
+                </table></td></tr>`;
+
+            // --- Summary row (click to expand) ---
             const locCell = escapeHtml([fw.country, fw.city].filter(Boolean).join(', ') || '—');
             const lastLog = fw.last_log ? formatTime(fw.last_log) : '—';
             const lastFlow = fw.last_flow ? formatTime(fw.last_flow) : '—';
-
-            // Click an interface count in the row → show interfaces across all IPs of this firewall
-            const ipsCsv = (fw.ips || []).map(x => x.ip).join(',');
             const ifaceLink = fw.iface_count > 0
                 ? `<button class="osint-btn" onclick="showIfacesForFw('${escapeAttr(ipsCsv)}', '${escapeAttr(fw.name || fw.ips[0]?.ip || '?')}')">${fw.iface_count} 🔍</button>`
                 : '0';
@@ -178,10 +195,15 @@ async function refreshFirewalls() {
             const fwLabel = fw.name
                 ? `<strong>${escapeHtml(fw.name)}</strong>`
                 : `<em>${t('firewalls.unnamed')}</em>`;
-            return `
-                <tr>
-                    <td>${fwLabel}<div class="ip-country" style="font-size:.72rem">${fw.ip_count} IP${fw.ip_count === 1 ? '' : 's'}</div></td>
-                    <td>${ipBlocks}</td>
+            const wanPreview = wanIps.length
+                ? wanIps.map(x => `<code style="font-size:.82rem">${escapeHtml(x.ip)}</code>`).join(' ') +
+                  ` <span class="ip-country" style="font-size:.64rem;background:rgba(239,68,68,.16);color:var(--accent-red)">WAN</span>`
+                : `<span style="color:var(--text-secondary);font-size:.8rem">${fw.ip_count} IP${fw.ip_count === 1 ? '' : 's'}</span>`;
+
+            const summaryRow = `<tr class="fw-row" style="cursor:pointer" onclick="toggleFwRow(this, event)" title="${escapeAttr(t('firewalls.expandHint'))}">
+                    <td><span class="fw-caret" style="display:inline-block;width:1em;color:var(--text-secondary)">▸</span> ${fwLabel}
+                        <div class="ip-country" style="font-size:.72rem;margin-left:1.3em">${fw.ip_count} IP${fw.ip_count === 1 ? '' : 's'}</div></td>
+                    <td>${wanPreview}</td>
                     <td>${locCell}</td>
                     <td>${ifaceLink}</td>
                     <td>${(fw.log_count || 0).toLocaleString('de-DE')}</td>
@@ -190,6 +212,7 @@ async function refreshFirewalls() {
                     <td>${wlSummary}</td>
                     <td>${actions.join(' ') || '<span class="ack-label">—</span>'}</td>
                 </tr>`;
+            return summaryRow + detailRow;
         }).join('');
     } catch (err) {
         console.error('Firewalls update failed:', err);
@@ -361,16 +384,36 @@ function formatBytes(b) {
 
 // escapeHtml() and escapeAttr() live in js/common.js
 
-// generic table filter from existing pattern
+// Expand/collapse a firewall row to reveal its per-IP detail table. Ignore
+// clicks that land on an action button inside the summary row.
+function toggleFwRow(row, ev) {
+    if (ev && ev.target.closest('button, a, .block-link, .ack-btn, .osint-btn')) return;
+    const detail = row.nextElementSibling;
+    if (!detail || !detail.classList.contains('fw-detail')) return;
+    const expanded = !row.classList.contains('expanded');
+    row.classList.toggle('expanded', expanded);
+    detail.classList.toggle('filter-hidden', !expanded);
+    const caret = row.querySelector('.fw-caret');
+    if (caret) caret.textContent = expanded ? '▾' : '▸';
+}
+
+// Filter matches a firewall on its own text AND its (collapsed) IP detail, so
+// you can search by an interface IP even before expanding. The detail row only
+// shows when its firewall matches AND is expanded.
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('input[data-filter-for]').forEach(input => {
         const tbody = document.getElementById(input.dataset.filterFor);
         if (!tbody) return;
         input.addEventListener('input', () => {
-            const t = (input.value || '').toLowerCase().trim();
-            tbody.querySelectorAll(':scope > tr').forEach(tr => {
-                const match = !t || tr.textContent.toLowerCase().includes(t);
-                tr.classList.toggle('filter-hidden', !match);
+            const term = (input.value || '').toLowerCase().trim();
+            tbody.querySelectorAll(':scope > tr.fw-row').forEach(row => {
+                const detail = row.nextElementSibling;
+                const hay = (row.textContent + (detail && detail.classList.contains('fw-detail') ? detail.textContent : '')).toLowerCase();
+                const match = !term || hay.includes(term);
+                row.classList.toggle('filter-hidden', !match);
+                if (detail && detail.classList.contains('fw-detail')) {
+                    detail.classList.toggle('filter-hidden', !match || !row.classList.contains('expanded'));
+                }
             });
         });
     });

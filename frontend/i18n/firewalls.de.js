@@ -23,6 +23,9 @@ window.I18N.de.firewalls = {
     colLogs: "Logs ∑",
     colLastLog: "Letzter Log",
     colLastFlow: "Letzter Flow",
+    expandHint: "Zum Auf-/Zuklappen klicken",
+    colSources: "Quellen",
+    colActivity: "Aktivität",
     colWhitelist: "Whitelist",
     colActions: "Aktionen",
 

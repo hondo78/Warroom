@@ -3004,9 +3004,18 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
             fw["country"] = rec["country"]; fw["city"] = rec["city"]
             fw["lat"] = rec["lat"]; fw["lon"] = rec["lon"]
 
-    # Sort each firewall's IP list deterministically (location IPs first)
+    # Sort each firewall's IP list: WAN IPs first, then by numeric IP address.
+    def _ip_octets(ip: str) -> tuple:
+        try:
+            return tuple(int(o) for o in str(ip).split("."))
+        except Exception:
+            return (999, 999, 999, 999)
+
     for fw in grouped.values():
-        fw["ips"].sort(key=lambda x: (not ("location" in x["sources"]), -(x["log_count"] + x["iface_count"]), x["ip"]))
+        fw["ips"].sort(key=lambda x: (
+            0 if (x.get("zone") or "").upper() == "WAN" else 1,
+            _ip_octets(x["ip"]),
+        ))
 
     items = sorted(grouped.values(), key=lambda r: r["log_count"] + r["iface_count"], reverse=True)
     return {"items": items}

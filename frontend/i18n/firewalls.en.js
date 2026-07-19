@@ -23,6 +23,9 @@ window.I18N.en.firewalls = {
     colLogs: "Logs ∑",
     colLastLog: "Last log",
     colLastFlow: "Last flow",
+    expandHint: "Click to expand/collapse",
+    colSources: "Sources",
+    colActivity: "Activity",
     colWhitelist: "Whitelist",
     colActions: "Actions",
 
