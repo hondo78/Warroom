@@ -539,6 +539,29 @@ _MIGRATIONS = [
     # Aggregate that concatenates arrays across grouped rows (Postgres has no
     # built-in). Used to union the per-day metadata arrays at query time.
     "CREATE OR REPLACE AGGREGATE array_cat_agg(anycompatiblearray) (sfunc = array_cat, stype = anycompatiblearray)",
+    # --- AI chat sessions ----------------------------------------------------
+    # Persist chat conversations so old sessions can be resumed. Each session has
+    # its own message history; a new session starts with a fresh, empty context.
+    """
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id BIGSERIAL PRIMARY KEY,
+        session_id BIGINT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tool TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, id)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC)",
 ]
 
 

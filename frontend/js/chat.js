@@ -1,14 +1,20 @@
-const _chatHistory = [];  // [{role:'user'|'assistant', content}]
+// AI chat with persisted sessions. Each session has its own context; a new
+// session starts fresh (empty context). The server stores the history — the
+// client only tracks which session is active.
+let _currentSession = null;   // null = a new, unsaved session (fresh context)
 
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('chatInput');
     const send = document.getElementById('chatSend');
-    botMsg(t('chat.greeting'));
 
     send.addEventListener('click', submit);
     input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
     document.querySelectorAll('.chip').forEach(c =>
         c.addEventListener('click', () => { input.value = c.dataset.cmd; submit(); }));
+    document.getElementById('newChatBtn').addEventListener('click', newChat);
+
+    loadSessions();
+    newChat();   // start every visit with a fresh context
 
     async function submit() {
         const msg = input.value.trim();
@@ -21,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const r = await fetch('/api/chat/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg, history: _chatHistory.slice(-8) }),
+                body: JSON.stringify({ message: msg, session_id: _currentSession }),
             });
             thinking.remove();
             // A slow chat can hit a proxy 502/504 whose body is HTML, not JSON —
@@ -33,11 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-            const reply = d.reply || t('chat.no_reply');
-            botMsg(reply);
-            // Only free conversation feeds the LLM history; command results don't.
-            _chatHistory.push({ role: 'user', content: msg });
-            if (d.tool === 'chat') _chatHistory.push({ role: 'assistant', content: reply });
+            botMsg(d.reply || t('chat.no_reply'));
+            _currentSession = d.session_id || _currentSession;
+            // Refresh the list so a new session appears / titles + order update.
+            loadSessions();
         } catch (err) {
             thinking.remove();
             botMsg(t('chat.error', { msg: err.message }));
@@ -47,6 +52,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 });
+
+function newChat() {
+    _currentSession = null;
+    document.getElementById('chatLog').innerHTML = '';
+    botMsg(t('chat.greeting'));
+    _markActive();
+    const inp = document.getElementById('chatInput');
+    if (inp) inp.focus();
+}
+
+async function loadSessions() {
+    const list = document.getElementById('sessionList');
+    if (!list) return;
+    try {
+        const r = await fetch('/api/chat/sessions');
+        const d = await r.json();
+        const sessions = d.sessions || [];
+        if (!sessions.length) {
+            list.innerHTML = `<div class="session-empty">${t('chat.no_sessions')}</div>`;
+            return;
+        }
+        list.innerHTML = '';
+        sessions.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'session-item' + (s.id === _currentSession ? ' active' : '');
+            item.dataset.id = s.id;
+            const title = document.createElement('span');
+            title.className = 's-title';
+            title.textContent = s.title || 'Chat';
+            title.title = `${s.title || 'Chat'} · ${s.messages} ${t('chat.msg_count')}`;
+            title.addEventListener('click', () => openSession(s.id));
+            const del = document.createElement('span');
+            del.className = 's-del';
+            del.innerHTML = '<i class="bi bi-trash"></i>';
+            del.title = t('common.delete') || 'Delete';
+            del.addEventListener('click', ev => { ev.stopPropagation(); deleteSession(s.id); });
+            item.append(title, del);
+            list.appendChild(item);
+        });
+    } catch (e) { /* ignore */ }
+}
+
+async function openSession(id) {
+    try {
+        const r = await fetch(`/api/chat/sessions/${id}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        _currentSession = id;
+        const log = document.getElementById('chatLog');
+        log.innerHTML = '';
+        (d.messages || []).forEach(m => {
+            if (m.role === 'user') userMsg(m.content);
+            else botMsg(m.content);
+        });
+        if (!(d.messages || []).length) botMsg(t('chat.greeting'));
+        _markActive();
+    } catch (e) { /* ignore */ }
+}
+
+async function deleteSession(id) {
+    try {
+        await fetch(`/api/chat/sessions/${id}`, { method: 'DELETE' });
+        if (id === _currentSession) newChat();
+        loadSessions();
+    } catch (e) { /* ignore */ }
+}
+
+function _markActive() {
+    document.querySelectorAll('.session-item').forEach(el =>
+        el.classList.toggle('active', Number(el.dataset.id) === _currentSession));
+}
 
 function _md(s) {
     // minimal, safe markdown: escape then apply **bold** and `code`

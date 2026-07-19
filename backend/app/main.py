@@ -4773,17 +4773,106 @@ async def osint_lookup(ip: str, force: bool = Query(default=False)):
 
 class ChatCommandIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
-    # Optional short conversation history [{role, content}] for the free chat.
+    # Persisted-session id. When omitted a new session (fresh context) is created;
+    # its history is loaded server-side, so the client no longer sends `history`.
+    session_id: int | None = None
+    # Legacy: an optional client-side history (used only when no session_id).
     history: list[dict] | None = None
 
 
 @app.post("/api/chat/command")
-async def chat_command(body: ChatCommandIn):
+async def chat_command(body: ChatCommandIn, db: AsyncSession = Depends(get_db)):
     """Natural-language input from the in-app chat: a recognised command (block /
     isolate / quarantine / OSINT / stats) is executed, otherwise it's a free
-    conversation with the analyst-persona LLM."""
+    conversation with the analyst-persona LLM.
+
+    Conversations are persisted as sessions. With a `session_id` the turn is
+    appended to that session and its stored messages provide the LLM context;
+    without one a new session (fresh, empty context) is created."""
     from app.command_service import run_command
-    return await run_command(body.message, actor="chat", history=body.history)
+    from app.models import ChatSession, ChatMessage
+
+    session = None
+    if body.session_id:
+        session = (await db.execute(
+            select(ChatSession).where(ChatSession.id == body.session_id)
+        )).scalar_one_or_none()
+    if session is None:
+        session = ChatSession(title=(body.message or "").strip()[:80] or "Chat")
+        db.add(session)
+        await db.flush()  # assign id
+
+    # LLM context = THIS session's prior messages only (fresh context per session).
+    # Include user turns and conversational assistant turns (not command outputs).
+    prior = (await db.execute(
+        select(ChatMessage).where(ChatMessage.session_id == session.id).order_by(ChatMessage.id)
+    )).scalars().all()
+    history = [{"role": m.role, "content": m.content} for m in prior
+               if m.role == "user" or (m.role == "assistant" and (m.tool or "chat") == "chat")]
+
+    result = await run_command(body.message, actor="chat", history=history[-16:])
+    reply = result.get("reply") or ""
+
+    db.add(ChatMessage(session_id=session.id, role="user", content=body.message[:8000]))
+    db.add(ChatMessage(session_id=session.id, role="assistant",
+                       content=reply[:16000], tool=result.get("tool")))
+    session.updated_at = datetime.now(timezone.utc)
+    if not session.title:
+        session.title = (body.message or "").strip()[:80] or "Chat"
+    await db.commit()
+
+    result["session_id"] = session.id
+    return result
+
+
+@app.get("/api/chat/sessions")
+async def list_chat_sessions(db: AsyncSession = Depends(get_db)):
+    """Saved chat sessions, newest first, with their message count."""
+    from app.models import ChatSession, ChatMessage
+    rows = (await db.execute(
+        select(ChatSession.id, ChatSession.title, ChatSession.updated_at,
+               func.count(ChatMessage.id).label("n"))
+        .outerjoin(ChatMessage, ChatMessage.session_id == ChatSession.id)
+        .group_by(ChatSession.id)
+        .order_by(ChatSession.updated_at.desc())
+        .limit(200)
+    )).all()
+    return {"sessions": [
+        {"id": r[0], "title": r[1] or "Chat",
+         "updated_at": r[2].isoformat() if r[2] else None, "messages": int(r[3] or 0)}
+        for r in rows
+    ]}
+
+
+@app.get("/api/chat/sessions/{session_id}")
+async def get_chat_session(session_id: int, db: AsyncSession = Depends(get_db)):
+    """A session's full message history, to resume it."""
+    from app.models import ChatSession, ChatMessage
+    s = (await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id)
+    )).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    msgs = (await db.execute(
+        select(ChatMessage).where(ChatMessage.session_id == session_id).order_by(ChatMessage.id)
+    )).scalars().all()
+    return {
+        "id": s.id, "title": s.title or "Chat",
+        "messages": [{"role": m.role, "content": m.content, "tool": m.tool} for m in msgs],
+    }
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a chat session (its messages cascade)."""
+    from app.models import ChatSession
+    s = (await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id)
+    )).scalar_one_or_none()
+    if s:
+        await db.delete(s)
+        await db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/chat/default-persona")

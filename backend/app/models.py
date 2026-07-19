@@ -580,3 +580,25 @@ class OsintUsage(Base):
     bucket_day = Column(DateTime(timezone=True), primary_key=True)
     count = Column(BigInteger, nullable=False, default=0)
     last_called_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class ChatSession(Base):
+    """A persisted AI-chat conversation. New sessions start with empty context;
+    old ones are resumed by loading their messages."""
+    __tablename__ = "chat_sessions"
+
+    id = Column(BigInteger, primary_key=True)
+    title = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(BigInteger, primary_key=True)
+    session_id = Column(BigInteger, nullable=False, index=True)
+    role = Column(Text, nullable=False)          # 'user' | 'assistant'
+    content = Column(Text, nullable=False)
+    tool = Column(Text)                          # resolved tool for assistant turns
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
