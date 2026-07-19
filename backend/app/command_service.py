@@ -57,7 +57,11 @@ Erkenne IPs, Domains/FQDNs und Hostnamen aus dem Text. blockiere/sperre + IP ->
 block_ip; + Domain -> block_domain. isoliere/isolate PC -> isolate_endpoint.
 quarantaene/quarantine -> quarantine_list. osint/pruefe/info zu -> osint.
 report/statistik/stats/zusammenfassung -> stats_report. hilfe/help -> help.
-Nur das JSON, keine Erklaerung."""
+WICHTIG: Fragen, die Daten/Logs ansehen, durchsuchen, zaehlen oder auswerten
+wollen (z.B. „zeige/suche/welche/liste/wie viele Verbindungen/Logs/Events …",
+auch zu INTERNEN IPs), sind KEIN osint/block -> tool "unknown" (der Chat-Assistent
+beantwortet sie mit einer DB-Abfrage). osint nur bei ausdruecklicher Reputations-/
+Bewertungsanfrage zu EINEM Indikator. Nur das JSON, keine Erklaerung."""
 
 _SYSTEM_PROMPT_EN = """You are the command parser for Warroom (security operations).
 Map the user's message to EXACTLY ONE tool and extract the arguments.
@@ -78,7 +82,11 @@ Recognise IPs, domains/FQDNs and hostnames from the text. block + IP ->
 block_ip; + domain -> block_domain. isolate a PC -> isolate_endpoint.
 quarantine -> quarantine_list. osint/check/info about -> osint.
 report/statistics/stats/summary -> stats_report. help -> help.
-Only the JSON, no explanation."""
+IMPORTANT: questions that view, search, count or analyse data/logs (e.g.
+"show/search/which/list/how many connections/logs/events …", including for
+INTERNAL IPs) are NOT osint/block -> tool "unknown" (the chat assistant answers
+them with a DB query). Use osint only for an explicit reputation/assessment
+request about a single indicator. Only the JSON, no explanation."""
 
 DEFAULT_ANALYST_PROMPT = """Du bist „Warroom Analyst", ein erfahrener Security-Operations-Analyst (SOC)
 als Assistent in der Warroom-Plattform (Sophos-zentriert: Firewall, Endpoints,
@@ -219,13 +227,21 @@ def _keyword_intent(text: str) -> dict[str, Any]:
             return {"tool": "osint", "args": {"value": ips[0], "type": "ip"}}
         if domains:
             return {"tool": "osint", "args": {"value": domains[0], "type": "domain"}}
-    # last resort: a bare indicator with no verb
-    if urls:
-        return {"tool": "block_url", "args": {"url": urls[0]}}
-    if ips:
-        return {"tool": "osint", "args": {"value": ips[0], "type": "ip"}}
-    if domains:
-        return {"tool": "osint", "args": {"value": domains[0], "type": "domain"}}
+    # Last resort: a BARE indicator with no verb (user just pasted "1.2.3.4" or
+    # "evil.com") → treat as an OSINT/blocklist target. But a full question that
+    # merely mentions an IP — e.g. "show connections to 10.0.1.5", "which logs
+    # hit 192.168.1.10" — must NOT be hijacked into an OSINT lookup (which would
+    # then reject the private IP). Route those to the conversational LLM instead.
+    residual = text
+    for ind in (urls + ips + domains):
+        residual = residual.replace(ind, " ")
+    if len(residual.split()) <= 1:
+        if urls:
+            return {"tool": "block_url", "args": {"url": urls[0]}}
+        if ips:
+            return {"tool": "osint", "args": {"value": ips[0], "type": "ip"}}
+        if domains:
+            return {"tool": "osint", "args": {"value": domains[0], "type": "domain"}}
     return {"tool": "unknown", "args": {}}
 
 
