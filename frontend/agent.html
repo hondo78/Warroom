@@ -119,7 +119,7 @@
                             <!-- ============================================== -->
                             <!-- ZEILE 1 — Pipeline (links → rechts)            -->
                             <!-- ============================================== -->
-                            <text x="20" y="22" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.05em">PIPELINE — JEDE QUELLE GEHT DURCH DASSELBE LLM</text>
+                            <text x="20" y="22" font-size="11" font-weight="700" fill="#94a3b8" letter-spacing="0.05em" data-i18n="agent.wf_diagram_header">PIPELINE — JEDE QUELLE GEHT DURCH DASSELBE LLM</text>
 
                             <!-- Quellen (Spalte 1) -->
                             <g font-size="12" fill="#e2e8f0">
@@ -143,11 +143,11 @@
                             <!-- Candidate-Filter (Spalte 2) -->
                             <g font-size="12" fill="#e2e8f0">
                                 <rect x="220" y="100" width="170" height="110" rx="8" fill="#0a0e17" stroke="#3b82f6" stroke-width="2" stroke-dasharray="3 2"/>
-                                <text x="305" y="122" text-anchor="middle" font-weight="600" fill="#3b82f6">Candidate-Filter</text>
-                                <text x="305" y="142" text-anchor="middle" fill="#94a3b8" font-size="10">• Whitelist (eigene FW)</text>
-                                <text x="305" y="158" text-anchor="middle" fill="#94a3b8" font-size="10">• Privat / Reserved-IPs</text>
+                                <text x="305" y="122" text-anchor="middle" font-weight="600" fill="#3b82f6" data-i18n="agent.wf_candidate_filter">Candidate-Filter</text>
+                                <text x="305" y="142" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_cf_whitelist">• Whitelist (eigene FW)</text>
+                                <text x="305" y="158" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_cf_private">• Privat / Reserved-IPs</text>
                                 <text x="305" y="174" text-anchor="middle" fill="#94a3b8" font-size="10">• Cooldown (1h/24h)</text>
-                                <text x="305" y="194" text-anchor="middle" fill="#22c55e" font-size="10">→ nur überlebende IPs</text>
+                                <text x="305" y="194" text-anchor="middle" fill="#22c55e" font-size="10" data-i18n="agent.wf_cf_surviving">→ nur überlebende IPs</text>
                             </g>
 
                             <!-- OSINT-Enrichment (Spalte 3) -->
@@ -163,17 +163,17 @@
                             <!-- LLM-Box mit 4 Prompts (Spalte 4) -->
                             <g font-size="12" fill="#e2e8f0">
                                 <rect x="640" y="40"  width="280" height="240" rx="10" fill="#0a0e17" stroke="#8b5cf6" stroke-width="2"/>
-                                <text x="780" y="65"  text-anchor="middle" font-weight="700" fill="#8b5cf6">LLM-Entscheider</text>
-                                <text x="780" y="84"  text-anchor="middle" fill="#94a3b8" font-size="11">OpenAI-kompatibel · LMStudio</text>
+                                <text x="780" y="65"  text-anchor="middle" font-weight="700" fill="#8b5cf6" data-i18n="agent.wf_llm_decider">LLM-Entscheider</text>
+                                <text x="780" y="84"  text-anchor="middle" fill="#94a3b8" font-size="11" data-i18n="agent.wf_openai_compat">OpenAI-kompatibel · LMStudio</text>
                                 <text x="780" y="100" text-anchor="middle" fill="#94a3b8" font-size="10" id="wfModel">(Modell: ?)</text>
 
                                 <!-- Input-Payload -->
-                                <text x="780" y="122" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="600">JSON-Eingabe</text>
+                                <text x="780" y="122" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="600" data-i18n="agent.wf_json_input">JSON-Eingabe</text>
                                 <text x="780" y="138" text-anchor="middle" fill="#94a3b8" font-size="10">source_type · source_ip · context</text>
                                 <text x="780" y="153" text-anchor="middle" fill="#94a3b8" font-size="10">osint · thresholds · allowed_actions</text>
 
                                 <!-- 4 Prompts -->
-                                <text x="780" y="178" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="600">System-Prompt pro Quelle</text>
+                                <text x="780" y="178" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="600" data-i18n="agent.wf_system_prompt">System-Prompt pro Quelle</text>
                                 <rect x="660" y="188" width="58" height="22" rx="4" fill="#1a2332" stroke="#94a3b8" stroke-width="0.8"/>
                                 <text x="689" y="203" text-anchor="middle" fill="#e2e8f0" font-size="10">Alert</text>
                                 <rect x="724" y="188" width="58" height="22" rx="4" fill="#1a2332" stroke="#94a3b8" stroke-width="0.8"/>
@@ -182,10 +182,10 @@
                                 <text x="817" y="203" text-anchor="middle" fill="#e2e8f0" font-size="10">IPS</text>
                                 <rect x="852" y="188" width="58" height="22" rx="4" fill="#1a2332" stroke="#94a3b8" stroke-width="0.8"/>
                                 <text x="881" y="203" text-anchor="middle" fill="#e2e8f0" font-size="10">Login</text>
-                                <text x="780" y="227" text-anchor="middle" fill="#94a3b8" font-size="9">admin-editierbar — /admin.html</text>
+                                <text x="780" y="227" text-anchor="middle" fill="#94a3b8" font-size="9" data-i18n="agent.wf_admin_editable">admin-editierbar — /admin.html</text>
 
                                 <!-- Output -->
-                                <text x="780" y="253" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="600">JSON-Antwort</text>
+                                <text x="780" y="253" text-anchor="middle" fill="#22c55e" font-size="10" font-weight="600" data-i18n="agent.wf_json_response">JSON-Antwort</text>
                                 <text x="780" y="269" text-anchor="middle" fill="#94a3b8" font-size="10">action · args · reasoning</text>
                             </g>
 
@@ -193,10 +193,10 @@
                             <g font-size="12" fill="#e2e8f0">
                                 <rect x="950" y="100" width="170" height="110" rx="8" fill="#1a2332" stroke="#f59e0b" stroke-width="1.5"/>
                                 <text x="1035" y="124" text-anchor="middle" font-weight="600">Parse + Validate</text>
-                                <text x="1035" y="144" text-anchor="middle" fill="#94a3b8" font-size="10">• &lt;think&gt;-Block strippen</text>
-                                <text x="1035" y="160" text-anchor="middle" fill="#94a3b8" font-size="10">• letzten {…}-Block wählen</text>
+                                <text x="1035" y="144" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_strip_think">• &lt;think&gt;-Block strippen</text>
+                                <text x="1035" y="160" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_pick_block">• letzten {…}-Block wählen</text>
                                 <text x="1035" y="176" text-anchor="middle" fill="#94a3b8" font-size="10">• action ∈ ALLOWED?</text>
-                                <text x="1035" y="194" text-anchor="middle" fill="#ef4444" font-size="10">Fehler → Decision = failed</text>
+                                <text x="1035" y="194" text-anchor="middle" fill="#ef4444" font-size="10" data-i18n="agent.wf_error_failed">Fehler → Decision = failed</text>
                             </g>
 
                             <!-- Persistenz-Container (Spalte 6) -->
@@ -228,7 +228,7 @@
                             <g font-size="12" fill="#e2e8f0">
                                 <polygon points="510,360 600,320 690,360 600,400" fill="#1a2332" stroke="#94a3b8" stroke-width="1.5"/>
                                 <text x="600" y="358" text-anchor="middle" font-size="11" font-weight="600">auto_execute?</text>
-                                <text x="600" y="374" text-anchor="middle" font-size="9" fill="#94a3b8">(Blocks immer manuell)</text>
+                                <text x="600" y="374" text-anchor="middle" font-size="9" fill="#94a3b8" data-i18n="agent.wf_blocks_manual">(Blocks immer manuell)</text>
                             </g>
 
                             <!-- Pending Review -->
@@ -242,7 +242,7 @@
                             <g font-size="12" fill="#e2e8f0">
                                 <rect x="770" y="335" width="220" height="60" rx="8" fill="#1a2332" stroke="#22c55e" stroke-width="2" stroke-dasharray="4 2"/>
                                 <text x="880" y="357" text-anchor="middle" font-weight="700" fill="#22c55e">🛡 Whitelist Hard-Guard</text>
-                                <text x="880" y="376" text-anchor="middle" fill="#94a3b8" font-size="11">eigene FW-IPs niemals blockierbar</text>
+                                <text x="880" y="376" text-anchor="middle" fill="#94a3b8" font-size="11" data-i18n="agent.wf_fw_never_block">eigene FW-IPs niemals blockierbar</text>
                             </g>
 
                             <!-- blocked_ips → /ioc_IP -->
@@ -256,7 +256,7 @@
                             <g font-size="12" fill="#e2e8f0">
                                 <rect x="1030" y="430" width="240" height="50" rx="8" fill="#1a2332" stroke="#ef4444" stroke-width="1"/>
                                 <text x="1150" y="450" text-anchor="middle" font-weight="600" font-size="11">block_subnet</text>
-                                <text x="1150" y="468" text-anchor="middle" fill="#94a3b8" font-size="10">/24 = 254 Hosts auf einmal</text>
+                                <text x="1150" y="468" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_subnet_hosts">/24 = 254 Hosts auf einmal</text>
 
                                 <rect x="1030" y="490" width="240" height="50" rx="8" fill="#3b82f6" fill-opacity=".12" stroke="#3b82f6" stroke-width="1"/>
                                 <text x="1150" y="510" text-anchor="middle" font-weight="600" font-size="11">acknowledge</text>
@@ -264,7 +264,7 @@
 
                                 <rect x="1030" y="550" width="240" height="50" rx="8" fill="#94a3b8" fill-opacity=".08" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 2"/>
                                 <text x="1150" y="570" text-anchor="middle" font-weight="600" font-size="11">no_action</text>
-                                <text x="1150" y="588" text-anchor="middle" fill="#94a3b8" font-size="10">nur Audit-Eintrag</text>
+                                <text x="1150" y="588" text-anchor="middle" fill="#94a3b8" font-size="10" data-i18n="agent.wf_audit_only">nur Audit-Eintrag</text>
                             </g>
 
                             <!-- agent_decisions → Diamond -->
@@ -276,13 +276,13 @@
                             <g stroke="#22c55e" stroke-width="1.5" fill="none" marker-end="url(#arrowgreen)">
                                 <path d="M 690 360 L 770 365"/>
                             </g>
-                            <text x="715" y="352" font-size="10" fill="#22c55e">ja · auto</text>
+                            <text x="715" y="352" font-size="10" fill="#22c55e" data-i18n="agent.wf_yes_auto">ja · auto</text>
 
                             <!-- Diamond → Pending (nein) -->
                             <g stroke="#f59e0b" stroke-width="1.5" fill="none" marker-end="url(#arrow)">
                                 <path d="M 510 360 L 410 365"/>
                             </g>
-                            <text x="430" y="352" font-size="10" fill="#f59e0b">nein</text>
+                            <text x="430" y="352" font-size="10" fill="#f59e0b" data-i18n="agent.wf_no">nein</text>
 
                             <!-- Pending → Whitelist (approved) -->
                             <g stroke="#22c55e" stroke-width="1.5" fill="none" marker-end="url(#arrowgreen)">
@@ -395,13 +395,13 @@
 <div class="modal-overlay" id="osintModal">
     <div class="modal alert-detail-modal">
         <div class="alert-detail-header">
-            <h3 id="osintModalTitle">OSINT-Check</h3>
-            <button class="modal-close" onclick="closeOsint()" title="Schliessen">×</button>
+            <h3 id="osintModalTitle" data-i18n="osint.modal_title">OSINT-Check</h3>
+            <button class="modal-close" onclick="closeOsint()" data-i18n-title="common.close" title="Schliessen">×</button>
         </div>
-        <div id="osintModalBody" class="alert-detail-body">Wird geladen…</div>
+        <div id="osintModalBody" class="alert-detail-body" data-i18n="common.loading">Wird geladen…</div>
         <div class="modal-actions">
-            <button onclick="reloadOsint()">Neu prüfen (Cache umgehen)</button>
-            <button onclick="closeOsint()">Schliessen</button>
+            <button onclick="reloadOsint()" data-i18n="osint.recheck_cache">Neu prüfen (Cache umgehen)</button>
+            <button onclick="closeOsint()" data-i18n="common.close">Schliessen</button>
         </div>
     </div>
 </div>

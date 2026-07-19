@@ -225,13 +225,13 @@
 
                 <!-- Bubble: x=Achse X, y=Achse Y, Blasengröße=Achse Z, Farbe=Anomalie -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0" id="anScatterTitle">Bubble-Ansicht</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" id="anScatterTitle" data-i18n="fwAnomalies.scatter_view">Bubble-Ansicht</h3></div>
                     <div class="card-body"><canvas id="anScatter" style="max-height:360px"></canvas></div>
                 </div>
 
                 <!-- 3-D scatter: rotatable point cloud over the 3 chosen dimensions -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0" id="an3dTitle">3-D-Ansicht</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" id="an3dTitle" data-i18n="fwAnomalies.scatter3d_view">3-D-Ansicht</h3></div>
                     <div class="card-body">
                         <p class="admin-hint" style="margin:0 0 .5rem" data-i18n-html="fwAnomalies.scatter3d_hint">
                             Jeder Punkt ist eine IP im Raum der <strong>drei gewählten Dimensionen</strong>
@@ -263,8 +263,8 @@
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr id="anSortRow">
                                     <th data-sort="score" style="cursor:pointer;user-select:none"><span data-i18n="common.score">Score</span> <span class="sort-ind"></span></th>
-                                    <th data-sort="ip" style="cursor:pointer;user-select:none"><span id="anIpHdr">Quell-IP</span> <span class="sort-ind"></span></th>
-                                    <th data-sort="peer" style="cursor:pointer;user-select:none" title="Haupt-Gegenstelle (Top nach Volumen) — Klick auf die Zeile zeigt alle Verbindungen" data-i18n-title="fwAnomalies.peer_hdr_title"><span id="anPeerHdr">Ziel-IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="ip" style="cursor:pointer;user-select:none"><span id="anIpHdr" data-i18n="fwAnomalies.source_ip">Quell-IP</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="peer" style="cursor:pointer;user-select:none" title="Haupt-Gegenstelle (Top nach Volumen) — Klick auf die Zeile zeigt alle Verbindungen" data-i18n-title="fwAnomalies.peer_hdr_title"><span id="anPeerHdr" data-i18n="common.dest_ip">Ziel-IP</span> <span class="sort-ind"></span></th>
                                     <th data-sort="country" style="cursor:pointer;user-select:none"><span data-i18n="common.country">Land</span> <span class="sort-ind"></span></th>
                                     <th data-sort="bytes" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.col_volume">Volumen</span> <span class="sort-ind"></span></th>
                                     <th data-sort="flows" style="cursor:pointer;user-select:none">Flows <span class="sort-ind"></span></th>

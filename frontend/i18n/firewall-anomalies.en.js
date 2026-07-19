@@ -54,6 +54,8 @@ window.I18N.en.fwAnomalies = {
     focus_all_dst: "All destination IPs (global)",
 
     // chart titles (interpolated)
+    scatter_view: "Bubble view",
+    scatter3d_view: "3-D view",
     scatter_title: "Bubble: {x} × {y} · bubble size = {z} · red = anomaly",
     scatter3d_title: "3-D view — {x} × {y} × {z} (red = anomaly)",
     scatter3d_hint: "Each point is an IP in the space of the <strong>three chosen dimensions</strong> (Axis X, Y, Z). <strong>Red</strong> points are anomalies — they stand out from the normal range in this space. Use the mouse to <strong>rotate, zoom</strong> and hover over points for details (incl. country &amp; score).",

@@ -54,6 +54,8 @@ window.I18N.de.fwAnomalies = {
     focus_all_dst: "Alle Ziel-IPs (global)",
 
     // chart titles (interpolated)
+    scatter_view: "Bubble-Ansicht",
+    scatter3d_view: "3-D-Ansicht",
     scatter_title: "Bubble: {x} × {y} · Blasengröße = {z} · rot = Anomalie",
     scatter3d_title: "3-D-Ansicht — {x} × {y} × {z} (rot = Anomalie)",
     scatter3d_hint: "Jeder Punkt ist eine IP im Raum der <strong>drei gewählten Dimensionen</strong> (Achse X, Y, Z). <strong>Rote</strong> Punkte sind Anomalien — sie heben sich in diesem Raum vom Normalbereich ab. Mit der Maus <strong>drehen, zoomen</strong> und über Punkte fahren für Details (inkl. Land &amp; Score).",

@@ -31,6 +31,28 @@ window.I18N.de.agent = {
     legend_persist: "Persistierung / Review",
     legend_reject: "Reject / Audit / Sonst",
 
+    // workflow diagram (SVG labels)
+    wf_diagram_header: "PIPELINE — JEDE QUELLE GEHT DURCH DASSELBE LLM",
+    wf_candidate_filter: "Candidate-Filter",
+    wf_cf_whitelist: "• Whitelist (eigene FW)",
+    wf_cf_private: "• Privat / Reserved-IPs",
+    wf_cf_surviving: "→ nur überlebende IPs",
+    wf_llm_decider: "LLM-Entscheider",
+    wf_openai_compat: "OpenAI-kompatibel · LMStudio",
+    wf_json_input: "JSON-Eingabe",
+    wf_system_prompt: "System-Prompt pro Quelle",
+    wf_admin_editable: "admin-editierbar — /admin.html",
+    wf_json_response: "JSON-Antwort",
+    wf_strip_think: "• <think>-Block strippen",
+    wf_pick_block: "• letzten {…}-Block wählen",
+    wf_error_failed: "Fehler → Decision = failed",
+    wf_blocks_manual: "(Blocks immer manuell)",
+    wf_fw_never_block: "eigene FW-IPs niemals blockierbar",
+    wf_subnet_hosts: "/24 = 254 Hosts auf einmal",
+    wf_audit_only: "nur Audit-Eintrag",
+    wf_yes_auto: "ja · auto",
+    wf_no: "nein",
+
     // cards
     timeline_title: "Aktivität — Decisions pro Stunde (Agent vs. Mensch)",
     log_title: "Decision-Log",

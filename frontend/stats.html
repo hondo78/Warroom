@@ -20,14 +20,14 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 <select id="statsDays" class="form-select form-select-sm" style="width:auto" onchange="loadStats()">
-                    <option value="1">Heute</option>
-                    <option value="7" selected>Letzte 7 Tage</option>
-                    <option value="30">Letzte 30 Tage</option>
-                    <option value="90">Letzte 90 Tage</option>
+                    <option value="1" data-i18n="stats.range_today">Heute</option>
+                    <option value="7" selected data-i18n="stats.range_7d">Letzte 7 Tage</option>
+                    <option value="30" data-i18n="stats.range_30d">Letzte 30 Tage</option>
+                    <option value="90" data-i18n="stats.range_90d">Letzte 90 Tage</option>
                 </select>
-                <button class="btn btn-outline-secondary btn-sm" onclick="flushAndReload()" title="In-Memory-Counter sofort in die DB schreiben und Daten neu laden"><i class="bi bi-arrow-down-circle"></i> Flush+Reload</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="loadStats()"><i class="bi bi-arrow-clockwise"></i> Aktualisieren</button>
-                <a href="/admin.html#geoip" class="btn btn-outline-secondary btn-sm" title="Quota-Limits konfigurieren"><i class="bi bi-sliders"></i> Limits</a>
+                <button class="btn btn-outline-secondary btn-sm" onclick="flushAndReload()" data-i18n-title="stats.flush_reload_title" title="In-Memory-Counter sofort in die DB schreiben und Daten neu laden"><i class="bi bi-arrow-down-circle"></i> <span data-i18n="stats.flush_reload">Flush+Reload</span></button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadStats()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+                <a href="/admin.html#geoip" class="btn btn-outline-secondary btn-sm" data-i18n-title="stats.limits_title" title="Quota-Limits konfigurieren"><i class="bi bi-sliders"></i> <span data-i18n="stats.limits">Limits</span></a>
             </div>
         </div>
     </nav>
@@ -87,7 +87,7 @@
     <main class="app-main">
         <div class="app-content-header">
             <div class="container-fluid">
-                <h3 class="mb-0">📊 OSINT-API — Nutzung &amp; Kosten</h3>
+                <h3 class="mb-0" data-i18n="stats.page_title">📊 OSINT-API — Nutzung &amp; Kosten</h3>
             </div>
         </div>
 
@@ -96,8 +96,8 @@
 
                 <!-- Section-Tabs -->
                 <ul class="nav nav-tabs mb-3" role="tablist">
-                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOsint" type="button"><i class="bi bi-search"></i> OSINT-Provider</button></li>
-                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLlm" type="button"><i class="bi bi-cpu"></i> LLM</button></li>
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOsint" type="button"><i class="bi bi-search"></i> <span data-i18n="stats.tab_osint">OSINT-Provider</span></button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabLlm" type="button"><i class="bi bi-cpu"></i> <span data-i18n="stats.tab_llm">LLM</span></button></li>
                 </ul>
                 <div class="tab-content">
 
@@ -105,10 +105,10 @@
 
                 <!-- Global KPIs -->
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="kHeute">-</h3><p>Calls heute</p></div><div class="small-box-footer">echte API-Calls (ohne Cache)</div><span class="icon"><i class="bi bi-calendar-day"></i></span></div>
-                    <div class="small-box bg-info"><div class="inner"><h3 id="kMonat">-</h3><p>Calls diesen Monat</p></div><div class="small-box-footer">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="kCache">-</h3><p>Cache-Hit-Rate</p></div><div class="small-box-footer" id="kCacheTotal">— gespart</div><span class="icon"><i class="bi bi-lightning-charge"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="kWarn">-</h3><p>Provider nahe Limit</p></div><div class="small-box-footer">≥ 80 % Auslastung</div><span class="icon"><i class="bi bi-exclamation-triangle"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="kHeute">-</h3><p data-i18n="stats.calls_today">Calls heute</p></div><div class="small-box-footer" data-i18n="stats.real_calls_no_cache">echte API-Calls (ohne Cache)</div><span class="icon"><i class="bi bi-calendar-day"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="kMonat">-</h3><p data-i18n="stats.calls_month">Calls diesen Monat</p></div><div class="small-box-footer" data-i18n="stats.since_month_start">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="kCache">-</h3><p data-i18n="stats.cache_hit_rate">Cache-Hit-Rate</p></div><div class="small-box-footer" id="kCacheTotal" data-i18n="stats.kpi_saved">— gespart</div><span class="icon"><i class="bi bi-lightning-charge"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="kWarn">-</h3><p data-i18n="stats.providers_near_limit">Provider nahe Limit</p></div><div class="small-box-footer" data-i18n="stats.utilization_80">≥ 80 % Auslastung</div><span class="icon"><i class="bi bi-exclamation-triangle"></i></span></div>
                 </div>
 
                 <!-- Provider Cards -->
@@ -116,25 +116,25 @@
 
                 <!-- Trend chart -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Tagesverlauf — alle Provider</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.daily_trend_all">Tagesverlauf — alle Provider</h3></div>
                     <div class="card-body"><canvas id="trendChart" style="max-height:320px"></canvas></div>
                 </div>
 
                 <!-- Detail table -->
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Provider-Detail</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.provider_detail">Provider-Detail</h3></div>
                     <div class="card-body">
                         <div class="table-scroll" style="max-height:520px">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Provider</th>
-                                    <th class="text-end">Heute</th>
-                                    <th class="text-end">Diesen Monat</th>
-                                    <th>Tageslimit</th>
-                                    <th>Monatslimit</th>
-                                    <th class="text-end">Cache-Hit</th>
-                                    <th class="text-end">2xx / no_record / Fehler</th>
-                                    <th>Letzter Call</th>
+                                    <th data-i18n="stats.col_provider">Provider</th>
+                                    <th class="text-end" data-i18n="stats.col_today">Heute</th>
+                                    <th class="text-end" data-i18n="stats.col_this_month">Diesen Monat</th>
+                                    <th data-i18n="stats.col_daily_limit">Tageslimit</th>
+                                    <th data-i18n="stats.col_monthly_limit">Monatslimit</th>
+                                    <th class="text-end" data-i18n="stats.col_cache_hit">Cache-Hit</th>
+                                    <th class="text-end" data-i18n="stats.col_2xx_norecord_error">2xx / no_record / Fehler</th>
+                                    <th data-i18n="stats.col_last_call">Letzter Call</th>
                                 </tr></thead>
                                 <tbody id="providerTable"></tbody>
                             </table>
@@ -148,23 +148,23 @@
                 <div class="tab-pane fade" id="tabLlm">
 
                 <div class="dashboard-stat-grid mb-3">
-                    <div class="small-box bg-info"><div class="inner"><h3 id="llmHeute">-</h3><p>Calls heute</p></div><div class="small-box-footer">an /chat/completions</div><span class="icon"><i class="bi bi-chat-square-dots"></i></span></div>
-                    <div class="small-box bg-info"><div class="inner"><h3 id="llmMonat">-</h3><p>Calls diesen Monat</p></div><div class="small-box-footer">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
-                    <div class="small-box bg-success"><div class="inner"><h3 id="llmSuccess">-</h3><p>Erfolgsrate</p></div><div class="small-box-footer" id="llmSuccessTotal">— / —</div><span class="icon"><i class="bi bi-check2-circle"></i></span></div>
-                    <div class="small-box bg-warning"><div class="inner"><h3 id="llmAvgMs">-</h3><p>Ø Latenz (ms)</p></div><div class="small-box-footer" id="llmLastCalled">letzter Call: —</div><span class="icon"><i class="bi bi-speedometer2"></i></span></div>
-                    <div class="small-box bg-info"><div class="inner"><h3 id="llmTokensMonth">-</h3><p>Tokens diesen Monat</p></div><div class="small-box-footer" id="llmTokensToday">heute: —</div><span class="icon"><i class="bi bi-tags"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmHeute">-</h3><p data-i18n="stats.calls_today">Calls heute</p></div><div class="small-box-footer" data-i18n="stats.llm_calls_endpoint">an /chat/completions</div><span class="icon"><i class="bi bi-chat-square-dots"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmMonat">-</h3><p data-i18n="stats.calls_month">Calls diesen Monat</p></div><div class="small-box-footer" data-i18n="stats.since_month_start">seit Monatsanfang</div><span class="icon"><i class="bi bi-calendar-month"></i></span></div>
+                    <div class="small-box bg-success"><div class="inner"><h3 id="llmSuccess">-</h3><p data-i18n="stats.success_rate">Erfolgsrate</p></div><div class="small-box-footer" id="llmSuccessTotal">— / —</div><span class="icon"><i class="bi bi-check2-circle"></i></span></div>
+                    <div class="small-box bg-warning"><div class="inner"><h3 id="llmAvgMs">-</h3><p data-i18n="stats.avg_latency_ms">Ø Latenz (ms)</p></div><div class="small-box-footer" id="llmLastCalled" data-i18n="stats.last_call_prefix">letzter Call: —</div><span class="icon"><i class="bi bi-speedometer2"></i></span></div>
+                    <div class="small-box bg-info"><div class="inner"><h3 id="llmTokensMonth">-</h3><p data-i18n="stats.tokens_month">Tokens diesen Monat</p></div><div class="small-box-footer" id="llmTokensToday" data-i18n="stats.today_prefix">heute: —</div><span class="icon"><i class="bi bi-tags"></i></span></div>
                 </div>
 
                 <div class="row g-3 mb-3">
                     <div class="col-lg-6">
                         <div class="card h-100">
-                            <div class="card-header"><h3 class="card-title mb-0">Calls pro Quelle</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.calls_per_source">Calls pro Quelle</h3></div>
                             <div class="card-body"><canvas id="llmSourceChart" style="max-height:280px"></canvas></div>
                         </div>
                     </div>
                     <div class="col-lg-6">
                         <div class="card h-100">
-                            <div class="card-header"><h3 class="card-title mb-0">Tagesverlauf</h3></div>
+                            <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.daily_trend">Tagesverlauf</h3></div>
                             <div class="card-body"><canvas id="llmTrendChart" style="max-height:280px"></canvas></div>
                         </div>
                     </div>
@@ -173,23 +173,23 @@
                 <!-- Analyzer: free-range chart with date pickers + source filter -->
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                        <h3 class="card-title mb-0">Analyse — Calls &amp; Tokens</h3>
+                        <h3 class="card-title mb-0" data-i18n="stats.analyze_title">Analyse — Calls &amp; Tokens</h3>
                         <div class="d-flex flex-wrap gap-2 align-items-center">
                             <div class="btn-group btn-group-sm" role="group">
-                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(1)">24h</button>
-                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(7)">7 T</button>
-                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(30)">30 T</button>
-                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(90)">90 T</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(1)" data-i18n="stats.range_btn_24h">24h</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(7)" data-i18n="stats.range_btn_7d">7 T</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(30)" data-i18n="stats.range_btn_30d">30 T</button>
+                                <button class="btn btn-outline-secondary" onclick="llmAnalyzeQuickRange(90)" data-i18n="stats.range_btn_90d">90 T</button>
                             </div>
-                            <label class="small text-secondary mb-0">Von</label>
+                            <label class="small text-secondary mb-0" data-i18n="stats.from">Von</label>
                             <input type="date" id="llmAnalyzeFrom" class="form-control form-control-sm" style="width:150px" onchange="loadLlmAnalyze()">
-                            <label class="small text-secondary mb-0">Bis</label>
+                            <label class="small text-secondary mb-0" data-i18n="stats.to">Bis</label>
                             <input type="date" id="llmAnalyzeTo" class="form-control form-control-sm" style="width:150px" onchange="loadLlmAnalyze()">
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="d-flex flex-wrap gap-1 mb-2" id="llmSourceFilter">
-                            <small class="text-secondary me-2 align-self-center">Quellen:</small>
+                            <small class="text-secondary me-2 align-self-center" data-i18n="stats.sources_label">Quellen:</small>
                         </div>
                         <canvas id="llmAnalyzeChart" style="max-height:420px"></canvas>
                     </div>
@@ -197,19 +197,19 @@
                 </div>
 
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Quellen-Detail</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.source_detail">Quellen-Detail</h3></div>
                     <div class="card-body">
                         <div class="table-scroll" style="max-height:280px">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Quelle</th>
-                                    <th class="text-end">Calls</th>
-                                    <th class="text-end">Erfolg</th>
-                                    <th class="text-end">Fehler</th>
-                                    <th class="text-end">Prompt-Tokens</th>
-                                    <th class="text-end">Completion-Tokens</th>
-                                    <th class="text-end">Ø Latenz (ms)</th>
-                                    <th>Letzter Call</th>
+                                    <th data-i18n="stats.col_source">Quelle</th>
+                                    <th class="text-end" data-i18n="stats.col_calls">Calls</th>
+                                    <th class="text-end" data-i18n="stats.col_success">Erfolg</th>
+                                    <th class="text-end" data-i18n="stats.col_error">Fehler</th>
+                                    <th class="text-end" data-i18n="stats.col_prompt_tokens">Prompt-Tokens</th>
+                                    <th class="text-end" data-i18n="stats.col_completion_tokens">Completion-Tokens</th>
+                                    <th class="text-end" data-i18n="stats.col_avg_latency">Ø Latenz (ms)</th>
+                                    <th data-i18n="stats.col_last_call">Letzter Call</th>
                                 </tr></thead>
                                 <tbody id="llmSourceTable"></tbody>
                             </table>
@@ -218,16 +218,16 @@
                 </div>
 
                 <div class="card mb-3">
-                    <div class="card-header"><h3 class="card-title mb-0">Modelle</h3></div>
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="stats.models">Modelle</h3></div>
                     <div class="card-body">
                         <div class="table-scroll" style="max-height:240px">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
-                                    <th>Modell</th>
-                                    <th class="text-end">Calls</th>
-                                    <th class="text-end">Prompt-Tokens</th>
-                                    <th class="text-end">Completion-Tokens</th>
-                                    <th class="text-end">Ø Latenz (ms)</th>
+                                    <th data-i18n="stats.col_model">Modell</th>
+                                    <th class="text-end" data-i18n="stats.col_calls">Calls</th>
+                                    <th class="text-end" data-i18n="stats.col_prompt_tokens">Prompt-Tokens</th>
+                                    <th class="text-end" data-i18n="stats.col_completion_tokens">Completion-Tokens</th>
+                                    <th class="text-end" data-i18n="stats.col_avg_latency">Ø Latenz (ms)</th>
                                 </tr></thead>
                                 <tbody id="llmModelTable"></tbody>
                             </table>
@@ -246,6 +246,8 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/i18n/de.js"></script>
     <script src="/i18n/en.js"></script>
+    <script src="/i18n/stats.de.js"></script>
+    <script src="/i18n/stats.en.js"></script>
     <script src="/js/i18n.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>

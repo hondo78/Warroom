@@ -24,6 +24,7 @@ window.I18N.en.honeypot = {
     files_hint: "Decoy files are created on the host and watched — any read/open access raises an alert.",
     add_file: "Add file",
     services_label: "Services to simulate", name_required: "Please enter a name.",
+    name_placeholder: "e.g. DMZ-Decoy-01", file: "File",
     deploy_title: "Deploy pod", token_once: "The token is shown only ONCE — copy it now.",
     deploy_cmd: "Run on the Linux honeypot host",
     edit_title: "Edit pod", delete: "Delete pod", confirm_delete: "Delete pod \"{name}\"? All its events are removed too.",

@@ -241,7 +241,7 @@ async function loadDownloads() {
             </div></div></div>`;
         }).join('') + '</div>';
     } catch (err) {
-        box.innerHTML = `<div class="detail-error">Fehler: ${escapeHtml(err.message)}</div>`;
+        box.innerHTML = `<div class="detail-error">${t('endpoints.error')}: ${escapeHtml(err.message)}</div>`;
     }
 }
 

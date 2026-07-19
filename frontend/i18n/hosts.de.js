@@ -38,6 +38,7 @@ window.I18N.de.hosts = {
     src_netbios: "NetBIOS",
     src_manual: "manuell",
     edit_title: "Hostname eintragen",
+    host_placeholder: "z.B. NAS-01",
     clear_manual: "Manuellen Namen entfernen",
     current_resolved: "Aktuell: {name} (Quelle: {source})",
     none_resolved: "Noch kein Hostname aufgelöst — trage ihn manuell ein.",

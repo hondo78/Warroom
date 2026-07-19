@@ -2,6 +2,7 @@
 window.I18N = window.I18N || {};
 window.I18N.de = window.I18N.de || {};
 window.I18N.de.monitored = {
+    page_title: "Warroom - Überwachung",
     title: "Überwachung — Verbindungen zu markierten IPs",
     intro: "Diese Seite wertet die auf der <a href=\"/blocked.html\">Blocklist / Watchlist</a> mit <i class=\"bi bi-binoculars\"></i> <strong>Überwachen</strong> markierten IPs aus: welche internen Hosts wann mit ihnen reden. Taucht eine <strong>neue Verbindung</strong> auf, wird über Telegram/Teams benachrichtigt.",
     disabled_warn: "Die Überwachung ist derzeit deaktiviert (ip_monitor_enabled=false).",

@@ -38,6 +38,7 @@ window.I18N.en.hosts = {
     src_netbios: "NetBIOS",
     src_manual: "manual",
     edit_title: "Set hostname",
+    host_placeholder: "e.g. NAS-01",
     clear_manual: "Remove manual name",
     current_resolved: "Current: {name} (source: {source})",
     none_resolved: "No hostname resolved yet — enter it manually.",

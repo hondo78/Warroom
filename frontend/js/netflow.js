@@ -4,6 +4,11 @@ let nfTimelineChart, nfTalkersChart, nfDestsChart, nfPortsChart, nfProtoChart, n
 
 const PALETTE = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#eab308', '#a78bfa'];
 
+// Number / date formatting follows the chosen UI language (thousands separators
+// and date order differ between en/de). Language can't change without a reload.
+const NF_LANG = (typeof currentLang === 'function') ? currentLang() : 'en';
+const NF_LOCALE = NF_LANG === 'de' ? 'de-DE' : 'en-US';
+
 document.addEventListener('DOMContentLoaded', async () => {
     initNfMap();
     initNfCharts();
@@ -50,7 +55,7 @@ function fmtBytes(b) {
 
 function fmtNum(n) {
     if (!n && n !== 0) return '-';
-    return n.toLocaleString('de-DE');
+    return n.toLocaleString(NF_LOCALE);
 }
 
 async function loadFirewalls() {
@@ -168,7 +173,7 @@ function initNfCharts() {
 async function updateTimeline() {
     const r = await fetch(`/api/netflow/timeline?${qs()}`);
     const d = await r.json();
-    nfTimelineChart.data.labels = d.points.map(p => p.ts ? new Date(p.ts).toLocaleString('de-DE') : '');
+    nfTimelineChart.data.labels = d.points.map(p => p.ts ? new Date(p.ts).toLocaleString(NF_LOCALE) : '');
     nfTimelineChart.data.datasets[0].data = d.points.map(p => p.bytes);
     nfTimelineChart.update();
 }

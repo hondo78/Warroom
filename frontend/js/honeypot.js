@@ -6,8 +6,7 @@ let _hpFileTemplates = {};  // kind -> {label, example}
 let _hpPods = [];
 let _editPodId = null;
 
-const _FILE_LABEL = { file: 'Datei' };
-function _svcLabel(s) { return _hpServices[s]?.label || _FILE_LABEL[s] || s; }
+function _svcLabel(s) { return _hpServices[s]?.label || (s === 'file' ? t('honeypot.file') : s); }
 
 let _hpSources = [];
 const _podsSort = { key: 'last_seen', dir: 'desc' };
@@ -190,8 +189,8 @@ function renderSources(sources) {
             : '';
         const ip = escapeAttr(s.source_ip);
         const action = s.acknowledged
-            ? `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.unack_title'))}" onclick="event.stopPropagation(); unackSource('${ip}', this)"><i class="bi bi-arrow-counterclockwise"></i> <span data-i18n="honeypot.unack">Öffnen</span></button>`
-            : `<button class="btn btn-sm btn-outline-success py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.ack_title'))}" onclick="event.stopPropagation(); ackSource('${ip}', this)"><i class="bi bi-check2"></i> <span data-i18n="honeypot.ack">Bestätigen</span></button>`;
+            ? `<button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.unack_title'))}" onclick="event.stopPropagation(); unackSource('${ip}', this)"><i class="bi bi-arrow-counterclockwise"></i> ${t('honeypot.unack')}</button>`
+            : `<button class="btn btn-sm btn-outline-success py-0" style="font-size:.72rem" title="${escapeAttr(t('honeypot.ack_title'))}" onclick="event.stopPropagation(); ackSource('${ip}', this)"><i class="bi bi-check2"></i> ${t('honeypot.ack')}</button>`;
         return `<tr class="hp-src-row" data-ip="${ip}" style="cursor:pointer${s.acknowledged ? ';opacity:.55' : ''}" onclick="toggleSource(this, '${ip}')">
             <td><i class="bi bi-caret-right-fill hp-caret"></i></td>
             <td><code>${escapeHtml(s.source_ip)}</code>${osint}${ackBadge}</td>

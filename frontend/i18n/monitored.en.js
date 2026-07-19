@@ -2,6 +2,7 @@
 window.I18N = window.I18N || {};
 window.I18N.en = window.I18N.en || {};
 window.I18N.en.monitored = {
+    page_title: "Warroom - Monitoring",
     title: "Monitoring — connections to flagged IPs",
     intro: "This page analyses the IPs flagged <i class=\"bi bi-binoculars\"></i> <strong>Monitor</strong> on the <a href=\"/blocked.html\">blocklist / watchlist</a>: which internal hosts talk to them, and when. When a <strong>new connection</strong> appears, a notification is sent via Telegram/Teams.",
     disabled_warn: "Monitoring is currently disabled (ip_monitor_enabled=false).",

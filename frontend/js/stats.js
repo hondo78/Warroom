@@ -37,7 +37,7 @@ async function loadStats() {
         _llmData = await llmResp.json();
         renderAll();
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('stats.error') + ' ' + err.message);
     }
 }
 
@@ -72,7 +72,7 @@ function renderKpis() {
     setText('kHeute', fmt(t.today_real));
     setText('kMonat', fmt(t.month_real));
     setText('kCache', t.global_cache_hit_rate_pct == null ? '—' : `${t.global_cache_hit_rate_pct} %`);
-    setText('kCacheTotal', `${fmt(t.window_cache_hit)} aus Cache (Window)`);
+    setText('kCacheTotal', window.t('stats.saved_from_cache_window', { n: fmt(t.window_cache_hit) }));
     setText('kWarn', fmt(t.providers_near_limit));
 }
 
@@ -83,10 +83,10 @@ function renderProviderCards() {
         const dailyBar  = quotaBar(p.today_real, p.daily_limit, p.daily_used_pct);
         const monthlyBar = quotaBar(p.month_real, p.monthly_limit, p.monthly_used_pct);
         const warnBadge = p.warn_level === 'exceeded'
-            ? '<span class="severity-badge severity-critical">LIMIT ÜBERSCHRITTEN</span>'
+            ? `<span class="severity-badge severity-critical">${t('stats.limit_exceeded')}</span>`
             : p.warn_level === 'warn'
-            ? '<span class="severity-badge severity-high">nahe Limit</span>'
-            : '<span class="severity-badge severity-low">ok</span>';
+            ? `<span class="severity-badge severity-high">${t('stats.near_limit')}</span>`
+            : `<span class="severity-badge severity-low">${t('stats.ok_badge')}</span>`;
         const cacheRate = p.cache_hit_rate_pct == null ? '—' : `${p.cache_hit_rate_pct} %`;
         return `
         <div class="col-lg-6 col-xl-4">
@@ -96,17 +96,17 @@ function renderProviderCards() {
                     ${warnBadge}
                 </div>
                 <div class="card-body">
-                    <div class="mb-2"><strong>Tag</strong> · ${fmt(p.today_real)} ${p.daily_limit ? '/ ' + fmt(p.daily_limit) : '<small class="text-secondary">(kein Limit)</small>'}</div>
+                    <div class="mb-2"><strong>${t('stats.day')}</strong> · ${fmt(p.today_real)} ${p.daily_limit ? '/ ' + fmt(p.daily_limit) : '<small class="text-secondary">' + t('stats.no_limit') + '</small>'}</div>
                     ${dailyBar}
-                    <div class="mb-2 mt-3"><strong>Monat</strong> · ${fmt(p.month_real)} ${p.monthly_limit ? '/ ' + fmt(p.monthly_limit) : '<small class="text-secondary">(kein Limit)</small>'}</div>
+                    <div class="mb-2 mt-3"><strong>${t('stats.month')}</strong> · ${fmt(p.month_real)} ${p.monthly_limit ? '/ ' + fmt(p.monthly_limit) : '<small class="text-secondary">' + t('stats.no_limit') + '</small>'}</div>
                     ${monthlyBar}
                     <hr class="my-3" style="opacity:.2">
                     <div class="d-flex justify-content-between small text-secondary">
-                        <span><i class="bi bi-lightning-charge"></i> Cache-Hit ${cacheRate}</span>
-                        <span>${fmt(p.window_cache_hit)} aus Cache</span>
+                        <span><i class="bi bi-lightning-charge"></i> ${t('stats.cache_hit')} ${cacheRate}</span>
+                        <span>${fmt(p.window_cache_hit)} ${t('stats.from_cache')}</span>
                     </div>
                     <div class="d-flex justify-content-between small text-secondary mt-1">
-                        <span>OK ${fmt(p.window.success || 0)} · 404 ${fmt(p.window.no_record || 0)} · Fehler ${fmt(p.window.error || 0)}</span>
+                        <span>OK ${fmt(p.window.success || 0)} · 404 ${fmt(p.window.no_record || 0)} · ${t('stats.errors')} ${fmt(p.window.error || 0)}</span>
                         <span>${p.last_called_at ? new Date(p.last_called_at).toLocaleString('de-DE', {dateStyle:'short', timeStyle:'short'}) : '—'}</span>
                     </div>
                 </div>
@@ -214,8 +214,8 @@ const LLM_SOURCE_LABELS = {
     waf:          { label: 'WAF',           color: '#f59e0b' },
     ips:          { label: 'IPS',           color: '#8b5cf6' },
     failed_login: { label: 'Failed-Login',  color: '#06b6d4' },
-    test:         { label: 'Test (Probe)',  color: '#94a3b8' },
-    manual:       { label: 'Manuell',       color: '#3b82f6' },
+    test:         { label: t('stats.src_test'),   color: '#94a3b8' },
+    manual:       { label: t('stats.src_manual'), color: '#3b82f6' },
 };
 
 function renderLlmKpis() {
@@ -223,13 +223,13 @@ function renderLlmKpis() {
     setText('llmHeute', fmt(t.today_calls));
     setText('llmMonat', fmt(t.month_calls));
     setText('llmSuccess', t.success_rate_pct == null ? '—' : `${t.success_rate_pct} %`);
-    setText('llmSuccessTotal', `Fenster: ${fmt(t.window_calls)} Calls`);
+    setText('llmSuccessTotal', window.t('stats.window_calls', { n: fmt(t.window_calls) }));
     setText('llmAvgMs', t.avg_duration_ms == null ? '—' : Math.round(t.avg_duration_ms));
     setText('llmLastCalled', t.last_called_at
-        ? 'letzter Call: ' + new Date(t.last_called_at).toLocaleString('de-DE')
-        : 'letzter Call: —');
+        ? window.t('stats.last_call_prefix') + ' ' + new Date(t.last_called_at).toLocaleString('de-DE')
+        : window.t('stats.last_call_prefix') + ' —');
     setText('llmTokensMonth', fmt(t.month_tokens));
-    setText('llmTokensToday', `heute: ${fmt(t.today_tokens)}`);
+    setText('llmTokensToday', `${window.t('stats.today_prefix')} ${fmt(t.today_tokens)}`);
 }
 
 function renderLlmSourceChart() {
@@ -249,8 +249,8 @@ function renderLlmSourceChart() {
         data: {
             labels,
             datasets: [
-                { label: 'Erfolg', data: success, backgroundColor: 'rgba(34,197,94,0.7)', borderColor: 'rgba(34,197,94,1)', borderWidth: 1, stack: 'a' },
-                { label: 'Fehler', data: errors,  backgroundColor: 'rgba(239,68,68,0.7)', borderColor: 'rgba(239,68,68,1)', borderWidth: 1, stack: 'a' },
+                { label: t('stats.chart_success'), data: success, backgroundColor: 'rgba(34,197,94,0.7)', borderColor: 'rgba(34,197,94,1)', borderWidth: 1, stack: 'a' },
+                { label: t('stats.chart_error'),   data: errors,  backgroundColor: 'rgba(239,68,68,0.7)', borderColor: 'rgba(239,68,68,1)', borderWidth: 1, stack: 'a' },
             ],
         },
         options: {
@@ -281,16 +281,16 @@ function renderLlmTrendChart() {
         data: {
             labels,
             datasets: [
-                { label: 'Calls',  data: calls,  backgroundColor: 'rgba(139,92,246,0.7)', yAxisID: 'y',  order: 2 },
-                { label: 'Tokens', data: tokens, type: 'line', borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)', tension: 0.25, yAxisID: 'y1', order: 1 },
+                { label: t('stats.calls'),  data: calls,  backgroundColor: 'rgba(139,92,246,0.7)', yAxisID: 'y',  order: 2 },
+                { label: t('stats.tokens'), data: tokens, type: 'line', borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)', tension: 0.25, yAxisID: 'y1', order: 1 },
             ],
         },
         options: {
             responsive: true, maintainAspectRatio: false,
             scales: {
                 x:  { ticks: { color: '#94a3b8' } },
-                y:  { position: 'left',  beginAtZero: true, ticks: { color: '#94a3b8' }, title: { display: true, text: 'Calls', color: '#94a3b8' } },
-                y1: { position: 'right', beginAtZero: true, ticks: { color: '#22c55e' }, title: { display: true, text: 'Tokens', color: '#22c55e' }, grid: { drawOnChartArea: false } },
+                y:  { position: 'left',  beginAtZero: true, ticks: { color: '#94a3b8' }, title: { display: true, text: t('stats.calls'), color: '#94a3b8' } },
+                y1: { position: 'right', beginAtZero: true, ticks: { color: '#22c55e' }, title: { display: true, text: t('stats.tokens'), color: '#22c55e' }, grid: { drawOnChartArea: false } },
             },
             plugins: { legend: { labels: { color: '#e2e8f0' } } },
         },
@@ -301,7 +301,7 @@ function renderLlmSourceTable() {
     const tbody = document.getElementById('llmSourceTable');
     const rows = (_llmData.by_source || []).filter(s => s.count > 0);
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-secondary py-3">Noch keine LLM-Aufrufe — der Agent muss eingeschaltet sein und einen Lauf gemacht haben.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-secondary py-3">${t('stats.no_llm_calls')}</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(s => {
@@ -323,7 +323,7 @@ function renderLlmModelTable() {
     const tbody = document.getElementById('llmModelTable');
     const rows = (_llmData.by_model || []).filter(m => m.count > 0);
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-secondary py-3">Kein Modell-Lauf erfasst.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-secondary py-3">${t('stats.no_model_runs')}</td></tr>`;
         return;
     }
     tbody.innerHTML = rows.map(m => `<tr>
@@ -424,7 +424,7 @@ async function loadLlmAnalyze() {
         _llmAnalyzeData = await r.json();
         renderLlmAnalyzeChart();
     } catch (err) {
-        alert('Fehler: ' + err.message);
+        alert(t('stats.error') + ' ' + err.message);
     }
 }
 
@@ -475,7 +475,7 @@ function renderLlmAnalyzeChart() {
     const datasets = [
         ...callDatasets,
         {
-            label: 'Tokens (Summe)',
+            label: t('stats.tokens_sum'),
             type: 'line',
             data: tokenSeries,
             borderColor: '#22c55e',
@@ -499,10 +499,10 @@ function renderLlmAnalyzeChart() {
                 x:  { stacked: true, ticks: { color: '#94a3b8' } },
                 y:  { stacked: true, position: 'left', beginAtZero: true,
                       ticks: { color: '#94a3b8' },
-                      title: { display: true, text: 'Calls', color: '#94a3b8' } },
+                      title: { display: true, text: t('stats.calls'), color: '#94a3b8' } },
                 y1: { position: 'right', beginAtZero: true,
                       ticks: { color: '#22c55e' },
-                      title: { display: true, text: 'Tokens', color: '#22c55e' },
+                      title: { display: true, text: t('stats.tokens'), color: '#22c55e' },
                       grid: { drawOnChartArea: false } },
             },
             plugins: { legend: { labels: { color: '#e2e8f0' } } },
@@ -525,13 +525,16 @@ function renderLlmAnalyzeChart() {
         const avgPerDay = dayCount ? Math.round(totalCalls / dayCount * 10) / 10 : 0;
         const tokensPerCall = totalCalls ? Math.round(totalTokens / totalCalls) : 0;
         const srcNote = _llmAnalyzeSources.size
-            ? `${includedSources.length} von ${Object.keys(LLM_SOURCE_LABELS).length} Quellen aktiv`
-            : `alle ${Object.keys(LLM_SOURCE_LABELS).length} Quellen`;
-        footer.textContent =
-            `${from} bis ${to} (${dayCount} Tag${dayCount === 1 ? '' : 'e'}) · `
-            + `${srcNote} · `
-            + `${fmt(totalCalls)} Calls (Ø ${avgPerDay}/Tag) · `
-            + `${fmt(totalTokens)} Tokens (Ø ${fmt(tokensPerCall)}/Call)`;
+            ? t('stats.sources_active', { active: includedSources.length, total: Object.keys(LLM_SOURCE_LABELS).length })
+            : t('stats.all_sources', { total: Object.keys(LLM_SOURCE_LABELS).length });
+        const daysLabel = dayCount === 1
+            ? t('stats.day_one', { n: dayCount })
+            : t('stats.day_many', { n: dayCount });
+        footer.textContent = t('stats.analyze_footer', {
+            from, to, days: daysLabel, srcNote,
+            calls: fmt(totalCalls), avgPerDay,
+            tokens: fmt(totalTokens), perCall: fmt(tokensPerCall),
+        });
     }
 }
 

@@ -24,6 +24,7 @@ window.I18N.de.honeypot = {
     files_hint: "Köder-Dateien werden auf dem Host angelegt und überwacht — jeder Lese-/Öffnungszugriff löst Alarm aus.",
     add_file: "Datei hinzufügen",
     services_label: "Zu simulierende Services", name_required: "Bitte einen Namen eingeben.",
+    name_placeholder: "z.B. DMZ-Decoy-01", file: "Datei",
     deploy_title: "Pod deployen", token_once: "Das Token wird nur EINMAL angezeigt — jetzt kopieren.",
     deploy_cmd: "Auf dem Linux-Honeypot-Host ausführen",
     edit_title: "Pod bearbeiten", delete: "Pod löschen", confirm_delete: "Pod „{name}\" löschen? Alle zugehörigen Events werden mit entfernt.",

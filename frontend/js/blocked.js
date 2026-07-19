@@ -1,3 +1,7 @@
+// Locale for number/date formatting follows the active UI language, so English
+// mode renders English-style dates/numbers instead of German ones.
+const BLK_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
+
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     setFeedUrls();
@@ -480,7 +484,7 @@ async function unblockUrl(url, btn) {
 
 function setCount(id, n) {
     const el = document.getElementById(id);
-    if (el) el.textContent = (n || 0).toLocaleString('de-DE');
+    if (el) el.textContent = (n || 0).toLocaleString(BLK_LOCALE);
 }
 
 function emptyRow(cols, msg) {
@@ -490,7 +494,7 @@ function emptyRow(cols, msg) {
 function formatTime(isoStr) {
     if (!isoStr) return '-';
     const d = new Date(isoStr);
-    return d.toLocaleString('de-DE', {
+    return d.toLocaleString(BLK_LOCALE, {
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit',
     });
