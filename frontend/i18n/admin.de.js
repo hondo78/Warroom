@@ -16,6 +16,13 @@ window.I18N.de.admin = {
     agentTitle: "🤖 KI-Agent (Alert-Analyse)",
     systemPromptsTitle: "🤖 KI-Agent — System-Prompts",
     generalTitle: "Allgemein",
+    mcpTitle: "🔌 MCP-Server — Log-Suche fürs LLM",
+    mcpHint: "Stellt eine read-only Suche über die Firewall-Syslogs als <strong>MCP-Server</strong> bereit (Streamable HTTP unter <code>/mcp</code>), damit ein MCP-Client (Claude Desktop/Code …) die Logs per LLM durchsuchen kann. Tools: <code>search_logs</code>, <code>count_logs</code>, <code>aggregate_logs</code>, <code>describe_logs</code>.",
+    mcpEnabled: "MCP-Server aktiv",
+    mcpToken: "Bearer-Token",
+    mcpTokenHint: "Erforderlich, wenn aktiv. Im MCP-Client als <code>Authorization: Bearer &lt;Token&gt;</code> hinterlegen. Unabhängig vom Warroom-API-Key rotierbar.",
+    mcpUrl: "MCP-URL",
+    mcpSave: "MCP-Einstellungen speichern",
     retentionTitle: "🧹 Firewall-Log-Retention",
     systemTitle: "System (Read-only)",
 

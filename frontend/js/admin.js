@@ -19,6 +19,7 @@ const SECTIONS = {
     firewallFeed: ['firewall_threat_feed_enabled', 'firewall_mdr_feed_enabled', 'firewall_mdr_feed_firewall_ids', 'firewall_mdr_feed_sync_interval_seconds'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
+    mcp: ['mcp_enabled', 'mcp_api_key'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_language', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
     // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
 };
@@ -32,6 +33,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (feedDomain) feedDomain.textContent = `${window.location.origin}/ioc_domain`;
     const feedUrl = document.getElementById('iocFeedUrlUrl');
     if (feedUrl) feedUrl.textContent = `${window.location.origin}/ioc_url`;
+    const mcpUrl = document.getElementById('mcpUrl');
+    if (mcpUrl) mcpUrl.textContent = `${window.location.origin}/mcp/`;
 });
 
 // admin.html doesn't load common.js, so provide a local HTML-escape.

@@ -151,6 +151,12 @@ class Settings(BaseSettings):
     agent_provider: str = "lmstudio"  # lmstudio | openai-compatible (extensible)
     agent_base_url: str = "http://host.docker.internal:1234/v1"
     agent_api_key: str = ""           # optional for local LMStudio
+
+    # --- MCP server (read-only log search over the firewall syslogs) ---
+    # Exposed at /mcp (Streamable HTTP) for MCP clients (Claude Desktop/Code, …).
+    # Off by default; when on, requires the mcp_api_key as a bearer token.
+    mcp_enabled: bool = False
+    mcp_api_key: str = ""
     agent_model: str = ""             # model id reported by /v1/models
     agent_interval_seconds: int = 120
     # LLM sampling controls used on every decision call (/chat/completions).

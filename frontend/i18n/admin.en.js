@@ -16,6 +16,13 @@ window.I18N.en.admin = {
     agentTitle: "🤖 AI agent (alert analysis)",
     systemPromptsTitle: "🤖 AI agent — system prompts",
     generalTitle: "General",
+    mcpTitle: "🔌 MCP server — LLM log search",
+    mcpHint: "Exposes a read-only search over the firewall syslogs as an <strong>MCP server</strong> (Streamable HTTP at <code>/mcp</code>) so an MCP client (Claude Desktop/Code …) can search the logs with an LLM. Tools: <code>search_logs</code>, <code>count_logs</code>, <code>aggregate_logs</code>, <code>describe_logs</code>.",
+    mcpEnabled: "MCP server enabled",
+    mcpToken: "Bearer token",
+    mcpTokenHint: "Required when enabled. Configure it in the MCP client as <code>Authorization: Bearer &lt;token&gt;</code>. Rotatable independently of the Warroom API key.",
+    mcpUrl: "MCP URL",
+    mcpSave: "Save MCP settings",
     retentionTitle: "🧹 Firewall log retention",
     systemTitle: "System (read-only)",
 

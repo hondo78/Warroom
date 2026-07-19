@@ -226,7 +226,11 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(collect_all, "date", id="initial_collect")
     scheduler.add_job(collect_o365, "date", id="initial_o365_collect")
     logger.info(f"Collector scheduled every {settings.collector_interval}s")
-    yield
+    # Run the MCP Streamable-HTTP session manager for the lifetime of the app so
+    # the /mcp mount can serve requests.
+    from app.mcp_server import mcp as _mcp
+    async with _mcp.session_manager.run():
+        yield
     scheduler.shutdown()
     await sophos_client.aclose()
     await o365_client.aclose()
@@ -236,6 +240,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Warroom API", lifespan=lifespan, dependencies=[Depends(verify_api_key)])
+
+# Read-only log-search MCP server at /mcp (Streamable HTTP). Mounted sub-app, so
+# it bypasses the global X-API-Key dependency and is guarded by its own bearer
+# token + mcp_enabled flag (see app/mcp_server._MCPAuth). Mounting calls
+# streamable_http_app(), which lazily creates the session manager the lifespan runs.
+from app.mcp_server import mcp_asgi_app
+app.mount("/mcp", mcp_asgi_app())
 
 
 class FirewallLocationIn(BaseModel):
@@ -5389,6 +5400,8 @@ class AdminSettingsIn(BaseModel):
     firewall_api_password: str | None = Field(default=None, max_length=256)
     firewall_api_verify_tls: bool | None = None
     firewall_central_sync_enabled: bool | None = None
+    mcp_enabled: bool | None = None
+    mcp_api_key: str | None = Field(default=None, max_length=200)
     firewall_dhcp_entity: str | None = Field(default=None, max_length=200)
     firewall_dhcp_refresh_seconds: int | None = Field(default=None, ge=60, le=86400)
     host_identity_monitor_enabled: bool | None = None

@@ -767,6 +767,32 @@
                     </div>
                 </div>
 
+                <!-- MCP server (LLM log search) -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.mcpTitle">🔌 MCP-Server — Log-Suche fürs LLM</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.mcpHint">Stellt eine read-only Suche über die Firewall-Syslogs als <strong>MCP-Server</strong> bereit (Streamable HTTP unter <code>/mcp</code>), damit ein MCP-Client (Claude Desktop/Code …) die Logs per LLM durchsuchen kann. Tools: <code>search_logs</code>, <code>count_logs</code>, <code>aggregate_logs</code>, <code>describe_logs</code>.</p>
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mcpEnabled">MCP-Server aktiv</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch mt-1">
+                                    <input class="form-check-input" type="checkbox" data-key="mcp_enabled" data-bool="1">
+                                </div>
+                            </div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mcpToken">Bearer-Token</label></div>
+                            <div class="col-md-8">
+                                <input type="password" class="form-control form-control-sm" data-key="mcp_api_key" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off">
+                                <small class="admin-hint" data-i18n="admin.mcpTokenHint">Erforderlich, wenn aktiv. Im MCP-Client als <code>Authorization: Bearer &lt;Token&gt;</code> hinterlegen. Unabhängig vom Warroom-API-Key rotierbar.</small>
+                            </div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mcpUrl">MCP-URL</label></div>
+                            <div class="col-md-8"><code id="mcpUrl" style="font-size:.8rem"></code></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('mcp')" data-i18n="admin.mcpSave">MCP-Einstellungen speichern</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- System (read-only) -->
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.systemTitle">System (Read-only)</h3></div>

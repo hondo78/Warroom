@@ -84,6 +84,8 @@ MANAGED_KEYS: dict[str, type] = {
     "agent_base_url": str,
     "agent_api_key": str,
     "agent_model": str,
+    "mcp_enabled": bool,
+    "mcp_api_key": str,
     "agent_interval_seconds": int,
     "agent_temperature": float,
     "agent_max_tokens": int,
@@ -170,6 +172,7 @@ SECRET_KEYS: set[str] = {
     "sophos_intelix_client_secret",
     "agent_api_key",
     "firewall_api_password",
+    "mcp_api_key",
 }
 
 
