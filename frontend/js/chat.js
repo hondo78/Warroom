@@ -23,8 +23,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: msg, history: _chatHistory.slice(-8) }),
             });
-            const d = await r.json();
             thinking.remove();
+            // A slow chat can hit a proxy 502/504 whose body is HTML, not JSON —
+            // surface a clear message instead of a JSON parse error.
+            const ct = r.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {
+                throw new Error((r.status === 502 || r.status === 504)
+                    ? t('chat.timeout') : `HTTP ${r.status}`);
+            }
+            const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
             const reply = d.reply || t('chat.no_reply');
             botMsg(reply);

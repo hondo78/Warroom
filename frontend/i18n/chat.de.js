@@ -9,4 +9,5 @@ window.I18N.de.chat = {
     greeting: "Hi! Ich bin dein **Warroom Analyst**. Frag mich frei zu Bedrohungen, CVEs, IPs/Domains, Logs — oder gib direkte Befehle wie „blockiere 1.2.3.4“, „isoliere PC-12345“, „zeig die Quarantäne“, „OSINT zu 8.8.8.8“, „Statistik-Report“. „hilfe“ zeigt die Befehle.",
     no_reply: "(keine Antwort)",
     error: "⚠️ Fehler: {msg}",
+    timeout: "Zeitüberschreitung – die Anfrage hat zu lange gedauert (evtl. langsames LLM oder große Abfrage). Bitte erneut versuchen.",
 };

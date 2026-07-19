@@ -9,4 +9,5 @@ window.I18N.en.chat = {
     greeting: "Hi! I'm your **Warroom Analyst**. Ask me freely about threats, CVEs, IPs/domains, logs — or give direct commands like \"block 1.2.3.4\", \"isolate PC-12345\", \"show the quarantine\", \"OSINT for 8.8.8.8\", \"statistics report\". Type \"help\" to list the commands.",
     no_reply: "(no reply)",
     error: "⚠️ Error: {msg}",
+    timeout: "Timed out – the request took too long (slow LLM or heavy query). Please try again.",
 };

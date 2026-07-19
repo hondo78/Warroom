@@ -21,6 +21,18 @@ server {
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
 
+    # The AI chat can make several LLM calls per message (intent + a read-only
+    # SQL loop), easily exceeding nginx's default 60s proxy_read_timeout, which
+    # would return an HTML 504 the frontend can't parse as JSON. Give it room.
+    location /api/chat/ {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-API-Key "${WARROOM_API_KEY}";
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
     location /api/ {
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;
