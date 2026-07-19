@@ -67,11 +67,23 @@ async def purge_firewall_logs() -> dict:
     # (uses idx_fw_logs_created).
     sec_deleted = await _purge("created_at < :cut", sec_cut, "security")
 
+    # Phase 3: keep the attack-map rollup bounded in step with the logs — the map
+    # never queries beyond 90 days anyway, so older rollup days are dead weight.
+    async with async_session() as db:
+        rollup_deleted = (await db.execute(
+            text("DELETE FROM fw_map_daily WHERE day < :cut"),
+            {"cut": sec_cut.date()},
+        )).rowcount or 0
+        await db.commit()
+    if rollup_deleted:
+        logger.info(f"firewall_retention[map_rollup]: deleted {rollup_deleted} day-row(s) older than {sec_cut.date()}")
+
     if not (conn_deleted or sec_deleted):
         logger.debug("firewall_retention: nothing to purge")
     return {
         "connection_deleted": conn_deleted,
         "security_deleted": sec_deleted,
+        "rollup_deleted": rollup_deleted,
         "connection_cutoff": conn_cut.isoformat(),
         "security_cutoff": sec_cut.isoformat(),
     }
