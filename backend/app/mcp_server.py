@@ -157,7 +157,24 @@ async def search_logs(
            f"WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT :limit")
     async with async_session() as db:
         rows = (await db.execute(sa_text(sql), params)).fetchall()
-    return {"returned": len(rows), "rows": [_row_to_dict(r) for r in rows]}
+    dict_rows = [_row_to_dict(r) for r in rows]
+
+    # Hand the LLM OSINT context for the external IPs in the result — from cache/
+    # history + the free Tor check only (no provider calls / quota). IPs with no
+    # cached data come back {"cached": false}; the LLM should ask the user before
+    # fetching fresh OSINT for them via the osint_lookup tool.
+    from app import osint
+    ip_candidates = [r[k] for r in dict_rows for k in ("source_ip", "destination_ip") if r.get(k)]
+    osint_map = await osint.enrich_cached(ip_candidates, cap=30)
+    result = {"returned": len(dict_rows), "rows": dict_rows, "osint": osint_map}
+    uncached = [ip for ip, v in osint_map.items() if not v.get("cached")]
+    if uncached:
+        result["osint_note"] = (
+            f"{len(uncached)} external IP(s) have no cached OSINT (Tor status only). "
+            "Ask the user whether to fetch full OSINT, then call osint_lookup with those IPs: "
+            + ", ".join(uncached[:15])
+        )
+    return result
 
 
 @mcp.tool()
@@ -233,6 +250,20 @@ async def aggregate_logs(
     async with async_session() as db:
         rows = (await db.execute(sa_text(sql), params)).fetchall()
     return {"group_by": group_by, "buckets": [{"key": r[0], "count": int(r[1])} for r in rows]}
+
+
+@mcp.tool()
+async def osint_lookup(ips: list[str], limit: int = 10) -> dict:
+    """Run a LIVE OSINT lookup (AbuseIPDB, VirusTotal, GreyNoise, Tor — no Shodan)
+    for the given external IPs and return a risk summary per IP.
+
+    Use this ONLY after asking the user whether to run it — typically for IPs that
+    search_logs reported as OSINT-uncached (osint_note). Distinct public IPs only,
+    capped at `limit` (max 15); results are cached for reuse. Costs provider quota,
+    so keep the list small."""
+    from app import osint
+    limit = max(1, min(int(limit), 15))
+    return {"osint": await osint.enrich_live(ips or [], cap=limit)}
 
 
 @mcp.tool()

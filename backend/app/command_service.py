@@ -488,6 +488,36 @@ async def _llm_call(messages: list[dict], base: str, timeout: float = 90) -> str
 _MAX_SQL_STEPS = 3
 
 
+_IP_CELL_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+
+async def _osint_context_for_result(res: dict) -> str:
+    """Given a SQL result ({columns, rows}), hand the LLM cached OSINT (+ free Tor)
+    for every distinct external IP it contains — no provider calls. For IPs with
+    no cached data, tell the LLM to offer a live lookup (the user confirms with
+    'osint zu <ip>'). Returns '' when there's nothing to add."""
+    try:
+        cand = [cell for row in (res.get("rows") or []) for cell in row
+                if isinstance(cell, str) and _IP_CELL_RE.match(cell)]
+        if not cand:
+            return ""
+        from app import osint
+        enr = await osint.enrich_cached(cand, cap=20)
+        if not enr:
+            return ""
+        ctx = ("\n[OSINT zu externen IPs — nur Cache/History + Tor] "
+               + json.dumps(enr, ensure_ascii=False)[:3000])
+        uncached = [ip for ip, v in enr.items() if not v.get("cached")]
+        if uncached:
+            ctx += ("\nHinweis: Fuer diese externen IPs ohne gecachte OSINT-Daten liegt nur der "
+                    "Tor-Status vor. Biete dem Nutzer an, eine Live-OSINT-Abfrage zu machen "
+                    "(er bestaetigt mit 'osint zu <ip>'): " + ", ".join(uncached[:15]))
+        return ctx
+    except Exception as e:
+        logger.warning(f"chat osint enrich failed: {e}")
+        return ""
+
+
 async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
     """Free-form conversation with the LLM using the analyst persona. When
     ``chat_sql_enabled`` is on, the model may issue read-only SQL queries (via a
@@ -529,7 +559,9 @@ async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
         messages.append({"role": "assistant", "content": content})
         try:
             res = await sql_query.run_select(sql)
+            osint_ctx = await _osint_context_for_result(res)
             feedback = ("[DB-Ergebnis] " + json.dumps(res, ensure_ascii=False)[:6000]
+                        + osint_ctx
                         + "\nBeantworte jetzt die Frage des Nutzers auf Deutsch, ohne weiteres JSON.")
         except sql_query.SqlError as e:
             feedback = f"[DB-Fehler] {e}. Korrigiere die Abfrage oder antworte ohne Datenbank."

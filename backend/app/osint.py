@@ -599,6 +599,107 @@ async def tor_check(ip: str) -> dict[str, Any]:
         return {"available": False, "reason": str(e)[:120]}
 
 
+# --- Enrichment for AI log queries ------------------------------------------
+# Compact per-IP OSINT summaries that get handed to the LLM alongside firewall-
+# log query results, so it can reason about the external IPs. enrich_cached()
+# NEVER makes a provider call (cache/history + the free Tor check only); IPs with
+# no cached data come back {"cached": false} so the assistant can offer a live
+# lookup. enrich_live() performs the real lookups (cheap providers, no Shodan).
+
+def _risk_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    ab = payload.get("abuseipdb") or {}
+    vt = payload.get("virustotal") or {}
+    gn = payload.get("greynoise") or {}
+    intel = payload.get("intelix") or {}
+    ipi = payload.get("ipinfo") or {}
+    return {
+        "abuse_score": ab.get("abuse_score"),
+        "vt_malicious": vt.get("malicious"),
+        "greynoise": gn.get("classification"),
+        "intelix_category": intel.get("security_category") or intel.get("category"),
+        "country": ipi.get("country"),
+        "org": ipi.get("org"),
+    }
+
+
+async def _history_summary(ip: str) -> dict[str, Any] | None:
+    """Latest stored OSINT for an IP from the long-term history table."""
+    try:
+        from sqlalchemy import select
+        from app.database import async_session
+        from app.models import OsintResult
+        async with async_session() as db:
+            row = (await db.execute(
+                select(OsintResult).where(OsintResult.value == ip,
+                                          OsintResult.indicator_type == "ip")
+            )).scalar_one_or_none()
+        if not row:
+            return None
+        return {
+            "abuse_score": row.abuse_score,
+            "vt_malicious": row.vt_malicious,
+            "greynoise": row.greynoise,
+            "intelix_category": row.intelix_category,
+            "country": row.country,
+            "org": row.org,
+        }
+    except Exception:
+        return None
+
+
+def _distinct_public(ips: list[str], cap: int) -> list[str]:
+    seen: list[str] = []
+    for ip in ips or []:
+        if ip and ip not in seen and is_public(ip):
+            seen.append(ip)
+        if len(seen) >= cap:
+            break
+    return seen
+
+
+async def enrich_cached(ips: list[str], cap: int = 30) -> dict[str, dict]:
+    """OSINT summary per distinct PUBLIC IP from cache/history + the free Tor
+    check only — no provider calls. Uncached IPs get {"cached": false} (+ Tor)."""
+    out: dict[str, dict] = {}
+    redis = await get_redis()
+    for ip in _distinct_public(ips, cap):
+        summary: dict[str, Any] | None = None
+        if redis:
+            try:
+                raw = await redis.get(f"osint:{ip}")
+                if raw:
+                    summary = _risk_summary(json.loads(raw))
+            except Exception:
+                summary = None
+        if summary is None:
+            summary = await _history_summary(ip)
+        tor = await tor_check(ip)
+        is_tor = bool(tor.get("is_exit_node"))
+        if summary is None:
+            out[ip] = {"cached": False, "tor_exit_node": is_tor}
+        else:
+            summary["cached"] = True
+            summary["tor_exit_node"] = is_tor
+            out[ip] = summary
+    return out
+
+
+async def enrich_live(ips: list[str], cap: int = 10) -> dict[str, dict]:
+    """Run real (cache-aware, no-Shodan) OSINT lookups for distinct public IPs,
+    capped. Use only after the user approves enriching OSINT-uncached IPs."""
+    out: dict[str, dict] = {}
+    for ip in _distinct_public(ips, cap):
+        try:
+            payload = await lookup(ip)
+            summary = _risk_summary(payload)
+            summary["cached"] = bool(payload.get("cached"))
+            summary["tor_exit_node"] = bool((payload.get("tor") or {}).get("is_exit_node"))
+            out[ip] = summary
+        except Exception as e:
+            out[ip] = {"error": str(e)[:120]}
+    return out
+
+
 async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> dict[str, Any]:
     """Run the OSINT providers and return a merged dict.
 
