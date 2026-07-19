@@ -496,7 +496,7 @@ INPUT (JSON):
   - allowed_actions
 
 DECISION RULES (first match wins). If a threshold is reached ⇒
-action="block_ip", otherwise action="no_action". Gib KEINE confidence aus.
+action="block_ip", otherwise action="no_action". Do not output any confidence.
 1. severities contains "high" or "critical"          → block_ip.
    IPS already classifies the system as an intrusion attempt; at high
    severity a block is justified without further evidence.
@@ -559,7 +559,7 @@ INPUT (JSON):
   - allowed_actions — "block_ip", "no_action"
 
 DECISION RULES (first match wins). If a threshold is reached ⇒
-action="block_ip", otherwise action="no_action". Gib KEINE confidence aus.
+action="block_ip", otherwise action="no_action". Do not output any confidence.
 1. count_24h >= threshold                          → block_ip.
 2. OSINT Sophos Intelix hit                        → block_ip.
 3. SHODAN CVE SEVERITY: shodan.cve_severity.has_high_critical = true (>= one CVE
@@ -650,7 +650,7 @@ PROCEDURE:
 1. Look at `networks`. A network counts as a distributed brute-force when
    attempts >= thresholds.min_attempts_per_net AND distinct_ips >=
    thresholds.min_distinct_ips_per_net (deviate with justification when the pattern is clear).
-2. Decision (the action follows from the thresholds — Gib KEINE confidence aus):
+2. Decision (the action follows from the thresholds — Do not output any confidence):
    - Exactly ONE suspicious network with too_large=false → action="block_subnet",
        args={"target_subnet":"<CIDR from networks.network>"}.
        This blocks the WHOLE network (a human must confirm).
@@ -729,7 +729,7 @@ INPUT (JSON):
                        matching the value_type, plus "no_action")
 
 DECISION RULES (first match wins). If an indicator/threshold is
-reached ⇒ Block, otherwise no_action. Gib KEINE confidence aus.
+reached ⇒ Block, otherwise no_action. Do not output any confidence.
 1. OSINT Sophos Intelix hit (security_category set OR
    intelix.score >= 70 OR intelix.category ∈ {Malicious, Phishing, Spam,
    High Risk, Bad})                                  → Block.
@@ -811,7 +811,7 @@ INPUT (JSON):
   - allowed_actions          — ["notify", "no_action"]
 
 DECISION RULES (first match wins). If a pattern/threshold is
-reached ⇒ action="notify", otherwise action="no_action". Gib KEINE confidence aus.
+reached ⇒ action="notify", otherwise action="no_action". Do not output any confidence.
 1. DISTRIBUTED BRUTEFORCE: many distinct source IPs (distinct_ips >=
    distributed_hint_min_ips) attacking the same user — typically few attempts
    per IP, but many in total. → action="notify",
@@ -889,7 +889,7 @@ INPUT (JSON):
                        may be missing.
   - allowed_actions — "block_ip", "isolate", "acknowledge", "no_action"
 
-DECISION RULES (first match wins). Gib KEINE confidence aus.
+DECISION RULES (first match wins). Do not output any confidence.
 1. C2 / active threat with a known external IP (destination_ip OR source_ip
    public) and a malicious finding — event type contains "CommandAndControl"
    or "Threat::Detected", OR OSINT proves maliciousness (intelix hit,
@@ -979,7 +979,7 @@ DECISION RULES (check in order, first match wins):
 4. Otherwise                                                      → no_action.
 
 The anomaly itself (high score) is NOT a reason to block — only OSINT evidence
-counts. Gib KEINE confidence aus.
+counts. Do not output any confidence.
 
 REASONING REQUIREMENTS — always name in the reasoning:
   a) the concrete maliciousness indicators (provider + values); for no_action,
@@ -2515,7 +2515,8 @@ def _connanom_texts(a: dict, lang: str) -> tuple[str, str]:
 
 def _connanom_comment(a: dict, lang: str) -> str:
     kind, detail = _connanom_texts(a, lang)
-    return f"agent[Verbindung]: {kind} — {detail} (Score {a['score']:.2f})"
+    tag = "Verbindung" if lang == "de" else "Connection"
+    return f"agent[{tag}]: {kind} — {detail} (Score {a['score']:.2f})"
 
 
 def _connanom_alert_html(a: dict, lang: str) -> str:
@@ -2741,7 +2742,8 @@ def _conntriage_comment(a: dict, r: dict, lang: str) -> str:
     ct = r.get("connection_type")
     head = ct if ct else ("Verbindung" if lang == "de" else "connection")
     reason = r.get("reasoning") or ""
-    return f"agent[Verbindung]: {head} — {reason}"[:1000]
+    tag = "Verbindung" if lang == "de" else "Connection"
+    return f"agent[{tag}]: {head} — {reason}"[:1000]
 
 
 def _conntriage_alert_html(a: dict, r: dict, lang: str) -> str:
