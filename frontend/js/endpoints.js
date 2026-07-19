@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const EP_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // Endpoint management — inventory (DB-backed, fast) + live actions
 // (isolate/restore/scan/delete) and the Sophos installer downloads.
 
@@ -91,10 +93,10 @@ const HEALTH_BADGE = { good: 'text-bg-success', suspicious: 'text-bg-warning', b
 async function loadStats() {
     try {
         const d = await (await fetch('/api/endpoints/stats')).json();
-        document.getElementById('epTotal').textContent = (d.total || 0).toLocaleString('de-DE');
-        document.getElementById('epOnline').textContent = (d.online || 0).toLocaleString('de-DE');
-        document.getElementById('epBad').textContent = ((d.by_health || {}).bad || 0).toLocaleString('de-DE');
-        document.getElementById('epIsolated').textContent = ((d.by_isolation || {}).isolated || 0).toLocaleString('de-DE');
+        document.getElementById('epTotal').textContent = (d.total || 0).toLocaleString(EP_LOCALE);
+        document.getElementById('epOnline').textContent = (d.online || 0).toLocaleString(EP_LOCALE);
+        document.getElementById('epBad').textContent = ((d.by_health || {}).bad || 0).toLocaleString(EP_LOCALE);
+        document.getElementById('epIsolated').textContent = ((d.by_isolation || {}).isolated || 0).toLocaleString(EP_LOCALE);
     } catch (_) { /* leave dashes */ }
 }
 
@@ -463,7 +465,7 @@ function formatTime(isoStr) {
     if (!isoStr) return '—';
     const d = new Date(isoStr);
     if (isNaN(d)) return escapeHtml(String(isoStr));
-    return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(EP_LOCALE, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 // escapeHtml() / escapeAttr() live in js/common.js

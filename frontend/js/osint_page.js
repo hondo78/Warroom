@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const OSP_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // OSINT query page. Reuses the render helpers from osint.js (_osintRender)
 // and the shared /api/osint/* endpoints, but shows the result inline on the
 // page instead of in the modal. The modal is still present so the 🔍
@@ -46,7 +48,7 @@ async function loadOsintHistory() {
             : `<span class="badge ${s >= 80 ? 'text-bg-danger' : s >= 40 ? 'text-bg-warning' : 'text-bg-secondary'}">${s}%</span>`;
         tbody.innerHTML = items.map(h => {
             const loc = [h.city, h.country].filter(Boolean).join(', ') || '—';
-            const ago = h.last_seen ? new Date(h.last_seen).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+            const ago = h.last_seen ? new Date(h.last_seen).toLocaleString(OSP_LOCALE, { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
             const osint = typeof osintButton === 'function' && h.type === 'ip' ? osintButton(h.value, 'osint-btn', 'ip') : '';
             return `<tr>
                 <td><code style="font-size:.8rem">${escapeHtml(h.value)}</code>${osint}</td>

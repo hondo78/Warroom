@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const ST_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // OSINT-Provider usage statistics: outbound API calls + quota utilization.
 
 let _data = null;
@@ -107,7 +109,7 @@ function renderProviderCards() {
                     </div>
                     <div class="d-flex justify-content-between small text-secondary mt-1">
                         <span>OK ${fmt(p.window.success || 0)} · 404 ${fmt(p.window.no_record || 0)} · ${t('stats.errors')} ${fmt(p.window.error || 0)}</span>
-                        <span>${p.last_called_at ? new Date(p.last_called_at).toLocaleString('de-DE', {dateStyle:'short', timeStyle:'short'}) : '—'}</span>
+                        <span>${p.last_called_at ? new Date(p.last_called_at).toLocaleString(ST_LOCALE, {dateStyle:'short', timeStyle:'short'}) : '—'}</span>
                     </div>
                 </div>
             </div>
@@ -138,7 +140,7 @@ function renderTrend() {
         }
     }
     const days = [...dayMap.keys()].sort();
-    const labels = days.map(d => new Date(d).toLocaleDateString('de-DE', { month: '2-digit', day: '2-digit' }));
+    const labels = days.map(d => new Date(d).toLocaleDateString(ST_LOCALE, { month: '2-digit', day: '2-digit' }));
     const datasets = _data.providers.map(p => {
         const meta = PROVIDER_LABELS[p.provider] || { label: p.provider, color: '#94a3b8' };
         return {
@@ -185,7 +187,7 @@ function renderTable() {
             <td>${monthlyTxt}</td>
             <td class="text-end">${p.cache_hit_rate_pct == null ? '—' : p.cache_hit_rate_pct + ' %'}</td>
             <td class="text-end"><span class="text-success">${fmt(p.window.success || 0)}</span> / <span class="text-secondary">${fmt(p.window.no_record || 0)}</span> / <span class="text-danger">${fmt(p.window.error || 0)}</span></td>
-            <td>${p.last_called_at ? new Date(p.last_called_at).toLocaleString('de-DE') : '—'}</td>
+            <td>${p.last_called_at ? new Date(p.last_called_at).toLocaleString(ST_LOCALE) : '—'}</td>
         </tr>`;
     }).join('');
 }
@@ -194,7 +196,7 @@ function fmt(n) {
     if (n == null) return '—';
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
     if (n >= 10_000) return (n / 1000).toFixed(1) + 'k';
-    return n.toLocaleString('de-DE');
+    return n.toLocaleString(ST_LOCALE);
 }
 
 function setText(id, txt) {
@@ -226,7 +228,7 @@ function renderLlmKpis() {
     setText('llmSuccessTotal', window.t('stats.window_calls', { n: fmt(t.window_calls) }));
     setText('llmAvgMs', t.avg_duration_ms == null ? '—' : Math.round(t.avg_duration_ms));
     setText('llmLastCalled', t.last_called_at
-        ? window.t('stats.last_call_prefix') + ' ' + new Date(t.last_called_at).toLocaleString('de-DE')
+        ? window.t('stats.last_call_prefix') + ' ' + new Date(t.last_called_at).toLocaleString(ST_LOCALE)
         : window.t('stats.last_call_prefix') + ' —');
     setText('llmTokensMonth', fmt(t.month_tokens));
     setText('llmTokensToday', `${window.t('stats.today_prefix')} ${fmt(t.today_tokens)}`);
@@ -266,7 +268,7 @@ function renderLlmSourceChart() {
 
 function renderLlmTrendChart() {
     const totals = _llmData.totals_by_day || [];
-    const labels = totals.map(t => new Date(t.day).toLocaleDateString('de-DE', { month: '2-digit', day: '2-digit' }));
+    const labels = totals.map(t => new Date(t.day).toLocaleDateString(ST_LOCALE, { month: '2-digit', day: '2-digit' }));
     const calls  = totals.map(t => t.count);
     const tokens = totals.map(t => t.prompt_tokens + t.completion_tokens);
     if (_llmTrendChart) _llmTrendChart.destroy();
@@ -314,7 +316,7 @@ function renderLlmSourceTable() {
             <td class="text-end">${fmt(s.prompt_tokens)}</td>
             <td class="text-end">${fmt(s.completion_tokens)}</td>
             <td class="text-end">${s.avg_duration_ms == null ? '—' : Math.round(s.avg_duration_ms)}</td>
-            <td>${s.last_called_at ? new Date(s.last_called_at).toLocaleString('de-DE') : '—'}</td>
+            <td>${s.last_called_at ? new Date(s.last_called_at).toLocaleString(ST_LOCALE) : '—'}</td>
         </tr>`;
     }).join('');
 }
@@ -442,7 +444,7 @@ function renderLlmAnalyzeChart() {
     // Build the day axis from totals_by_day so the chart always has dense
     // x labels even on days where some sources had zero calls.
     const dayLabels = totals.map(t => t.day);
-    const dayDisplay = dayLabels.map(d => new Date(d).toLocaleDateString('de-DE', { month: '2-digit', day: '2-digit' }));
+    const dayDisplay = dayLabels.map(d => new Date(d).toLocaleDateString(ST_LOCALE, { month: '2-digit', day: '2-digit' }));
 
     // Calls per source per day (stacked bars)
     const callDatasets = includedSources.map(src => {

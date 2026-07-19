@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const CHT_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 let timelineChart = null;
 let severityChart = null;
 let categoriesChart = null;
@@ -185,7 +187,7 @@ async function updateTimeline(days) {
 
         const formatDate = (d) => {
             if (!d) return '';
-            return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+            return new Date(d).toLocaleDateString(CHT_LOCALE, { day: '2-digit', month: '2-digit' });
         };
 
         const allDates = new Set();

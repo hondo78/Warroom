@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const EM_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // Email Management page — talks to the /api/email/* proxy, which forwards to
 // the Sophos Central Email API (/email/v1). Field names in Sophos payloads
 // vary a little between API versions, so reads use tolerant `pick()` lookups
@@ -77,7 +79,7 @@ function setApiStatus(ok, msg) {
 
 function updateSelectedCount() {
     const total = selected[false].size + selected[true].size;
-    document.getElementById('statSelected').textContent = total.toLocaleString('de-DE');
+    document.getElementById('statSelected').textContent = total.toLocaleString(EM_LOCALE);
 }
 
 // ---------------------------------------------------------------- Mailboxes
@@ -94,7 +96,7 @@ async function loadMailboxes() {
         else { setApiStatus(true); }
         const items = d.items || [];
         cache.mailboxes = items;
-        document.getElementById('statMailboxes').textContent = d.available ? items.length.toLocaleString('de-DE') : '—';
+        document.getElementById('statMailboxes').textContent = d.available ? items.length.toLocaleString(EM_LOCALE) : '—';
 
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary py-4">${d.available ? t('email.no_mailboxes') : t('email.api_unreachable_full')}</td></tr>`;
@@ -226,7 +228,7 @@ async function loadQuarantine(postDelivery) {
         if (!d.available) setApiStatus(false, d.error); else setApiStatus(true);
         const items = d.items || [];
         cache[postDelivery] = items;
-        document.getElementById(statId).textContent = d.available ? items.length.toLocaleString('de-DE') : '—';
+        document.getElementById(statId).textContent = d.available ? items.length.toLocaleString(EM_LOCALE) : '—';
 
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-4">${d.available ? t('email.no_messages') : t('email.api_unreachable_full')}</td></tr>`;
@@ -386,7 +388,7 @@ function formatTime(isoStr) {
     if (!isoStr) return '—';
     const d = new Date(isoStr);
     if (isNaN(d)) return escapeHtml(String(isoStr));
-    return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(EM_LOCALE, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function truncate(str, n) {

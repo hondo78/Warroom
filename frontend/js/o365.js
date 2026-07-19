@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const O365_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // Microsoft 365 login-audit page. The full result set (≤500 rows) is kept in
 // memory; sorting and per-column filtering happen client-side on re-render.
 
@@ -38,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function formatTime(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
-    return d.toLocaleString('de-DE', {
+    return d.toLocaleString(O365_LOCALE, {
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit',
     });
@@ -53,10 +55,10 @@ async function refreshO365() {
         const s = d.stats || {};
 
         document.getElementById('o365NotConfigured').style.display = d.configured ? 'none' : '';
-        document.getElementById('o365Total').textContent = (s.total ?? 0).toLocaleString('de-DE');
-        document.getElementById('o365Failed').textContent = (s.failed ?? 0).toLocaleString('de-DE');
-        document.getElementById('o365Users').textContent = (s.unique_users ?? 0).toLocaleString('de-DE');
-        document.getElementById('o365Ips').textContent = (s.unique_ips ?? 0).toLocaleString('de-DE');
+        document.getElementById('o365Total').textContent = (s.total ?? 0).toLocaleString(O365_LOCALE);
+        document.getElementById('o365Failed').textContent = (s.failed ?? 0).toLocaleString(O365_LOCALE);
+        document.getElementById('o365Users').textContent = (s.unique_users ?? 0).toLocaleString(O365_LOCALE);
+        document.getElementById('o365Ips').textContent = (s.unique_ips ?? 0).toLocaleString(O365_LOCALE);
 
         _o365Items = d.items || [];
         renderO365Table();
@@ -198,7 +200,7 @@ function renderTopList(tbodyId, rows, labelFn, emptyText) {
         return;
     }
     tbody.innerHTML = rows.map(x =>
-        `<tr><td>${escapeHtml(labelFn(x) || '—')}</td><td style="text-align:right"><strong>${x.count.toLocaleString('de-DE')}</strong></td></tr>`
+        `<tr><td>${escapeHtml(labelFn(x) || '—')}</td><td style="text-align:right"><strong>${x.count.toLocaleString(O365_LOCALE)}</strong></td></tr>`
     ).join('');
 }
 

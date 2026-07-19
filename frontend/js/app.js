@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const APP_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 document.addEventListener('DOMContentLoaded', () => {
     initMap();
     initCharts();
@@ -175,13 +177,13 @@ async function updateIpsWidget() {
         // Stat card
         const totalEl = document.getElementById('ipsTotal');
         const subEl = document.getElementById('ipsSub');
-        if (totalEl) totalEl.textContent = (stats.total || 0).toLocaleString('de-DE');
+        if (totalEl) totalEl.textContent = (stats.total || 0).toLocaleString(APP_LOCALE);
         if (subEl) {
             const dropped = stats.dropped || 0;
             const high = stats.high_severity || 0;
-            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')})];
-            parts.push(t('dash.n_blocked', {n: dropped.toLocaleString('de-DE')}));
-            if (high > 0) parts.push(`${high.toLocaleString('de-DE')} high/critical`);
+            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString(APP_LOCALE)})];
+            parts.push(t('dash.n_blocked', {n: dropped.toLocaleString(APP_LOCALE)}));
+            if (high > 0) parts.push(`${high.toLocaleString(APP_LOCALE)} high/critical`);
             subEl.textContent = parts.join(' · ');
         }
 
@@ -271,7 +273,7 @@ async function updateBlockedOutbound() {
 
         // Header count badge
         const countEl = document.getElementById('blockedOutboundCount');
-        if (countEl) countEl.textContent = (stats.total || 0).toLocaleString('de-DE');
+        if (countEl) countEl.textContent = (stats.total || 0).toLocaleString(APP_LOCALE);
 
         // Summary block (24h / unique dests / unique sources / top lists)
         const sumEl = document.getElementById('blockedOutboundSummary');
@@ -281,9 +283,9 @@ async function updateBlockedOutbound() {
                 return `<div class="waf-sum-block"><span class="waf-sum-title">${title}</span>${entries.map(fmt).join('')}</div>`;
             };
             const facts = [
-                t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')}),
-                t('dash.bo_unique_dests', {n: (stats.unique_dests || 0).toLocaleString('de-DE')}),
-                t('dash.bo_unique_sources', {n: (stats.unique_sources || 0).toLocaleString('de-DE')}),
+                t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString(APP_LOCALE)}),
+                t('dash.bo_unique_dests', {n: (stats.unique_dests || 0).toLocaleString(APP_LOCALE)}),
+                t('dash.bo_unique_sources', {n: (stats.unique_sources || 0).toLocaleString(APP_LOCALE)}),
             ];
             sumEl.innerHTML = [
                 `<div class="waf-sum-block"><span class="waf-sum-title">${t('dash.bo_summary')}</span>${
@@ -350,13 +352,13 @@ async function updateWafWidget() {
         // Stat card — counts attacks only (allowed traffic isn't a "detection")
         const totalEl = document.getElementById('wafTotal');
         const subEl = document.getElementById('wafSub');
-        if (totalEl) totalEl.textContent = (stats.total || 0).toLocaleString('de-DE');
+        if (totalEl) totalEl.textContent = (stats.total || 0).toLocaleString(APP_LOCALE);
         if (subEl) {
             const blocked = stats.blocked || 0;
             const allowed = stats.allowed_all || 0;
-            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString('de-DE')})];
-            parts.push(t('dash.n_blocked', {n: blocked.toLocaleString('de-DE')}));
-            if (allowed > 0) parts.push(t('dash.n_clean', {n: allowed.toLocaleString('de-DE')}));
+            const parts = [t('dash.n_in_24h', {n: (stats.last_24h || 0).toLocaleString(APP_LOCALE)})];
+            parts.push(t('dash.n_blocked', {n: blocked.toLocaleString(APP_LOCALE)}));
+            if (allowed > 0) parts.push(t('dash.n_clean', {n: allowed.toLocaleString(APP_LOCALE)}));
             subEl.textContent = parts.join(' · ');
         }
 
@@ -417,7 +419,7 @@ async function updateWafWidget() {
             const src4 = l.src_4xx || 0;
             const src5 = l.src_5xx || 0;
             const errCell = (src4 || src5)
-                ? `<span class="waf-err-cell" title="${t('dash.waf_hits_in_window')}">${src4 ? `<span class="waf-err-4xx">${src4.toLocaleString('de-DE')}</span>` : ''}${src4 && src5 ? ' / ' : ''}${src5 ? `<span class="waf-err-5xx">${src5.toLocaleString('de-DE')}</span>` : ''}</span>`
+                ? `<span class="waf-err-cell" title="${t('dash.waf_hits_in_window')}">${src4 ? `<span class="waf-err-4xx">${src4.toLocaleString(APP_LOCALE)}</span>` : ''}${src4 && src5 ? ' / ' : ''}${src5 ? `<span class="waf-err-5xx">${src5.toLocaleString(APP_LOCALE)}</span>` : ''}</span>`
                 : '<span class="muted-cell">—</span>';
 
             return `
@@ -553,7 +555,7 @@ async function blockAllFailedLogins() {
 }
 
 function fmtCount(n) {
-    return (n || 0).toLocaleString('de-DE');
+    return (n || 0).toLocaleString(APP_LOCALE);
 }
 
 async function blockIpRequest(ip, comment) {
@@ -782,7 +784,7 @@ async function updateSummary() {
 function formatTime(isoStr) {
     if (!isoStr) return '-';
     const d = new Date(isoStr);
-    return d.toLocaleString('de-DE', {
+    return d.toLocaleString(APP_LOCALE, {
         day: '2-digit', month: '2-digit',
         hour: '2-digit', minute: '2-digit',
     });
@@ -890,8 +892,8 @@ function renderAlertDetail(a) {
     const ipComment = `${a.type || 'alert'} ${a.id}`.slice(0, 80);
     const fields = [
         ['ID', a.id, true],
-        [t('dash.detail_created'), a.created_at ? new Date(a.created_at).toLocaleString('de-DE') : '-'],
-        ['Ingested', a.ingested_at ? new Date(a.ingested_at).toLocaleString('de-DE') : '-'],
+        [t('dash.detail_created'), a.created_at ? new Date(a.created_at).toLocaleString(APP_LOCALE) : '-'],
+        ['Ingested', a.ingested_at ? new Date(a.ingested_at).toLocaleString(APP_LOCALE) : '-'],
         [t('common.severity'), a.severity, false, severityBadge(a.severity)],
         [t('dash.type'), a.type, true],
         [t('dash.category'), a.category],
@@ -901,7 +903,7 @@ function renderAlertDetail(a) {
         ['Lat/Lon', a.lat != null ? `${a.lat}, ${a.lon}` : '-'],
         ['Agent', a.agent],
         ['Tenant', a.tenant_id, true],
-        ['Acknowledged', a.acknowledged_at ? `${new Date(a.acknowledged_at).toLocaleString('de-DE')} (${a.acknowledged_action || ''})` : t('dash.no')],
+        ['Acknowledged', a.acknowledged_at ? `${new Date(a.acknowledged_at).toLocaleString(APP_LOCALE)} (${a.acknowledged_action || ''})` : t('dash.no')],
     ];
 
     const fieldsHtml = fields.map(([label, value, mono, raw]) => {

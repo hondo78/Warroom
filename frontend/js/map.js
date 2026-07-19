@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const MAP_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 let attackMap = null;
 let attackerMarkers = null;
 let firewallMarkers = null;
@@ -306,7 +308,7 @@ function _popEsc(str) {
 function _popTime(iso) {
     if (!iso) return '-';
     const d = new Date(iso);
-    return d.toLocaleString('de-DE', {
+    return d.toLocaleString(MAP_LOCALE, {
         day: '2-digit', month: '2-digit', year: '2-digit',
         hour: '2-digit', minute: '2-digit',
     });
@@ -361,7 +363,7 @@ function buildAttackPopup(atk) {
         `<div class="popup-row"><span class="popup-key">Richtung:</span> <span class="popup-val ${dirCls}">${dirLabel}</span></div>`,
         `<div class="popup-row"><span class="popup-key">Standort:</span> <span class="popup-val">${loc}</span></div>`,
         asnLine,
-        `<div class="popup-row"><span class="popup-key">Angriffe:</span> <span class="popup-val"><strong>${(atk.count || 0).toLocaleString('de-DE')}</strong></span></div>`,
+        `<div class="popup-row"><span class="popup-key">Angriffe:</span> <span class="popup-val"><strong>${(atk.count || 0).toLocaleString(MAP_LOCALE)}</strong></span></div>`,
         `<div class="popup-row"><span class="popup-key">Schwere:</span> <span class="popup-val" style="color:${sevColor}">${sev}</span></div>`,
         `<div class="popup-row"><span class="popup-key">Quelle:</span> <span class="popup-val">${_popEsc(_popSourceLabel(atk.source))}</span></div>`,
         `<div class="popup-row"><span class="popup-key">Erster:</span> <span class="popup-val">${_popTime(atk.first_seen)}</span></div>`,

@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const OS_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 // OSINT helpers — shared between dashboard, netflow and blocklist page.
 // Provides showOsint(value, type), closeOsint(), reloadOsint(), and an
 // osintButton(value, classes, type) helper. `type` is 'ip' (default),
@@ -285,7 +287,7 @@ function _osintFmtBytes(b) {
 
 function _osintFmtTs(iso) {
     if (!iso) return '—';
-    try { return new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    try { return new Date(iso).toLocaleString(OS_LOCALE, { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); }
     catch (e) { return '—'; }
 }
 
@@ -297,15 +299,15 @@ function _osintConnTable(side, label, arrow) {
         <td>${x.port != null ? x.port : '—'}</td>
         <td>${_osintEscape(_osintProtoName(x.protocol))}</td>
         <td style="text-align:right">${_osintFmtBytes(x.bytes)}</td>
-        <td style="text-align:right">${(x.flows || 0).toLocaleString('de-DE')}</td>
+        <td style="text-align:right">${(x.flows || 0).toLocaleString(OS_LOCALE)}</td>
         <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
     </tr>`).join('');
     const ge = side.truncated ? '≥ ' : '';
     const trunc = side.truncated ? ` · ${t('osint.top', { n: c.length })}` : '';
     return `
         <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
-            ${arrow} <strong>${label}</strong>: ${ge}${(side.peers || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.peers'))} ·
-            ${ge}${_osintFmtBytes(side.bytes)} · ${ge}${(side.flows || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.flows'))}${trunc}
+            ${arrow} <strong>${label}</strong>: ${ge}${(side.peers || 0).toLocaleString(OS_LOCALE)} ${_osintEscape(t('osint.peers'))} ·
+            ${ge}${_osintFmtBytes(side.bytes)} · ${ge}${(side.flows || 0).toLocaleString(OS_LOCALE)} ${_osintEscape(t('osint.flows'))}${trunc}
         </div>
         <div class="table-scroll" style="max-height:240px">
             <table class="table table-sm table-hover align-middle" style="margin:0">
@@ -323,14 +325,14 @@ function _osintFwTable(side, label, arrow) {
         <td>${x.port != null ? x.port : '—'}</td>
         <td>${_osintEscape(x.protocol || '—')}</td>
         <td><span class="badge text-bg-danger" style="font-size:.66rem">${_osintEscape(x.action || 'deny')}</span></td>
-        <td style="text-align:right">${(x.events || 0).toLocaleString('de-DE')}</td>
+        <td style="text-align:right">${(x.events || 0).toLocaleString(OS_LOCALE)}</td>
         <td style="white-space:nowrap">${_osintFmtTs(x.last_seen)}</td>
     </tr>`).join('');
     const trunc = side.truncated ? ` · ${t('osint.top', { n: c.length })}` : '';
     return `
         <div class="osint-conn-head" style="margin:.6rem 0 .3rem">
-            ${arrow} <strong>${label}</strong>: ${(side.peers || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.peers'))} ·
-            ${(side.events || 0).toLocaleString('de-DE')} ${_osintEscape(t('osint.attempts'))}${trunc}
+            ${arrow} <strong>${label}</strong>: ${(side.peers || 0).toLocaleString(OS_LOCALE)} ${_osintEscape(t('osint.peers'))} ·
+            ${(side.events || 0).toLocaleString(OS_LOCALE)} ${_osintEscape(t('osint.attempts'))}${trunc}
         </div>
         <div class="table-scroll" style="max-height:240px">
             <table class="table table-sm table-hover align-middle" style="margin:0">
@@ -568,7 +570,7 @@ function _osintRenderVTDomain(p) {
             .map(([engine, cat]) => `<span class="osint-tag">${_osintEscape(cat)} <em>(${_osintEscape(engine)})</em></span>`).join(' ')
         : '';
     const createdAt = p.creation_date
-        ? new Date(p.creation_date * 1000).toLocaleDateString('de-DE')
+        ? new Date(p.creation_date * 1000).toLocaleDateString(OS_LOCALE)
         : '';
     return `
         <dl class="detail-grid osint-dl">

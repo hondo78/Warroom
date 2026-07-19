@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const FW_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 document.addEventListener('DOMContentLoaded', () => {
     refreshFirewalls();
     // 120s matches the /api/firewalls/extended cache TTL — refreshing more often
@@ -118,10 +120,10 @@ async function refreshFirewalls() {
         // Stats reflect FIREWALL count, not IP count
         const totalIps = items.reduce((s, x) => s + (x.ip_count || 0), 0);
         const wlIps = items.reduce((s, x) => s + (x.whitelisted_count || 0), 0);
-        document.getElementById('fwCount').textContent = items.length.toLocaleString('de-DE');
+        document.getElementById('fwCount').textContent = items.length.toLocaleString(FW_LOCALE);
         document.getElementById('fwWhitelisted').textContent = `${wlIps} / ${totalIps}`;
-        document.getElementById('fwIfaces').textContent = items.reduce((s, x) => s + (x.iface_count || 0), 0).toLocaleString('de-DE');
-        document.getElementById('fwLogs').textContent = items.reduce((s, x) => s + (x.log_count || 0), 0).toLocaleString('de-DE');
+        document.getElementById('fwIfaces').textContent = items.reduce((s, x) => s + (x.iface_count || 0), 0).toLocaleString(FW_LOCALE);
+        document.getElementById('fwLogs').textContent = items.reduce((s, x) => s + (x.log_count || 0), 0).toLocaleString(FW_LOCALE);
 
         const tbody = document.getElementById('fwListTable');
         if (!items.length) {
@@ -146,7 +148,7 @@ async function refreshFirewalls() {
                     ? `<span class="ip-country" style="font-size:.7rem${isWan ? ';background:rgba(239,68,68,.16);color:var(--accent-red)' : ''}">${escapeHtml(ipObj.zone)}</span>`
                     : '<span style="color:var(--text-secondary)">—</span>';
                 const activity = [];
-                if (ipObj.log_count) activity.push(`${ipObj.log_count.toLocaleString('de-DE')} logs`);
+                if (ipObj.log_count) activity.push(`${ipObj.log_count.toLocaleString(FW_LOCALE)} logs`);
                 if (ipObj.iface_count) activity.push(`${ipObj.iface_count} ifaces`);
                 const wlCell = !ipObj.whitelisted
                     ? `<button class="block-link" onclick="whitelistIp('${escapeAttr(ipObj.ip)}', '${escapeAttr(fw.name || ipObj.ip)}', this)" title="${escapeAttr(t('firewalls.tipWhitelistThisIp'))}">+wl</button>`
@@ -206,7 +208,7 @@ async function refreshFirewalls() {
                     <td>${wanPreview}</td>
                     <td>${locCell}</td>
                     <td>${ifaceLink}</td>
-                    <td>${(fw.log_count || 0).toLocaleString('de-DE')}</td>
+                    <td>${(fw.log_count || 0).toLocaleString(FW_LOCALE)}</td>
                     <td>${lastLog}</td>
                     <td>${lastFlow}</td>
                     <td>${wlSummary}</td>
@@ -246,8 +248,8 @@ async function showIfacesForFw(ipsCsv, name) {
                 <td>${escapeHtml(it.name || '-')}</td>
                 <td>${formatBytes(it.bytes_in)}</td>
                 <td>${formatBytes(it.bytes_out)}</td>
-                <td>${(it.flows_in || 0).toLocaleString('de-DE')}</td>
-                <td>${(it.flows_out || 0).toLocaleString('de-DE')}</td>
+                <td>${(it.flows_in || 0).toLocaleString(FW_LOCALE)}</td>
+                <td>${(it.flows_out || 0).toLocaleString(FW_LOCALE)}</td>
                 <td>${formatTime(it.last_seen)}</td>
             </tr>`).join('');
         document.getElementById('fwIfaceCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
@@ -309,8 +311,8 @@ async function showIfaces(ip, name) {
                 <td>${escapeHtml(it.name || '-')}</td>
                 <td>${formatBytes(it.bytes_in)}</td>
                 <td>${formatBytes(it.bytes_out)}</td>
-                <td>${(it.flows_in || 0).toLocaleString('de-DE')}</td>
-                <td>${(it.flows_out || 0).toLocaleString('de-DE')}</td>
+                <td>${(it.flows_in || 0).toLocaleString(FW_LOCALE)}</td>
+                <td>${(it.flows_out || 0).toLocaleString(FW_LOCALE)}</td>
                 <td>${formatTime(it.last_seen)}</td>
             </tr>`).join('');
         document.getElementById('fwIfaceCard').scrollIntoView({behavior: 'smooth', block: 'nearest'});
@@ -372,7 +374,7 @@ async function refreshWhitelistFromHere() {
 function formatTime(isoStr) {
     if (!isoStr) return '—';
     const d = new Date(isoStr);
-    return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(FW_LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatBytes(b) {

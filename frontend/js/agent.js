@@ -1,3 +1,5 @@
+// Language-aware number/date formatting (en-US unless UI is German).
+const AG_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
 let _aTimelineChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -26,11 +28,11 @@ async function updateAgentStats() {
         const r = await fetch('/api/agent/decisions/stats');
         const d = await r.json();
         const by = d.by_status || {};
-        document.getElementById('aTotal').textContent = (d.total || 0).toLocaleString('de-DE');
-        document.getElementById('aPending').textContent = (by.pending || 0).toLocaleString('de-DE');
-        document.getElementById('aExecuted').textContent = (by.executed || 0).toLocaleString('de-DE');
-        document.getElementById('aRejected').textContent = ((by.rejected || 0) + (by.superseded || 0) + (by.declined || 0)).toLocaleString('de-DE');
-        document.getElementById('aFailed').textContent = (by.failed || 0).toLocaleString('de-DE');
+        document.getElementById('aTotal').textContent = (d.total || 0).toLocaleString(AG_LOCALE);
+        document.getElementById('aPending').textContent = (by.pending || 0).toLocaleString(AG_LOCALE);
+        document.getElementById('aExecuted').textContent = (by.executed || 0).toLocaleString(AG_LOCALE);
+        document.getElementById('aRejected').textContent = ((by.rejected || 0) + (by.superseded || 0) + (by.declined || 0)).toLocaleString(AG_LOCALE);
+        document.getElementById('aFailed').textContent = (by.failed || 0).toLocaleString(AG_LOCALE);
         const actorMix = d.by_actor || {};
         document.getElementById('aActorMix').textContent = `${actorMix.agent || 0} ${t('agent.actor_agent')} · ${actorMix.human || 0} ${t('agent.actor_human')}`;
     } catch (err) { console.error(err); }
@@ -571,7 +573,7 @@ async function agentWafRunNow() { return agentRunNowRule('waf'); }
 function formatTime(isoStr) {
     if (!isoStr) return '-';
     const d = new Date(isoStr);
-    return d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(AG_LOCALE, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 // escapeHtml() lives in js/common.js
