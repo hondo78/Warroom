@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+      - name: Run tests
+        working-directory: backend
+        run: pytest
+
+  frontend-syntax:
+    name: Frontend JS/i18n syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax-check JS + i18n dictionaries
+        run: |
+          set -e
+          for f in frontend/js/*.js frontend/i18n/*.js; do
+            node --check "$f"
+          done
+          echo "all JS/i18n files parse"
