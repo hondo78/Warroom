@@ -69,6 +69,9 @@ async def lifespan(app: FastAPI):
             "Set WARROOM_API_KEY in .env to require authentication on /api/*."
         )
     await ensure_schema()
+    # Encrypt any plaintext secrets already in app_settings (one-time, idempotent).
+    from app.settings_store import encrypt_existing_secrets
+    await encrypt_existing_secrets()
     # Merge DB overrides on top of .env defaults before any client uses settings.
     await apply_overrides_to_settings()
     sophos_client.reload()

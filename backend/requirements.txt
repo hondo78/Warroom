@@ -11,3 +11,4 @@ python-dotenv==1.0.1
 tenacity==9.0.0
 dnspython==2.7.0
 mcp==1.28.1
+cryptography>=42.0

@@ -33,3 +33,6 @@ postgres_data/
 
 # graphify generated knowledge graph (local artifact)
 graphify-out/
+
+# Secret-encryption key (app/crypto.py) — never commit
+data/

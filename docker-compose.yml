@@ -40,6 +40,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./geoip:/app/geoip
+      # Persists the secret-encryption key (app/crypto.py) outside the DB. Back up
+      # ./data — losing the key makes stored secrets unrecoverable.
+      - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy

@@ -204,9 +204,34 @@ def _to_str(value: Any) -> str:
 
 
 async def load_overrides() -> dict[str, str]:
+    from app.crypto import decrypt
     async with async_session() as s:
         rows = (await s.execute(select(AppSetting))).scalars().all()
-    return {r.key: r.value for r in rows if r.key in MANAGED_KEYS}
+    return {
+        r.key: (decrypt(r.value) if r.key in SECRET_KEYS else r.value)
+        for r in rows if r.key in MANAGED_KEYS
+    }
+
+
+async def encrypt_existing_secrets() -> int:
+    """One-time migration: encrypt any plaintext SECRET_KEYS rows already in
+    app_settings. Idempotent (skips already-encrypted values); no-op when no
+    encryption key is available. Run at startup."""
+    from app.crypto import encrypt, is_encrypted, encryption_available
+    if not encryption_available():
+        return 0
+    changed = 0
+    async with async_session() as s:
+        rows = (await s.execute(select(AppSetting))).scalars().all()
+        for r in rows:
+            if r.key in SECRET_KEYS and r.value and not is_encrypted(r.value):
+                r.value = encrypt(r.value)
+                changed += 1
+        if changed:
+            await s.commit()
+    if changed:
+        logger.info(f"Encrypted {changed} plaintext secret(s) at rest")
+    return changed
 
 
 async def apply_overrides_to_settings() -> None:
@@ -233,13 +258,17 @@ async def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
     if not sane:
         return {}
 
+    # Secret values are encrypted at rest; the live singleton (below) keeps the
+    # plaintext so clients keep working.
+    from app.crypto import encrypt
     async with async_session() as s:
         for k, v in sane.items():
+            db_val = encrypt(v) if k in SECRET_KEYS else v
             existing = await s.get(AppSetting, k)
             if existing is None:
-                s.add(AppSetting(key=k, value=v))
+                s.add(AppSetting(key=k, value=db_val))
             else:
-                existing.value = v
+                existing.value = db_val
         await s.commit()
 
     interval_changed = "collector_interval" in sane
