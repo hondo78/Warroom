@@ -83,12 +83,18 @@ async function loadSessions() {
             title.textContent = s.title || 'Chat';
             title.title = `${s.title || 'Chat'} · ${s.messages} ${t('chat.msg_count')}`;
             title.addEventListener('click', () => openSession(s.id));
+            title.addEventListener('dblclick', () => renameSession(s.id, s.title));
+            const ren = document.createElement('span');
+            ren.className = 's-ren';
+            ren.innerHTML = '<i class="bi bi-pencil"></i>';
+            ren.title = t('chat.rename');
+            ren.addEventListener('click', ev => { ev.stopPropagation(); renameSession(s.id, s.title); });
             const del = document.createElement('span');
             del.className = 's-del';
             del.innerHTML = '<i class="bi bi-trash"></i>';
             del.title = t('common.delete') || 'Delete';
             del.addEventListener('click', ev => { ev.stopPropagation(); deleteSession(s.id); });
-            item.append(title, del);
+            item.append(title, ren, del);
             list.appendChild(item);
         });
     } catch (e) { /* ignore */ }
@@ -108,6 +114,21 @@ async function openSession(id) {
         });
         if (!(d.messages || []).length) botMsg(t('chat.greeting'));
         _markActive();
+    } catch (e) { /* ignore */ }
+}
+
+async function renameSession(id, current) {
+    const name = prompt(t('chat.rename_prompt'), current || '');
+    if (name === null) return;   // cancelled
+    const title = name.trim();
+    if (!title) return;
+    try {
+        await fetch(`/api/chat/sessions/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+        loadSessions();
     } catch (e) { /* ignore */ }
 }
 

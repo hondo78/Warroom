@@ -4862,6 +4862,25 @@ async def get_chat_session(session_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+class ChatSessionRenameIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+@app.patch("/api/chat/sessions/{session_id}")
+async def rename_chat_session(session_id: int, body: ChatSessionRenameIn,
+                              db: AsyncSession = Depends(get_db)):
+    """Rename a chat session."""
+    from app.models import ChatSession
+    s = (await db.execute(
+        select(ChatSession).where(ChatSession.id == session_id)
+    )).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    s.title = body.title.strip()[:200] or s.title
+    await db.commit()
+    return {"ok": True, "id": s.id, "title": s.title}
+
+
 @app.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a chat session (its messages cascade)."""

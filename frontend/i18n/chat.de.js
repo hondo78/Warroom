@@ -8,6 +8,8 @@ window.I18N.de.chat = {
     chip_osint: "OSINT 8.8.8.8",
     greeting: "Hi! Ich bin dein **Warroom Analyst**. Frag mich frei zu Bedrohungen, CVEs, IPs/Domains, Logs — oder gib direkte Befehle wie „blockiere 1.2.3.4“, „isoliere PC-12345“, „zeig die Quarantäne“, „OSINT zu 8.8.8.8“, „Statistik-Report“. „hilfe“ zeigt die Befehle.",
     new_session: "Neuer Chat",
+    rename: "Umbenennen",
+    rename_prompt: "Neuer Name für die Session:",
     no_sessions: "Noch keine Sitzungen",
     msg_count: "Nachrichten",
     no_reply: "(keine Antwort)",

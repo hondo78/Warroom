@@ -19,7 +19,8 @@
         .session-item:hover { border-color: rgba(255,255,255,.2); }
         .session-item.active { border-color: var(--accent-blue, #2563eb); background: rgba(37,99,235,.15); }
         .session-item .s-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; flex: 1; }
-        .session-item .s-del { opacity: .45; cursor: pointer; font-size: .8rem; }
+        .session-item .s-ren, .session-item .s-del { opacity: .45; cursor: pointer; font-size: .8rem; }
+        .session-item .s-ren:hover { opacity: 1; color: var(--accent-blue, #3b82f6); }
         .session-item .s-del:hover { opacity: 1; color: var(--accent-red, #ef4444); }
         .session-empty { font-size: .78rem; opacity: .5; padding: .4rem .2rem; }
         @media (max-width: 720px) { .chat-layout { flex-direction: column; } .chat-sessions { width: 100%; flex: none; } .session-list { max-height: 30vh; } }
