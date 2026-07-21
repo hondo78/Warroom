@@ -267,6 +267,17 @@ async def osint_lookup(ips: list[str], limit: int = 10) -> dict:
 
 
 @mcp.tool()
+async def ip_dossier(ip: str, days: int = 30) -> dict:
+    """Everything Warroom knows about one IP in a single view: firewall-log
+    activity (as source and destination), NetFlow volume, OSINT + Tor exit-node
+    status, honeypot hits, blocklist/whitelist status, recent AI-agent decisions,
+    and host identity (hostname/MAC for internal IPs). Read-only — use it to
+    triage an IP you found in the logs."""
+    from app.ip_dossier import build_dossier
+    return await build_dossier(ip, max(1, min(int(days), 365)))
+
+
+@mcp.tool()
 async def describe_logs() -> dict:
     """Describe the firewall_logs dataset: available fields, the current time
     span, total rows, and the distinct values of the key categorical fields

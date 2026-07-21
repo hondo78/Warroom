@@ -3430,6 +3430,15 @@ async def set_anomaly_verdict(body: AnomalyVerdictIn, db: AsyncSession = Depends
             "created_by": "human", "updated_at": now.isoformat()}
 
 
+@app.get("/api/ip/{ip}/dossier")
+@cached(ttl=120)
+async def ip_dossier_endpoint(ip: str, days: int = Query(default=30, ge=1, le=365)):
+    """Everything Warroom knows about one IP (firewall, netflow, OSINT/Tor,
+    honeypot, blocklist, agent decisions, host identity) in a single view."""
+    from app.ip_dossier import build_dossier
+    return await build_dossier(ip, days)
+
+
 @app.get("/api/ip/{ip}/connections")
 @cached(ttl=120)
 async def ip_connections(
