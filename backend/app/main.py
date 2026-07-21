@@ -105,6 +105,10 @@ async def lifespan(app: FastAPI):
     # @cached TTL (30s) so cache entries always overlap.
     scheduler.add_job(warm_dashboard_cache, "interval", seconds=25, id="cache_warmer")
     scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
+    # Slow-tier warmer for the heavy 30-day stat views (JSON-heavy aggregates).
+    scheduler.add_job(warm_heavy_stats, "interval", seconds=600, id="heavy_stats_warmer",
+                      max_instances=1, coalesce=True)
+    scheduler.add_job(warm_heavy_stats, "date", id="initial_heavy_warm")
     # Keep the attack-map daily rollup (fw_map_daily) current — folds newly
     # ingested firewall_logs in by id watermark. max_instances=1 so a slow catch-up
     # never overlaps itself.
@@ -553,7 +557,7 @@ async def get_severity_distribution(
 
 
 @app.get("/api/stats/timeline")
-@cached(ttl=300)
+@cached(ttl=1200)
 async def get_timeline(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -1699,7 +1703,7 @@ async def get_shodan_hosts(
 # --- Firewall Stats ---
 
 @app.get("/api/stats/firewall-events")
-@cached(ttl=300)
+@cached(ttl=1200)
 async def get_firewall_event_stats(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
@@ -4322,7 +4326,7 @@ _WAF_ATTACK_FILTER_SQL = """(
 
 
 @app.get("/api/firewall-logs/waf/stats")
-@cached(ttl=300)
+@cached(ttl=1200)
 async def get_waf_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -4570,7 +4574,7 @@ _IPS_FILTER_SQL = """(
 
 
 @app.get("/api/firewall-logs/ips/stats")
-@cached(ttl=300)
+@cached(ttl=1200)
 async def get_ips_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -4742,7 +4746,7 @@ _BLOCKED_OUTBOUND_WHERE = (
 
 
 @app.get("/api/firewall-logs/blocked-outbound/stats")
-@cached(ttl=300)
+@cached(ttl=1200)
 async def get_blocked_outbound_stats(
     days: int = Query(default=7, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
@@ -6775,3 +6779,45 @@ async def warm_dashboard_cache() -> None:
         f"cache warmer: {results['ok']} ok / {results['fail']} failed "
         f"in {time.monotonic() - start:.2f}s"
     )
+
+
+# The 30-day stat views aggregate raw firewall_logs (JSON-heavy, 15-40s cold) and
+# aren't cleanly rollup-able, so we pre-compute them in the background on a slow
+# cadence instead — the endpoints' long TTL (1200s) keeps a warmed 30-day result
+# fresh between ticks, so the tabs open instantly while the DB pays the cost off
+# the request path.
+_WARM_TARGETS_HEAVY: list[tuple[str, dict]] = [
+    ("get_waf_stats", {"days": 30}),
+    ("get_ips_stats", {"days": 30}),
+    ("get_blocked_outbound_stats", {"days": 30}),
+    ("get_firewall_event_stats", {"days": 30}),
+    ("get_timeline", {"days": 30}),
+]
+
+
+async def warm_heavy_stats() -> None:
+    """Pre-warm the slow 30-day stat endpoints (low concurrency, off the request
+    path). Scheduled every 10 min; failures on one target don't block the others."""
+    import asyncio
+    import time
+    sem = asyncio.Semaphore(2)
+    start = time.monotonic()
+    ok = fail = 0
+
+    async def warm_one(name: str, kwargs: dict):
+        nonlocal ok, fail
+        func = globals().get(name)
+        if func is None:
+            fail += 1
+            return
+        async with sem:
+            try:
+                async with async_session() as db:
+                    await func(db=db, **kwargs)
+                ok += 1
+            except Exception as e:
+                fail += 1
+                logger.warning(f"heavy warmer: {name} failed: {e}")
+
+    await asyncio.gather(*(warm_one(n, kw) for n, kw in _WARM_TARGETS_HEAVY))
+    logger.info(f"heavy stats warmer: {ok} ok / {fail} failed in {time.monotonic() - start:.2f}s")
