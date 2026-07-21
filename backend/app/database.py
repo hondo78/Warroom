@@ -562,6 +562,30 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, id)",
     "CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC)",
+    # --- Users, roles & audit log (opt-in auth, gated by auth_enabled) --------
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGSERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'analyst',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_login TIMESTAMP WITH TIME ZONE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        username TEXT,
+        role TEXT,
+        method TEXT,
+        path TEXT,
+        status INTEGER,
+        ip TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)",
 ]
 
 

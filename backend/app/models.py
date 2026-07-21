@@ -602,3 +602,27 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     tool = Column(Text)                          # resolved tool for assistant turns
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(BigInteger, primary_key=True)
+    username = Column(Text, unique=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    role = Column(Text, nullable=False, default="analyst")   # viewer | analyst | admin
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True))
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(BigInteger, primary_key=True)
+    username = Column(Text)
+    role = Column(Text)
+    method = Column(Text)
+    path = Column(Text)
+    status = Column(Integer)
+    ip = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

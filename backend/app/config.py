@@ -146,6 +146,11 @@ class Settings(BaseSettings):
     # /api/* request must carry an X-API-Key header matching this value.
     warroom_api_key: str = ""
 
+    # --- User auth (opt-in). Off by default: unchanged X-API-Key behaviour.
+    # When on, browser endpoints require a login session; machine paths (IOC
+    # feeds, honeypot, teams) keep their own auth. See app/auth.py.
+    auth_enabled: bool = False
+
     # --- AI agent ---
     agent_enabled: bool = False
     agent_provider: str = "lmstudio"  # lmstudio | openai-compatible (extensible)

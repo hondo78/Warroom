@@ -41,24 +41,43 @@ scheduler = AsyncIOScheduler()
 
 
 async def verify_api_key(request: Request, x_api_key: str | None = Header(default=None)):
-    # The Teams webhook authenticates itself with its own HMAC signature
-    # (Teams never sends X-API-Key), so it is exempt from the global key check.
-    if request.url.path.startswith("/api/teams/"):
+    path = request.url.path
+    # Self-authenticating machine paths: Teams (own HMAC) and honeypot pods (own
+    # per-pod bearer token) never send X-API-Key and verify inline.
+    if path.startswith("/api/teams/") or path.startswith("/api/honeypot/agent/"):
         return
-    # Honeypot pods authenticate with their own per-pod bearer token (they run on
-    # remote hosts and never hold the Warroom API key), so the agent-facing
-    # endpoints are exempt from the global key check and verify the token inline.
-    if request.url.path.startswith("/api/honeypot/agent/"):
+    # Auth endpoints manage their own access (login must always be reachable).
+    if path.startswith("/api/auth/"):
         return
-    expected = settings.warroom_api_key
-    if not expected:
-        # Open mode: warning is logged once at startup; do not block.
+
+    def _legacy_key_check():
+        # Unchanged X-API-Key rule: require the key if configured, else open.
+        expected = settings.warroom_api_key
+        if not expected:
+            return
+        if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="invalid or missing X-API-Key")
+
+    # Non-/api paths are machine endpoints (IOC feeds /ioc_*): always the legacy
+    # key rule, regardless of auth_enabled — the firewall pulls them with the key.
+    if not path.startswith("/api/"):
+        _legacy_key_check()
         return
-    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid or missing X-API-Key",
-        )
+
+    if settings.auth_enabled:
+        # Opt-in user auth: /api/* browser endpoints require a login session.
+        from app.auth import get_current_user, ROLE_ORDER
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="login required")
+        request.state.user = user
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and \
+                ROLE_ORDER.get(user.get("r"), 0) < ROLE_ORDER["analyst"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="read-only role")
+        return
+
+    _legacy_key_check()
 
 
 @asynccontextmanager
@@ -72,6 +91,8 @@ async def lifespan(app: FastAPI):
     # Encrypt any plaintext secrets already in app_settings (one-time, idempotent).
     from app.settings_store import encrypt_existing_secrets
     await encrypt_existing_secrets()
+    # Ensure a login exists (so enabling auth_enabled never locks anyone out).
+    await _bootstrap_admin()
     # Merge DB overrides on top of .env defaults before any client uses settings.
     await apply_overrides_to_settings()
     sophos_client.reload()
@@ -254,6 +275,200 @@ app = FastAPI(title="Warroom API", lifespan=lifespan, dependencies=[Depends(veri
 # streamable_http_app(), which lazily creates the session manager the lifespan runs.
 from app.mcp_server import mcp_asgi_app
 app.mount("/mcp", mcp_asgi_app())
+
+
+# --- User auth, roles & audit log (opt-in via auth_enabled) -----------------
+
+@app.middleware("http")
+async def _audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        path = request.url.path
+        if (settings.auth_enabled and request.method in ("POST", "PUT", "PATCH", "DELETE")
+                and path.startswith("/api/") and not path.startswith("/api/auth/")
+                and not path.startswith("/api/honeypot/agent/")
+                and not path.startswith("/api/teams/")):
+            user = getattr(request.state, "user", None) or {}
+            from app.models import AuditLog
+            async with async_session() as db:
+                db.add(AuditLog(
+                    username=user.get("u"), role=user.get("r"),
+                    method=request.method, path=path, status=response.status_code,
+                    ip=(request.client.host if request.client else None),
+                ))
+                await db.commit()
+    except Exception as e:
+        logger.debug(f"audit log write failed: {e}")
+    return response
+
+
+async def _bootstrap_admin() -> None:
+    """Create an initial admin user if none exists, so enabling auth never locks
+    anyone out. Password from WARROOM_ADMIN_PASSWORD, else generated + logged once."""
+    import os
+    import secrets as _secrets
+    from app.auth import hash_password
+    from app.models import User
+    async with async_session() as db:
+        if (await db.execute(select(func.count(User.id)))).scalar():
+            return
+        username = os.environ.get("WARROOM_ADMIN_USER", "admin")
+        env_pw = os.environ.get("WARROOM_ADMIN_PASSWORD")
+        pw = env_pw or _secrets.token_urlsafe(12)
+        db.add(User(username=username, password_hash=hash_password(pw), role="admin"))
+        await db.commit()
+    if env_pw:
+        logger.warning(f"AUTH: created bootstrap admin '{username}' (password from WARROOM_ADMIN_PASSWORD).")
+    else:
+        logger.warning(f"AUTH: created bootstrap admin '{username}' with generated password: "
+                       f"{pw}  — log in and change it in Admin → Users.")
+
+
+class LoginIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class UserIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=6, max_length=256)
+    role: str = "analyst"
+
+
+class UserUpdateIn(BaseModel):
+    password: str | None = Field(default=None, min_length=6, max_length=256)
+    role: str | None = None
+
+
+def _require_admin(request: Request) -> dict:
+    from app.auth import get_current_user, has_role
+    user = getattr(request.state, "user", None) or get_current_user(request)
+    if not has_role(user, "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+    return user
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: LoginIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
+    from app.auth import verify_password, make_session, set_session_cookie
+    from app.models import User, AuditLog
+    u = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
+    ok = u is not None and verify_password(body.password, u.password_hash)
+    db.add(AuditLog(username=body.username, role=(u.role if u else None),
+                    method="POST", path="/api/auth/login",
+                    status=200 if ok else 401,
+                    ip=(request.client.host if request.client else None)))
+    if not ok:
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+    u.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    resp = JSONResponse({"username": u.username, "role": u.role})
+    set_session_cookie(resp, make_session(u.id, u.username, u.role))
+    return resp
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    from fastapi.responses import JSONResponse
+    from app.auth import clear_session_cookie
+    resp = JSONResponse({"ok": True})
+    clear_session_cookie(resp)
+    return resp
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    from app.auth import get_current_user
+    if not settings.auth_enabled:
+        return {"auth_enabled": False}
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+    return {"auth_enabled": True, "username": user["u"], "role": user["r"]}
+
+
+@app.get("/api/auth/users")
+async def auth_list_users(request: Request, db: AsyncSession = Depends(get_db)):
+    _require_admin(request)
+    from app.models import User
+    rows = (await db.execute(select(User).order_by(User.username))).scalars().all()
+    return {"users": [{
+        "id": u.id, "username": u.username, "role": u.role,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "last_login": u.last_login.isoformat() if u.last_login else None,
+    } for u in rows]}
+
+
+@app.post("/api/auth/users")
+async def auth_create_user(body: UserIn, request: Request, db: AsyncSession = Depends(get_db)):
+    _require_admin(request)
+    from app.auth import hash_password, ROLES
+    from app.models import User
+    if body.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {ROLES}")
+    if (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="username already exists")
+    u = User(username=body.username, password_hash=hash_password(body.password), role=body.role)
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    return {"id": u.id, "username": u.username, "role": u.role}
+
+
+@app.patch("/api/auth/users/{user_id}")
+async def auth_update_user(user_id: int, body: UserUpdateIn, request: Request,
+                           db: AsyncSession = Depends(get_db)):
+    _require_admin(request)
+    from app.auth import hash_password, ROLES
+    from app.models import User
+    u = await db.get(User, user_id)
+    if u is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    if body.role is not None:
+        if body.role not in ROLES:
+            raise HTTPException(status_code=400, detail="invalid role")
+        if u.role == "admin" and body.role != "admin":
+            admins = (await db.execute(select(func.count(User.id)).where(User.role == "admin"))).scalar() or 0
+            if admins <= 1:
+                raise HTTPException(status_code=400, detail="cannot demote the last admin")
+        u.role = body.role
+    if body.password:
+        u.password_hash = hash_password(body.password)
+    await db.commit()
+    return {"ok": True, "id": u.id, "role": u.role}
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def auth_delete_user(user_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    me = _require_admin(request)
+    from app.models import User
+    u = await db.get(User, user_id)
+    if u is None:
+        return {"ok": True}
+    if u.username == me.get("u"):
+        raise HTTPException(status_code=400, detail="cannot delete yourself")
+    if u.role == "admin":
+        admins = (await db.execute(select(func.count(User.id)).where(User.role == "admin"))).scalar() or 0
+        if admins <= 1:
+            raise HTTPException(status_code=400, detail="cannot delete the last admin")
+    await db.delete(u)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/audit")
+async def audit_log_list(request: Request, limit: int = Query(default=200, ge=1, le=1000),
+                         db: AsyncSession = Depends(get_db)):
+    _require_admin(request)
+    from app.models import AuditLog
+    rows = (await db.execute(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit))).scalars().all()
+    return {"entries": [{
+        "username": a.username, "role": a.role, "method": a.method, "path": a.path,
+        "status": a.status, "ip": a.ip,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    } for a in rows]}
 
 
 class FirewallLocationIn(BaseModel):
@@ -5524,6 +5739,7 @@ class AdminSettingsIn(BaseModel):
     firewall_api_password: str | None = Field(default=None, max_length=256)
     firewall_api_verify_tls: bool | None = None
     firewall_central_sync_enabled: bool | None = None
+    auth_enabled: bool | None = None
     mcp_enabled: bool | None = None
     mcp_api_key: str | None = Field(default=None, max_length=200)
     firewall_dhcp_entity: str | None = Field(default=None, max_length=200)

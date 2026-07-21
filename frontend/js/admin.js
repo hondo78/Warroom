@@ -20,6 +20,7 @@ const SECTIONS = {
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
     mcp: ['mcp_enabled', 'mcp_api_key'],
+    auth: ['auth_enabled'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_language', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
     // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
 };
@@ -395,4 +396,72 @@ function toast(msg, type = 'info') {
     el.classList.remove('hidden');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+
+// --- Users, roles & audit (only meaningful when auth is enabled) -------------
+document.addEventListener('DOMContentLoaded', () => { loadUsers(); });
+
+async function loadUsers() {
+    const tb = document.getElementById('userTable');
+    if (!tb) return;
+    try {
+        const r = await fetch('/api/auth/users');
+        if (!r.ok) { tb.innerHTML = ''; return; }
+        const d = await r.json();
+        tb.innerHTML = (d.users || []).map(u => `<tr>
+            <td>${adminEsc(u.username)}</td>
+            <td><select class="form-select form-select-sm" style="width:auto;display:inline-block" onchange="updateRole(${u.id}, this.value)">
+                ${['viewer', 'analyst', 'admin'].map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}
+            </select></td>
+            <td class="admin-hint">${u.last_login ? new Date(u.last_login).toLocaleString() : '—'}</td>
+            <td><button class="btn btn-outline-danger btn-sm py-0" onclick="deleteUser(${u.id}, '${adminEsc(u.username)}')"><i class="bi bi-trash"></i></button></td>
+        </tr>`).join('') || `<tr><td colspan="4" class="admin-hint">${t('admin.authNoUsers') || 'Keine Benutzer / no users'}</td></tr>`;
+    } catch (e) { /* ignore */ }
+}
+
+async function createUser() {
+    const username = document.getElementById('newUser').value.trim();
+    const password = document.getElementById('newPass').value;
+    const role = document.getElementById('newRole').value;
+    if (!username || password.length < 6) { alert(t('admin.authPwShort') || 'Benutzername + Passwort (min. 6 Zeichen) nötig.'); return; }
+    const r = await fetch('/api/auth/users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, role }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert((e.detail || 'Fehler')); return; }
+    document.getElementById('newUser').value = ''; document.getElementById('newPass').value = '';
+    loadUsers();
+}
+
+async function updateRole(id, role) {
+    const r = await fetch(`/api/auth/users/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || 'Fehler'); loadUsers(); }
+}
+
+async function deleteUser(id, name) {
+    if (!confirm((t('admin.authDelConfirm') || 'Benutzer löschen?') + ' ' + name)) return;
+    const r = await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || 'Fehler'); }
+    loadUsers();
+}
+
+async function loadAudit() {
+    const tb = document.getElementById('auditTable');
+    if (!tb) return;
+    try {
+        const r = await fetch('/api/audit?limit=200');
+        if (!r.ok) { tb.innerHTML = `<tr><td colspan="5" class="admin-hint">${t('admin.authAuditNeedAdmin') || 'Nur für Admins bei aktiver Anmeldung.'}</td></tr>`; return; }
+        const d = await r.json();
+        tb.innerHTML = (d.entries || []).map(e => `<tr>
+            <td>${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
+            <td>${adminEsc(e.username || '—')}</td>
+            <td><code>${adminEsc(e.method)} ${adminEsc(e.path)}</code></td>
+            <td><span class="badge ${e.status >= 400 ? 'text-bg-danger' : 'text-bg-secondary'}">${e.status}</span></td>
+            <td class="admin-hint">${adminEsc(e.ip || '')}</td>
+        </tr>`).join('') || `<tr><td colspan="5" class="admin-hint">—</td></tr>`;
+    } catch (e) { /* ignore */ }
 }
