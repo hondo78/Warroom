@@ -161,6 +161,7 @@ window.I18N.en.osint = {
     tor_exit_yes: "Tor exit node",
     tor_exit_no: "Not a Tor exit node",
     open_tor: "Check in ExoneraTor",
+    rdns_none: "No PTR record",
     open_greynoise: "Open GreyNoise",
 
     // Intelix

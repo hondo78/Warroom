@@ -240,6 +240,7 @@ function _osintRender(d, type) {
             ['Shodan', _osintRenderShodan(d.shodan)],
             ['GreyNoise', _osintRenderGN(d.greynoise)],
             ['Tor', _osintRenderTor(d.tor, d.ip)],
+            ['Reverse DNS', _osintRenderRdns(d.rdns)],
             ['ipinfo.io', _osintRenderIpInfo(d.ipinfo)],
         ];
     }
@@ -517,6 +518,16 @@ function _osintRenderTor(p, ip) {
         `;
     }
     return `<div class="osint-na">${_osintEscape(t('osint.tor_exit_no'))}</div>`;
+}
+
+function _osintRenderRdns(p) {
+    const head = _osintHead(p); if (head !== null) return head;
+    if (p.hostname) {
+        return `<dl class="detail-grid osint-dl">
+            ${_osintRow('PTR', `<code>${_osintEscape(p.hostname)}</code>`)}
+        </dl>`;
+    }
+    return `<div class="osint-na">${_osintEscape(t('osint.rdns_none'))}</div>`;
 }
 
 function _osintAsString(value) {

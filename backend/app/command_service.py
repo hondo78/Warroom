@@ -394,6 +394,9 @@ async def _h_osint(args, actor) -> str:
             parts.append("TOR: **Exit-Node** ⚠️")
         elif tor.get("available"):
             parts.append("TOR: kein Exit-Node")
+        rd = (d.get("rdns") or {})
+        if rd.get("hostname"):
+            parts.append(f"Reverse DNS: {rd.get('hostname')}")
         parts.append("(Shodan/Ports/CVEs separat per Button im OSINT-Panel)")
     else:
         if vt.get("malicious") is not None:

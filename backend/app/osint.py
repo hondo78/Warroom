@@ -599,6 +599,22 @@ async def tor_check(ip: str) -> dict[str, Any]:
         return {"available": False, "reason": str(e)[:120]}
 
 
+async def reverse_dns(ip: str) -> dict[str, Any]:
+    """PTR (reverse DNS) record for an IP — a free signal (no API/quota): the
+    hostname the network owner assigned, which often reveals the hosting/ISP or a
+    scanner's naming pattern. Runs in a thread executor with a short timeout so a
+    slow/hung resolver can't block the lookup."""
+    loop = asyncio.get_running_loop()
+    try:
+        host, _aliases, _addrs = await asyncio.wait_for(
+            loop.run_in_executor(None, socket.gethostbyaddr, ip), timeout=4.0)
+        return {"available": True, "hostname": host}
+    except (socket.herror, socket.gaierror):
+        return {"available": True, "hostname": None}   # resolved: no PTR record
+    except (asyncio.TimeoutError, OSError, Exception) as e:
+        return {"available": False, "reason": (str(e)[:80] or "timeout")}
+
+
 # --- Enrichment for AI log queries ------------------------------------------
 # Compact per-IP OSINT summaries that get handed to the LLM alongside firewall-
 # log query results, so it can reason about the external IPs. enrich_cached()
@@ -754,12 +770,13 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
             logger.warning(f"OSINT redis read failed: {e}")
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        abuse, vt, gn, ipi, intelix = await asyncio.gather(
+        abuse, vt, gn, ipi, intelix, rdns = await asyncio.gather(
             _track("abuseipdb", _abuseipdb(client, ip)),
             _track("virustotal", _virustotal(client, ip)),
             _track("greynoise", _greynoise(client, ip)),
             _track("ipinfo", _ipinfo(client, ip)),
             _track("intelix", _intelix(client, ip)),
+            reverse_dns(ip),
         )
 
     # Query Shodan when enabled (auto-every-lookup or explicit permission);
@@ -781,6 +798,7 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         "ipinfo": ipi,
         "intelix": intelix,
         "tor": await tor_check(ip),
+        "rdns": rdns,
         "cached": False,
     }
 

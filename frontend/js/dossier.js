@@ -67,6 +67,7 @@ function render(d) {
     if (d.osint && !d.osint.error) {
         const o = d.osint;
         let b = _row(t('dossier.geo'), escapeHtml([o.country, o.org].filter(Boolean).join(' · ') || '—'));
+        if (o.rdns) b += _row('Reverse DNS', `<code>${escapeHtml(o.rdns)}</code>`);
         b += _row('AbuseIPDB', o.abuse_score != null ? `<b>${o.abuse_score}%</b>` : '—');
         b += _row('VirusTotal', o.vt_malicious != null ? `${o.vt_malicious} malicious` : '—');
         b += _row('GreyNoise', o.greynoise ? escapeHtml(o.greynoise) : '—');

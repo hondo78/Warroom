@@ -99,6 +99,7 @@ def _osint_slim(payload: dict) -> dict:
     tor = payload.get("tor") or {}
     sh = payload.get("shodan") or {}
     s["tor_exit_node"] = bool(tor.get("is_exit_node"))
+    s["rdns"] = (payload.get("rdns") or {}).get("hostname")
     s["shodan_ports"] = sh.get("ports") if isinstance(sh.get("ports"), list) else None
     s["shodan_cves"] = len(sh.get("vulns") or []) if isinstance(sh.get("vulns"), (list, dict)) else None
     return s
