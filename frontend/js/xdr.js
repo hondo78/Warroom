@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('ldSaved').addEventListener('change', e => {
         if (_ldTemplates[e.target.value]) document.getElementById('ldSql').value = _ldTemplates[e.target.value];
     });
+    // Editing the SQL turns it into an ad-hoc query (a saved query with $$vars$$
+    // must run via its id, so the dropdown selection drives which path we use).
+    document.getElementById('dlSql').addEventListener('input', () => { document.getElementById('dlSaved').value = ''; });
+    document.getElementById('ldSql').addEventListener('input', () => { document.getElementById('ldSaved').value = ''; });
 
     loadSavedQueries();
     loadEndpoints();
@@ -90,10 +94,13 @@ async function runDataLake() {
     const status = document.getElementById('dlStatus'), result = document.getElementById('dlResult');
     if (!sql) { status.textContent = t('xdr.needSql'); return; }
     result.innerHTML = ''; status.textContent = t('xdr.starting');
+    const savedId = document.getElementById('dlSaved').value;
+    const hours = parseInt(document.getElementById('dlHours').value, 10);
+    const payload = savedId ? { saved_query_id: savedId, hours } : { template: sql, hours };
     try {
         const run = await (await fetch('/api/xdr/datalake/run', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template: sql, hours: parseInt(document.getElementById('dlHours').value, 10) }),
+            body: JSON.stringify(payload),
         }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || r.status); return r; })).json();
         const d = await _poll(`/api/xdr/datalake/runs/${run.id}`, status, t('xdr.status'));
         if (d.status === 'finished') {
@@ -111,10 +118,12 @@ async function runLiveDiscover() {
     if (!sql) { status.textContent = t('xdr.needSql'); return; }
     if (!ids.length) { status.textContent = t('xdr.needEndpoints'); return; }
     result.innerHTML = ''; status.textContent = t('xdr.starting');
+    const savedId = document.getElementById('ldSaved').value;
+    const payload = savedId ? { saved_query_id: savedId, endpoint_ids: ids } : { template: sql, endpoint_ids: ids };
     try {
         const run = await (await fetch('/api/xdr/livediscover/run', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template: sql, endpoint_ids: ids }),
+            body: JSON.stringify(payload),
         }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || r.status); return r; })).json();
         const d = await _poll(`/api/xdr/livediscover/runs/${run.id}`, status, t('xdr.status'));
         if (d.status === 'finished') {

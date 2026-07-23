@@ -654,19 +654,30 @@ class SophosClient:
     # metadata). Data Lake queries the XDR telemetry (30/90-day retention); Live
     # Discover runs osquery live on selected endpoints.
 
+    @staticmethod
+    def _xdr_result(r: httpx.Response) -> dict:
+        # Surface the Sophos error body (it explains 400s like "Some variables in
+        # the query are not defined") instead of a generic status message.
+        if r.status_code >= 400:
+            msg = r.text
+            try:
+                msg = r.json().get("message") or msg
+            except Exception:
+                pass
+            raise RuntimeError(f"HTTP {r.status_code}: {str(msg)[:250]}")
+        return r.json()
+
     async def _xdr_get(self, path: str, params: dict | None = None) -> dict:
         await self._ensure_auth()
         r = await self._get_client().get(
             f"{self._base_url()}{path}", headers=self._auth_headers(), params=params or {})
-        r.raise_for_status()
-        return r.json()
+        return self._xdr_result(r)
 
     async def _xdr_post(self, path: str, body: dict) -> dict:
         await self._ensure_auth()
         r = await self._get_client().post(
             f"{self._base_url()}{path}", headers=self._auth_headers(), json=body)
-        r.raise_for_status()
-        return r.json()
+        return self._xdr_result(r)
 
     # -- Data Lake --
     async def xdr_list_queries(self) -> dict:
