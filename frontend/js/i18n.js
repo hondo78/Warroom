@@ -62,6 +62,7 @@
         '/o365.html': 'nav.m365',
         '/osint.html': 'nav.osint',
         '/dossier.html': 'nav.dossier',
+        '/xdr.html': 'nav.xdr',
         '/stats.html': 'nav.statistics',
         '/admin.html': 'nav.admin',
     };

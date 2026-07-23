@@ -1,0 +1,20 @@
+window.I18N = window.I18N || {}; window.I18N.en = window.I18N.en || {};
+window.I18N.en.xdr = {
+    header: "Sophos XDR",
+    dlHint: "SQL queries against the XDR telemetry (xdr_data). Pick a saved query or write your own SQL.",
+    ldHint: "osquery queries live on selected endpoints. Read-only queries — they run for real on the machines.",
+    run: "Run",
+    ldRun: "Run on endpoints",
+    targets: "Target endpoints",
+    savedPlaceholder: "— pick a saved query (fills the SQL box) —",
+    noEndpoints: "No endpoints found.",
+    epError: "Could not load endpoints.",
+    rows: "rows",
+    noRows: "No results.",
+    needSql: "Please enter a query.",
+    needEndpoints: "Please select at least one endpoint.",
+    starting: "Starting run…",
+    status: "Status",
+    runFailed: "Query failed",
+    error: "Error",
+};

@@ -475,6 +475,167 @@ async def audit_log_list(request: Request, limit: int = Query(default=200, ge=1,
     } for a in rows]}
 
 
+# --- Sophos XDR: Data Lake + Live Discover query APIs -----------------------
+
+def _xdr_isoz(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+class XdrRunIn(BaseModel):
+    template: str | None = None            # ad-hoc SQL against xdr_data
+    saved_query_id: str | None = None      # or run a saved query
+    variables: list[dict] | None = None
+    hours: int | None = Field(default=24, ge=1, le=2160)   # time window (Data Lake)
+    from_ts: str | None = None             # explicit ISO range (overrides hours)
+    to_ts: str | None = None
+
+
+class LdRunIn(BaseModel):
+    template: str | None = None            # ad-hoc osquery SQL
+    saved_query_id: str | None = None
+    variables: list[dict] | None = None
+    endpoint_ids: list[str] | None = None      # target these endpoints
+    os_platforms: list[str] | None = None      # …or all endpoints of these OSes
+
+
+def _xdr_err(e: Exception) -> HTTPException:
+    return HTTPException(status_code=502, detail=f"Sophos XDR API: {str(e)[:200]}")
+
+
+@app.get("/api/xdr/datalake/queries")
+@cached(ttl=300)
+async def xdr_datalake_queries():
+    try:
+        return await sophos_client.xdr_list_queries()
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.post("/api/xdr/datalake/run")
+async def xdr_datalake_run(body: XdrRunIn):
+    now = datetime.now(timezone.utc)
+    frm = body.from_ts or _xdr_isoz(now - timedelta(hours=body.hours or 24))
+    to = body.to_ts or _xdr_isoz(now)
+    if body.saved_query_id:
+        payload = {"savedQuery": {"queryId": body.saved_query_id}, "from": frm, "to": to}
+        if body.variables:
+            payload["variables"] = body.variables
+    elif body.template:
+        payload = {"adHocQuery": {"template": body.template, "name": "warroom"}, "from": frm, "to": to}
+    else:
+        raise HTTPException(status_code=400, detail="template or saved_query_id required")
+    try:
+        return await sophos_client.xdr_run(payload)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/datalake/runs")
+async def xdr_datalake_runs():
+    try:
+        return await sophos_client.xdr_list_runs()
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/datalake/runs/{run_id}")
+async def xdr_datalake_run_status(run_id: str):
+    try:
+        return await sophos_client.xdr_get_run(run_id)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/datalake/runs/{run_id}/results")
+async def xdr_datalake_run_results(run_id: str, page: str | None = None):
+    try:
+        return await sophos_client.xdr_get_results(run_id, page)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/livediscover/queries")
+@cached(ttl=300)
+async def xdr_ld_queries():
+    try:
+        return await sophos_client.ld_list_queries()
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/livediscover/categories")
+@cached(ttl=300)
+async def xdr_ld_categories():
+    try:
+        return await sophos_client.ld_list_categories()
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.post("/api/xdr/livediscover/run")
+async def xdr_ld_run(body: LdRunIn):
+    if not (body.endpoint_ids or body.os_platforms):
+        raise HTTPException(status_code=400, detail="endpoint_ids or os_platforms required")
+    filters: list[dict] = []
+    if body.endpoint_ids:
+        filters.append({"ids": body.endpoint_ids})
+    if body.os_platforms:
+        filters.append({"os": {"platforms": body.os_platforms}})
+    match = {"filters": filters}
+    if body.saved_query_id:
+        payload = {"savedQuery": {"queryId": body.saved_query_id}, "matchEndpoints": match}
+        if body.variables:
+            payload["variables"] = body.variables
+    elif body.template:
+        payload = {"adHocQuery": {"template": body.template, "name": "warroom"}, "matchEndpoints": match}
+    else:
+        raise HTTPException(status_code=400, detail="template or saved_query_id required")
+    try:
+        return await sophos_client.ld_run(payload)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/livediscover/runs/{run_id}")
+async def xdr_ld_run_status(run_id: str):
+    try:
+        return await sophos_client.ld_get_run(run_id)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/livediscover/runs/{run_id}/results")
+async def xdr_ld_run_results(run_id: str, page: str | None = None):
+    try:
+        return await sophos_client.ld_get_results(run_id, page)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/livediscover/runs/{run_id}/endpoints")
+async def xdr_ld_run_endpoints(run_id: str):
+    try:
+        return await sophos_client.ld_get_run_endpoints(run_id)
+    except Exception as e:
+        raise _xdr_err(e)
+
+
+@app.get("/api/xdr/endpoints")
+@cached(ttl=120)
+async def xdr_endpoints():
+    """Compact endpoint list for the Live Discover target picker."""
+    try:
+        eps = await sophos_client.get_endpoints()
+        return {"items": [{
+            "id": e.get("id"),
+            "hostname": e.get("hostname"),
+            "platform": (e.get("os") or {}).get("platform"),
+            "type": e.get("type"),
+        } for e in (eps or []) if e.get("id")]}
+    except Exception as e:
+        raise _xdr_err(e)
+
+
 class FirewallLocationIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     ip: str | None = Field(None, max_length=45)

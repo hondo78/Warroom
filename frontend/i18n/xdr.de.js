@@ -1,0 +1,20 @@
+window.I18N = window.I18N || {}; window.I18N.de = window.I18N.de || {};
+window.I18N.de.xdr = {
+    header: "Sophos XDR",
+    dlHint: "SQL-Abfragen gegen die XDR-Telemetrie (xdr_data). Gespeicherte Query wählen oder eigenes SQL schreiben.",
+    ldHint: "osquery-Abfragen live auf ausgewählten Endpoints. Nur lesende Abfragen — wird real auf den Rechnern ausgeführt.",
+    run: "Ausführen",
+    ldRun: "Auf Endpoints ausführen",
+    targets: "Ziel-Endpoints",
+    savedPlaceholder: "— gespeicherte Query wählen (füllt das SQL-Feld) —",
+    noEndpoints: "Keine Endpoints gefunden.",
+    epError: "Endpoints konnten nicht geladen werden.",
+    rows: "Zeilen",
+    noRows: "Keine Ergebnisse.",
+    needSql: "Bitte eine Abfrage eingeben.",
+    needEndpoints: "Bitte mindestens einen Endpoint auswählen.",
+    starting: "Run wird gestartet…",
+    status: "Status",
+    runFailed: "Abfrage fehlgeschlagen",
+    error: "Fehler",
+};

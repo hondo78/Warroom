@@ -649,5 +649,65 @@ class SophosClient:
         }
         return await self._email_write("post", f"{base}/messages/delete", body)
 
+    # --- XDR: Data Lake (xdr-query/v1) + Live Discover (live-discover/v1) ------
+    # Async query APIs: start a run → poll status → fetch results (with column
+    # metadata). Data Lake queries the XDR telemetry (30/90-day retention); Live
+    # Discover runs osquery live on selected endpoints.
+
+    async def _xdr_get(self, path: str, params: dict | None = None) -> dict:
+        await self._ensure_auth()
+        r = await self._get_client().get(
+            f"{self._base_url()}{path}", headers=self._auth_headers(), params=params or {})
+        r.raise_for_status()
+        return r.json()
+
+    async def _xdr_post(self, path: str, body: dict) -> dict:
+        await self._ensure_auth()
+        r = await self._get_client().post(
+            f"{self._base_url()}{path}", headers=self._auth_headers(), json=body)
+        r.raise_for_status()
+        return r.json()
+
+    # -- Data Lake --
+    async def xdr_list_queries(self) -> dict:
+        return await self._xdr_get("/xdr-query/v1/queries", {"pageSize": 100})
+
+    async def xdr_run(self, body: dict) -> dict:
+        return await self._xdr_post("/xdr-query/v1/queries/runs", body)
+
+    async def xdr_list_runs(self) -> dict:
+        return await self._xdr_get("/xdr-query/v1/queries/runs", {"pageSize": 50})
+
+    async def xdr_get_run(self, run_id: str) -> dict:
+        return await self._xdr_get(f"/xdr-query/v1/queries/runs/{run_id}")
+
+    async def xdr_get_results(self, run_id: str, page: str | None = None) -> dict:
+        params = {"pageSize": 500}
+        if page:
+            params["pageFromKey"] = page
+        return await self._xdr_get(f"/xdr-query/v1/queries/runs/{run_id}/results", params)
+
+    # -- Live Discover --
+    async def ld_list_queries(self) -> dict:
+        return await self._xdr_get("/live-discover/v1/queries", {"pageSize": 100})
+
+    async def ld_list_categories(self) -> dict:
+        return await self._xdr_get("/live-discover/v1/queries/categories", {"pageSize": 100})
+
+    async def ld_run(self, body: dict) -> dict:
+        return await self._xdr_post("/live-discover/v1/queries/runs", body)
+
+    async def ld_get_run(self, run_id: str) -> dict:
+        return await self._xdr_get(f"/live-discover/v1/queries/runs/{run_id}")
+
+    async def ld_get_results(self, run_id: str, page: str | None = None) -> dict:
+        params = {"pageSize": 500}
+        if page:
+            params["pageFromKey"] = page
+        return await self._xdr_get(f"/live-discover/v1/queries/runs/{run_id}/results", params)
+
+    async def ld_get_run_endpoints(self, run_id: str) -> dict:
+        return await self._xdr_get(f"/live-discover/v1/queries/runs/{run_id}/endpoints", {"pageSize": 200})
+
 
 sophos_client = SophosClient()

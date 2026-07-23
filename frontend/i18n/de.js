@@ -21,6 +21,7 @@ Object.assign(window.I18N.de, {
         m365: "Microsoft 365",
         osint: "OSINT",
         dossier: "IP-Dossier",
+        xdr: "XDR",
         statistics: "Statistik",
         admin: "Admin",
         grp_monitoring: "Monitoring",
