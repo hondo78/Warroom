@@ -5948,6 +5948,9 @@ class AdminSettingsIn(BaseModel):
     agent_auto_execute: bool | None = None
     agent_learning_enabled: bool | None = None
     agent_learning_threshold: int | None = Field(default=None, ge=1, le=1000)
+    agent_block_burst_enabled: bool | None = None
+    agent_block_burst_window_minutes: int | None = Field(default=None, ge=1, le=1440)
+    agent_block_burst_threshold: int | None = Field(default=None, ge=1, le=100000)
     agent_language: str | None = Field(default=None, pattern="^(en|de)$")
     agent_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_waf_system_prompt: str | None = Field(default=None, max_length=20000)
@@ -6187,6 +6190,83 @@ async def agent_decisions_stats(db: AsyncSession = Depends(get_db)):
         out["by_status"][status or "unknown"] = out["by_status"].get(status or "unknown", 0) + cnt
         out["by_actor"][actor or "agent"] = out["by_actor"].get(actor or "agent", 0) + cnt
     return out
+
+
+@app.get("/api/agent/quality")
+async def agent_quality(days: int = Query(default=30, ge=1, le=365),
+                        db: AsyncSession = Depends(get_db)):
+    """Agent decision-quality / feedback metrics for the given window.
+
+    A ``declined`` block was executed and then reverted by a human — i.e. a
+    confirmed false positive. The false-positive rate is declined / (executed +
+    declined). The ``auto`` block reports the same for decisions the LEARNED
+    pattern auto-approved, so you can see whether automation is trustworthy."""
+    from app.agent import BLOCK_ACTIONS
+    block_actions = list(BLOCK_ACTIONS)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    _STATUSES = ("executed", "declined", "failed", "pending", "rejected")
+
+    def _blank() -> dict:
+        return {k: 0 for k in _STATUSES}
+
+    def _with_rates(d: dict) -> dict:
+        acted = d["executed"] + d["declined"]
+        d["acted"] = acted
+        d["false_positive_rate"] = round(d["declined"] / acted, 4) if acted else 0.0
+        return d
+
+    rows = (await db.execute(
+        select(AgentDecision.source_type, AgentDecision.status, func.count(AgentDecision.id))
+        .where(AgentDecision.action.in_(block_actions))
+        .where(AgentDecision.created_at >= since)
+        .group_by(AgentDecision.source_type, AgentDecision.status)
+    )).all()
+
+    totals = _blank()
+    by_source: dict[str, dict] = {}
+    for src, status, cnt in rows:
+        s = src or "unknown"
+        d = by_source.setdefault(s, {"source_type": s, **_blank()})
+        if status in _STATUSES:
+            d[status] += cnt
+            totals[status] += cnt
+
+    # Auto-approved (learned-pattern) block decisions — trust of automation.
+    auto = _blank()
+    auto_rows = (await db.execute(
+        select(AgentDecision.status, func.count(AgentDecision.id))
+        .where(AgentDecision.action.in_(block_actions))
+        .where(AgentDecision.created_at >= since)
+        .where(text("jsonb_exists(action_args, 'auto_approved')"))
+        .group_by(AgentDecision.status)
+    )).all()
+    for status, cnt in auto_rows:
+        if status in _STATUSES:
+            auto[status] += cnt
+
+    # Learned-pattern summary (all-time — patterns persist across windows).
+    pats = (await db.execute(select(AgentApprovalPattern))).scalars().all()
+    def _net(p) -> int:
+        return (p.approvals or 0) - (p.rejections or 0)
+    top = sorted(pats, key=_net, reverse=True)[:5]
+    patterns = {
+        "total": len(pats),
+        "active_auto": sum(1 for p in pats if (p.auto_approved or 0) > 0),
+        "top": [{
+            "signature": p.signature, "source_type": p.source_type, "action": p.action,
+            "rule": p.rule, "approvals": p.approvals or 0, "rejections": p.rejections or 0,
+            "net": _net(p), "auto_approved": p.auto_approved or 0,
+        } for p in top],
+    }
+
+    return {
+        "window_days": days,
+        "totals": _with_rates(totals),
+        "auto": _with_rates(auto),
+        "by_source": sorted((_with_rates(d) for d in by_source.values()),
+                            key=lambda d: d["acted"], reverse=True),
+        "patterns": patterns,
+    }
 
 
 @app.get("/api/agent/decisions/timeline")
@@ -6546,6 +6626,9 @@ async def get_agent_workflow():
         "interval_seconds": settings.agent_interval_seconds,
         "learning_enabled": settings.agent_learning_enabled,
         "learning_threshold": settings.agent_learning_threshold,
+        "block_burst_enabled": settings.agent_block_burst_enabled,
+        "block_burst_window_minutes": settings.agent_block_burst_window_minutes,
+        "block_burst_threshold": settings.agent_block_burst_threshold,
     }
 
     # step/detail are German fallbacks; the frontend prefers the i18n dict

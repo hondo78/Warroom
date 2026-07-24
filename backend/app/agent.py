@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app import login_cache
 from app import waf_path_cache
@@ -281,7 +281,7 @@ async def _maybe_learned_auto_approve(rec: AgentDecision) -> bool:
     logger.info(f"agent: learned auto-approve decision {rec.id} "
                 f"(sig={signature}, net={net}>={threshold})")
     try:
-        await execute_decision(rec.id)
+        await _agent_auto_execute(rec.id)
     except Exception as e:
         logger.warning(f"agent: learned auto-approve execute failed for {rec.id}: {e}")
     return True
@@ -1483,11 +1483,85 @@ async def _persist_decision(alert: Alert, decision: dict[str, Any]) -> None:
     if should:
         logger.info(f"agent: auto-executing decision {record.id} ({why})")
         try:
-            await execute_decision(record.id)
+            await _agent_auto_execute(record.id)
         except Exception as e:
             logger.warning(f"agent: auto-execute failed for decision {record.id}: {e}")
     else:
         await _notify_telegram_pending(record.id)
+
+
+_BURST_ALARM_REDIS_KEY = "agent:block_burst_alarmed"
+
+
+async def _maybe_alarm_block_burst() -> None:
+    """Warn if the agent has auto-blocked an unusually high number of IPs in a
+    short window — the safety net against a misfiring rule or an over-eager
+    learned pattern flooding the blocklist. Counts real BlockedIp rows written
+    by the agent (so a single subnet-block of 500 hosts trips it), and throttles
+    to one alarm per window via a Redis key with a matching TTL."""
+    if not getattr(settings, "agent_block_burst_enabled", True):
+        return
+    window_min = max(1, int(getattr(settings, "agent_block_burst_window_minutes", 60) or 60))
+    threshold = max(1, int(getattr(settings, "agent_block_burst_threshold", 25) or 25))
+    window_sec = window_min * 60
+    try:
+        from app.geoip_service import get_redis
+        r = await get_redis()
+        # Throttle: if we already alarmed within this window, stay quiet.
+        if r is not None and await r.get(_BURST_ALARM_REDIS_KEY):
+            return
+
+        since = datetime.now(timezone.utc) - timedelta(minutes=window_min)
+        async with async_session() as db:
+            count = (await db.execute(
+                select(func.count()).select_from(BlockedIp).where(
+                    BlockedIp.blocked_by == "agent",
+                    BlockedIp.blocked_at >= since,
+                )
+            )).scalar_one()
+        if count < threshold:
+            return
+
+        # Arm the throttle before sending so a concurrent execute can't double-fire.
+        if r is not None:
+            await r.set(_BURST_ALARM_REDIS_KEY, "1", ex=window_sec)
+
+        lang = _agent_lang()
+        if lang == "en":
+            html = (
+                f"<b>⚠️ Agent block-burst</b>\n"
+                f"The agent auto-blocked <b>{count}</b> IPs in the last {window_min} min "
+                f"(threshold {threshold}).\n"
+                f"Check the Agent page — a misfiring rule or learned pattern may be "
+                f"flooding the blocklist. Wrong blocks can be reverted per decision "
+                f"(the agent then unlearns the pattern)."
+            )
+        else:
+            html = (
+                f"<b>⚠️ Agent-Block-Burst</b>\n"
+                f"Der Agent hat in den letzten {window_min} min <b>{count}</b> IPs "
+                f"automatisch geblockt (Schwelle {threshold}).\n"
+                f"Prüfe die Agent-Seite — evtl. flutet eine fehlzündende Regel oder ein "
+                f"gelerntes Muster die Blockliste. Falsche Blocks lassen sich pro "
+                f"Entscheidung zurücknehmen (der Agent verlernt das Muster dann)."
+            )
+        from app.notifications import notify
+        await notify(html, title="Warroom · Agent-Burst")
+        logger.warning(f"agent: block-burst alarm — {count} auto-blocks in {window_min}min "
+                       f"(threshold {threshold})")
+    except Exception as e:  # never let the alarm break execution
+        logger.debug(f"agent: block-burst check failed: {e}")
+
+
+async def _agent_auto_execute(decision_id: int) -> dict[str, Any] | None:
+    """execute_decision + the block-burst safety check. Used only on the agent's
+    OWN auto-execute paths (learned auto-approve / master switch), never on human
+    approvals — the burst alarm is about the agent acting on its own."""
+    try:
+        res = await execute_decision(decision_id)
+    finally:
+        await _maybe_alarm_block_burst()
+    return res
 
 
 async def execute_decision(decision_id: int) -> dict[str, Any]:
@@ -1970,7 +2044,7 @@ async def _store_rule_decision(
     if should:
         logger.info(f"agent[{source_type}]: auto-executing decision {rec.id} for {ip} ({why})")
         try:
-            await execute_decision(rec.id)
+            await _agent_auto_execute(rec.id)
         except Exception as e:
             logger.warning(f"agent[{source_type}]: auto-execute failed for {ip}: {e}")
     else:

@@ -8,7 +8,56 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function refreshAgentPage() {
-    await Promise.all([updateAgentStats(), updateAgentTimeline(), updateAgentList(), updateWorkflowBadges()]);
+    await Promise.all([updateAgentStats(), updateAgentTimeline(), updateAgentQuality(), updateAgentList(), updateWorkflowBadges()]);
+}
+
+function _colourFp(el, rate, acted) {
+    if (!el) return;
+    el.classList.remove('text-danger', 'text-warning', 'text-success');
+    if (!acted) return;
+    if (rate >= 0.3) el.classList.add('text-danger');
+    else if (rate >= 0.1) el.classList.add('text-warning');
+    else el.classList.add('text-success');
+}
+
+async function updateAgentQuality() {
+    try {
+        const days = document.getElementById('aQualDays')?.value || 30;
+        const r = await fetch(`/api/agent/quality?days=${days}`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const pct = v => (v * 100).toFixed(1) + '%';
+        const num = v => (v || 0).toLocaleString(AG_LOCALE);
+        const T = d.totals || {}, A = d.auto || {}, P = d.patterns || {};
+
+        document.getElementById('qFpRate').textContent = T.acted ? pct(T.false_positive_rate || 0) : '—';
+        document.getElementById('qFpSub').textContent = `${num(T.declined)} / ${num(T.acted)}`;
+        document.getElementById('qAutoFp').textContent = A.acted ? pct(A.false_positive_rate || 0) : '—';
+        document.getElementById('qAutoSub').textContent = `${num(A.declined)} / ${num(A.acted)}`;
+        document.getElementById('qActed').textContent = num(T.acted);
+        document.getElementById('qPatterns').textContent = num(P.active_auto);
+        document.getElementById('qPatSub').textContent = t('agent.qual_of_total', {n: P.total || 0});
+        _colourFp(document.getElementById('qFpRate'), T.false_positive_rate, T.acted);
+        _colourFp(document.getElementById('qAutoFp'), A.false_positive_rate, A.acted);
+
+        const srcBody = document.querySelector('#aQualBySource tbody');
+        srcBody.innerHTML = (d.by_source || []).map(s => `<tr>
+            <td>${escapeHtml(s.source_type)}</td>
+            <td class="text-end">${num(s.executed)}</td>
+            <td class="text-end">${num(s.declined)}</td>
+            <td class="text-end">${num(s.failed)}</td>
+            <td class="text-end">${s.acted ? pct(s.false_positive_rate || 0) : '—'}</td>
+        </tr>`).join('') || `<tr><td colspan="5" class="text-muted">${t('agent.qual_none')}</td></tr>`;
+
+        const patBody = document.querySelector('#aQualPatterns tbody');
+        patBody.innerHTML = (P.top || []).map(p => `<tr>
+            <td><code style="font-size:.75rem">${escapeHtml(p.signature || '')}</code></td>
+            <td class="text-end">${num(p.approvals)}</td>
+            <td class="text-end">${num(p.rejections)}</td>
+            <td class="text-end"><b>${num(p.net)}</b></td>
+            <td class="text-end">${num(p.auto_approved)}</td>
+        </tr>`).join('') || `<tr><td colspan="5" class="text-muted">${t('agent.qual_none')}</td></tr>`;
+    } catch (e) { console.error(e); }
 }
 
 async function updateWorkflowBadges() {

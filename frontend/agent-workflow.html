@@ -141,6 +141,17 @@
                             <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.learnThreshold">Approval threshold</label></div>
                             <div class="col-md-3"><input type="number" min="1" max="1000" class="form-control form-control-sm" id="g_agent_learning_threshold"></div>
                         </div>
+
+                        <hr>
+                        <p class="admin-hint mb-2" data-i18n-html="agentWorkflow.burstHint">Safety net: alert via Telegram/Teams when the agent <strong>auto-blocks</strong> more IPs than the threshold within the window — an early warning that a misfiring rule or learned pattern is flooding the blocklist. Throttled to one alert per window.</p>
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.burstEnabled">Burst alarm active</label></div>
+                            <div class="col-md-3"><div class="form-check form-switch mt-1"><input class="form-check-input" type="checkbox" id="g_agent_block_burst_enabled"></div></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.burstThreshold">Blocks per window</label></div>
+                            <div class="col-md-3"><input type="number" min="1" max="100000" class="form-control form-control-sm" id="g_agent_block_burst_threshold"></div>
+                            <div class="col-md-3"><label class="form-label" data-i18n="agentWorkflow.burstWindow">Window (minutes)</label></div>
+                            <div class="col-md-3"><input type="number" min="1" max="1440" class="form-control form-control-sm" id="g_agent_block_burst_window_minutes"></div>
+                        </div>
                         <div class="text-end mt-3"><button class="btn btn-primary btn-sm" onclick="saveLearning()" data-i18n="agentWorkflow.learnSave">Save learning settings</button></div>
 
                         <h4 class="mt-3" data-i18n="agentWorkflow.learnPatternsTitle">Learned patterns</h4>

@@ -195,6 +195,14 @@ class Settings(BaseSettings):
     # execute_decision still re-checks the whitelist on every run.
     agent_learning_enabled: bool = False
     agent_learning_threshold: int = 3
+    # Block-burst alarm: notify (Telegram/Teams) when the agent AUTO-blocks an
+    # unusually high number of IPs within a short rolling window — an early
+    # warning that a misfiring rule or a learned pattern is flooding the
+    # blocklist. Throttled to one alarm per window. On by default; only fires
+    # once auto-execution/learning is active anyway.
+    agent_block_burst_enabled: bool = True
+    agent_block_burst_window_minutes: int = 60
+    agent_block_burst_threshold: int = 25
     # Empty -> fall back to DEFAULT_SYSTEM_PROMPT in app.agent.
     agent_system_prompt: str = ""
     # Per-source LLM system prompts for rule-based decisions. Empty -> fall

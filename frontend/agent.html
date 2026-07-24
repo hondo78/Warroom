@@ -331,6 +331,43 @@
                     <div class="card-body"><canvas id="aTimelineChart" style="max-height:240px"></canvas></div>
                 </div>
 
+                <!-- Quality / Feedback -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="agent.quality_title">Qualität &amp; Feedback</h3>
+                        <select id="aQualDays" class="form-select form-select-sm" style="width:auto" onchange="updateAgentQuality()">
+                            <option value="7">7 d</option>
+                            <option value="30" selected>30 d</option>
+                            <option value="90">90 d</option>
+                        </select>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint mb-3" data-i18n="agent.quality_hint">Eine „zurückgenommene" Entscheidung wurde ausgeführt und danach von einem Menschen widerrufen — also ein bestätigter False Positive. FP-Rate = zurückgenommen / (aktiv + zurückgenommen).</p>
+                        <div class="row g-2 mb-3">
+                            <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="qFpRate">–</h3><p data-i18n="agent.qual_fp_rate">False-Positive-Rate</p></div><div class="small-box-footer" id="qFpSub">—</div></div></div>
+                            <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="qAutoFp">–</h3><p data-i18n="agent.qual_auto_fp">Auto-Approval FP-Rate</p></div><div class="small-box-footer" id="qAutoSub">—</div></div></div>
+                            <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="qActed">–</h3><p data-i18n="agent.qual_acted">Blocks (aktiv + zurückgenommen)</p></div><div class="small-box-footer" data-i18n="agent.qual_window">im Zeitfenster</div></div></div>
+                            <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="qPatterns">–</h3><p data-i18n="agent.qual_patterns">Aktive Auto-Muster</p></div><div class="small-box-footer" id="qPatSub">—</div></div></div>
+                        </div>
+                        <h6 class="mb-2" data-i18n="agent.qual_by_source">Pro Quelle</h6>
+                        <div class="table-responsive mb-3"><table class="table table-sm align-middle mb-0" id="aQualBySource"><thead><tr>
+                            <th data-i18n="agent.qual_col_source">Quelle</th>
+                            <th class="text-end" data-i18n="agent.qual_col_executed">Aktiv</th>
+                            <th class="text-end" data-i18n="agent.qual_col_declined">Zurückgenommen</th>
+                            <th class="text-end" data-i18n="agent.qual_col_failed">Fehler</th>
+                            <th class="text-end" data-i18n="agent.qual_col_fp">FP-Rate</th>
+                        </tr></thead><tbody></tbody></table></div>
+                        <h6 class="mb-2" data-i18n="agent.qual_top_patterns">Top gelernte Muster</h6>
+                        <div class="table-responsive"><table class="table table-sm align-middle mb-0" id="aQualPatterns"><thead><tr>
+                            <th data-i18n="agent.qual_col_rule">Signatur</th>
+                            <th class="text-end" data-i18n="agent.qual_col_approvals">✔</th>
+                            <th class="text-end" data-i18n="agent.qual_col_rejections">✖</th>
+                            <th class="text-end" data-i18n="agent.qual_col_net">Netto</th>
+                            <th class="text-end" data-i18n="agent.qual_col_auto">Auto</th>
+                        </tr></thead><tbody></tbody></table></div>
+                    </div>
+                </div>
+
                 <!-- Filter + Liste -->
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="agent.log_title">Decision-Log</h3></div>

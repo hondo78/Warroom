@@ -82,12 +82,21 @@ function populateLearning(g) {
     const th = document.getElementById('g_agent_learning_threshold');
     if (en) en.checked = !!g.learning_enabled;
     if (th) th.value = g.learning_threshold ?? 3;
+    const be = document.getElementById('g_agent_block_burst_enabled');
+    const bt = document.getElementById('g_agent_block_burst_threshold');
+    const bw = document.getElementById('g_agent_block_burst_window_minutes');
+    if (be) be.checked = g.block_burst_enabled !== false;
+    if (bt) bt.value = g.block_burst_threshold ?? 25;
+    if (bw) bw.value = g.block_burst_window_minutes ?? 60;
 }
 
 async function saveLearning() {
     const payload = {
         agent_learning_enabled: document.getElementById('g_agent_learning_enabled').checked,
         agent_learning_threshold: parseInt(document.getElementById('g_agent_learning_threshold').value, 10),
+        agent_block_burst_enabled: document.getElementById('g_agent_block_burst_enabled').checked,
+        agent_block_burst_threshold: parseInt(document.getElementById('g_agent_block_burst_threshold').value, 10),
+        agent_block_burst_window_minutes: parseInt(document.getElementById('g_agent_block_burst_window_minutes').value, 10),
     };
     await putSettings(payload, t('agentWorkflow.learnSaved'));
 }

@@ -198,6 +198,40 @@ def _extract_json(content: str) -> dict | None:
     return None
 
 
+_SQL_FENCE_RE = re.compile(r"```(?:sql)?\s*(.+?)```", re.S | re.I)
+
+
+def _clean_sql(s: str | None, strict: bool) -> str | None:
+    """Normalise an SQL candidate; return it only if it looks like a read-only
+    SELECT/WITH. ``strict`` (used for a whole bare reply, not a fenced block or
+    JSON) also requires a FROM so a prose sentence starting with 'Select…' isn't
+    mistaken for a query."""
+    s = (s or "").strip().rstrip(";").strip()
+    low = s.lower()
+    if not low.startswith(("select", "with")):
+        return None
+    if strict and "from" not in low and not low.startswith("with"):
+        return None
+    return s
+
+
+def _extract_sql(content: str, obj: dict | None) -> str | None:
+    """Pull a read-only query out of an LLM reply. The primary contract is
+    ``{"sql": "…"}`` JSON, but models frequently emit a ```sql fenced block```
+    or a bare statement instead — accept those too so the chat's DB access is
+    robust to formatting quirks."""
+    if isinstance(obj, dict) and isinstance(obj.get("sql"), str):
+        c = _clean_sql(obj["sql"], strict=False)
+        if c:
+            return c
+    m = _SQL_FENCE_RE.search(content or "")
+    if m:
+        c = _clean_sql(m.group(1), strict=False)
+        if c:
+            return c
+    return _clean_sql(content, strict=True)
+
+
 def _keyword_intent(text: str) -> dict[str, Any]:
     t = text.lower().strip()
     urls = _URL_RE.findall(text)
@@ -547,36 +581,41 @@ async def llm_chat(text: str, history: list[dict] | None = None) -> str | None:
             messages.append({"role": h["role"], "content": str(h["content"])[:4000]})
     messages.append({"role": "user", "content": text})
 
+    lang = _agent_lang()
+    _empty = "(no answer)" if lang == "en" else "(keine Antwort)"
     for _ in range(_MAX_SQL_STEPS):
         content = _strip_reasoning(await _llm_call(messages, base))
-        sql = None
-        if db_enabled:
-            obj = _extract_json(content)
-            cand = obj.get("sql") if isinstance(obj, dict) else None
-            if isinstance(cand, str) and cand.strip().lower().startswith(("select", "with")):
-                sql = cand
+        sql = _extract_sql(content, _extract_json(content)) if db_enabled else None
         if sql is None:
-            return content.strip() or "(keine Antwort)"
+            return content.strip() or _empty
         # The model asked for data: run it read-only and feed the rows back.
         from app import sql_query
         messages.append({"role": "assistant", "content": content})
         try:
             res = await sql_query.run_select(sql)
             osint_ctx = await _osint_context_for_result(res)
-            feedback = ("[DB-Ergebnis] " + json.dumps(res, ensure_ascii=False)[:6000]
-                        + osint_ctx
-                        + "\nBeantworte jetzt die Frage des Nutzers auf Deutsch, ohne weiteres JSON.")
+            payload = "[DB result] " if lang == "en" else "[DB-Ergebnis] "
+            tail = ("\nNow answer the user's question in English, without further JSON."
+                    if lang == "en" else
+                    "\nBeantworte jetzt die Frage des Nutzers auf Deutsch, ohne weiteres JSON.")
+            feedback = payload + json.dumps(res, ensure_ascii=False)[:6000] + osint_ctx + tail
         except sql_query.SqlError as e:
-            feedback = f"[DB-Fehler] {e}. Korrigiere die Abfrage oder antworte ohne Datenbank."
+            feedback = (f"[DB error] {e}. Fix the query or answer without the database."
+                        if lang == "en" else
+                        f"[DB-Fehler] {e}. Korrigiere die Abfrage oder antworte ohne Datenbank.")
         except Exception as e:
             logger.warning(f"chat sql failed: {e}")
-            feedback = f"[DB-Fehler] Abfrage fehlgeschlagen: {str(e)[:160]}. Antworte ohne Datenbank."
+            feedback = (f"[DB error] query failed: {str(e)[:160]}. Answer without the database."
+                        if lang == "en" else
+                        f"[DB-Fehler] Abfrage fehlgeschlagen: {str(e)[:160]}. Antworte ohne Datenbank.")
         messages.append({"role": "user", "content": feedback})
 
     # Query budget exhausted — force a final answer with no further SQL.
     messages.append({"role": "user",
-                     "content": "Gib jetzt die finale Antwort auf Deutsch, ohne weitere DB-Abfrage und ohne JSON."})
-    return _strip_reasoning(await _llm_call(messages, base)).strip() or "(keine Antwort)"
+                     "content": ("Now give the final answer in English, with no further DB query and no JSON."
+                                 if lang == "en" else
+                                 "Gib jetzt die finale Antwort auf Deutsch, ohne weitere DB-Abfrage und ohne JSON.")})
+    return _strip_reasoning(await _llm_call(messages, base)).strip() or _empty
 
 
 async def run_command(text: str, actor: str = "chat", history: list[dict] | None = None) -> dict[str, Any]:
