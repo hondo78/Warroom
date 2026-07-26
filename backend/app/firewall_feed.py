@@ -7,6 +7,10 @@ feed** with
     POST /firewall/v1/firewalls/{firewallId}/mdr-threat-feed/indicators
 using the existing Sophos Central OAuth credentials.
 
+Only the DELTA is pushed: each run sends solely the blocklist entries added
+since the last successful push (never the whole list). Progress is tracked by a
+tie-safe per-table cursor (blocked_at, value) in Redis — see ``_WATERMARK_KEY``.
+
 Both delivery methods are independently toggled in the admin settings
 (``firewall_threat_feed_enabled`` / ``firewall_mdr_feed_enabled``).
 
@@ -19,7 +23,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from app.config import settings
 from app.database import async_session
@@ -82,33 +86,110 @@ async def _target_firewall_ids() -> list[str]:
     return [str(fw.get("id")) for fw in firewalls if fw.get("id")]
 
 
-async def _current_blocklists() -> tuple[list[str], list[str], list[str]]:
-    async with async_session() as db:
-        ips = (await db.execute(select(BlockedIp.ip).order_by(BlockedIp.ip))).scalars().all()
-        domains = (await db.execute(select(BlockedDomain.domain).order_by(BlockedDomain.domain))).scalars().all()
-        urls = (await db.execute(select(BlockedUrl.url).order_by(BlockedUrl.url))).scalars().all()
-    return list(ips), list(domains), list(urls)
+# Redis key holding the per-table delta cursor. Value is a composite
+# (blocked_at, value) per list, which is tie-safe: a bulk block (block_ips /
+# block_subnet) writes many rows sharing ONE blocked_at, so a plain
+# ``blocked_at >`` cursor would skip its siblings. No TTL (persistent). If it's
+# ever lost (Redis flush) we re-initialize to the CURRENT newest entry and push
+# nothing — so the whole list is never sent.
+_WATERMARK_KEY = "firewall:mdr:watermark"
+
+
+async def _load_watermark(r) -> dict | None:
+    raw = await r.get(_WATERMARK_KEY)
+    if not raw:
+        return None
+    try:
+        wm = json.loads(raw)
+        return wm if isinstance(wm, dict) else None
+    except Exception:
+        return None
+
+
+async def _save_watermark(r, wm: dict) -> None:
+    await r.set(_WATERMARK_KEY, json.dumps(wm))
+
+
+async def _current_cursor(db, val_col, ts_col) -> dict | None:
+    """Composite cursor (blocked_at, value) of the newest row, or None if the
+    table is empty (then any future row is a fresh delta)."""
+    row = (await db.execute(
+        select(val_col, ts_col).where(ts_col.isnot(None))
+        .order_by(ts_col.desc(), val_col.desc()).limit(1)
+    )).first()
+    return {"ts": row[1].isoformat(), "value": row[0]} if row else None
+
+
+async def _fetch_delta(db, val_col, ts_col, wm) -> list[tuple]:
+    """Rows strictly after the composite cursor ``wm``, tie-safe, oldest first."""
+    q = select(val_col, ts_col).where(ts_col.isnot(None))
+    if wm:
+        ts = datetime.fromisoformat(wm["ts"])
+        q = q.where(or_(ts_col > ts, and_(ts_col == ts, val_col > wm["value"])))
+    q = q.order_by(ts_col.asc(), val_col.asc())
+    return [(row[0], row[1]) for row in (await db.execute(q)).all()]
 
 
 async def sync_mdr_threat_feed(force: bool = False) -> dict:
-    """Push the current blocklists to every targeted firewall's MDR threat feed.
+    """Push ONLY the newly-added blocklist entries (the delta since the last
+    successful push) to every targeted firewall's MDR threat feed — never the
+    whole list. A per-table composite cursor (blocked_at, value) is kept in
+    Redis; on the first run (or after the cursor is lost) it initializes to the
+    current newest entry and pushes nothing, so a full list is never sent.
 
-    ``force=True`` runs even when the feature is disabled (manual admin trigger).
-    Returns a per-firewall result summary. Never raises — logs and reports errors
-    so a single firewall failure doesn't abort the rest."""
+    ``force=True`` runs even when the feature is disabled (manual admin trigger)
+    but still pushes only the delta. Never raises — logs/reports errors so a
+    single firewall failure doesn't abort the rest."""
     if not settings.firewall_mdr_feed_enabled and not force:
         return {"skipped": "firewall_mdr_feed_enabled is off"}
 
-    ips, domains, urls = await _current_blocklists()
-    total = len(ips) + len(domains) + len(urls)
     firewall_ids = await _target_firewall_ids()
     if not firewall_ids:
         logger.info("firewall_feed: no target firewalls; nothing pushed")
-        return {"firewalls": [], "indicators": total, "note": "no target firewalls"}
+        return {"firewalls": [], "indicators": 0, "note": "no target firewalls"}
+
+    # The delta cursor lives in Redis. If Redis is unavailable we can't know what
+    # was already delivered — skip rather than risk sending the whole list.
+    try:
+        r = await get_redis()
+    except Exception:
+        r = None
+    if r is None:
+        logger.warning("firewall_feed: Redis unavailable — MDR delta push skipped")
+        return {"skipped": "redis unavailable — delta cursor not accessible"}
+
+    wm = await _load_watermark(r)
+    async with async_session() as db:
+        if wm is None:
+            # First run / cursor lost: treat everything currently blocked as
+            # already delivered; only future additions become deltas.
+            wm = {
+                "ip": await _current_cursor(db, BlockedIp.ip, BlockedIp.blocked_at),
+                "domain": await _current_cursor(db, BlockedDomain.domain, BlockedDomain.blocked_at),
+                "url": await _current_cursor(db, BlockedUrl.url, BlockedUrl.blocked_at),
+            }
+            await _save_watermark(r, wm)
+            logger.info("firewall_feed: initialized MDR delta cursor — only new "
+                        "blocks are pushed from now on")
+            return {"firewalls": [], "indicators": 0, "initialized": True,
+                    "note": "delta cursor initialized — only new blocks are pushed from now on"}
+
+        ip_delta = await _fetch_delta(db, BlockedIp.ip, BlockedIp.blocked_at, wm.get("ip"))
+        dom_delta = await _fetch_delta(db, BlockedDomain.domain, BlockedDomain.blocked_at, wm.get("domain"))
+        url_delta = await _fetch_delta(db, BlockedUrl.url, BlockedUrl.blocked_at, wm.get("url"))
+
+    total = len(ip_delta) + len(dom_delta) + len(url_delta)
+    if total == 0:
+        logger.debug("firewall_feed: MDR delta empty — nothing new to push")
+        return {"firewalls": [], "indicators": 0, "note": "no new indicators"}
+
+    ips = [v for v, _ in ip_delta]
+    domains = [v for v, _ in dom_delta]
+    urls = [v for v, _ in url_delta]
 
     # The MDR feed rejects wildcard domains (e.g. *.evil.com). Skip them up front
-    # — otherwise every chunk containing one fails and falls back to slow
-    # item-by-item pushes on every sync. They stay covered by the pull feed.
+    # (still covered by the pull feed); the cursor advances past them so they're
+    # not retried forever.
     wildcard_domains = [d for d in domains if "*" in d]
     domains = [d for d in domains if "*" not in d]
     pre_skipped = [
@@ -154,12 +235,28 @@ async def sync_mdr_threat_feed(force: bool = False) -> dict:
         results.append({"firewall_id": fid, "pushed": pushed,
                         "rejected": rejected, "transaction_ids": tx_ids, "error": error})
 
-    ok = sum(1 for r in results if r["error"] is None)
-    rej = sum(len(r["rejected"]) for r in results)
+    ok = sum(1 for x in results if x["error"] is None)
+    rej = sum(len(x["rejected"]) for x in results)
     logger.info(
-        f"firewall_feed: MDR push — {total} indicator(s) to {ok}/{len(firewall_ids)} "
+        f"firewall_feed: MDR delta push — {total} new indicator(s) to {ok}/{len(firewall_ids)} "
         f"firewall(s), {rej} value(s) rejected"
     )
+
+    # Advance the cursor to the newest fetched entry per table — but only once at
+    # least one firewall accepted the push, so a total failure retries the same
+    # delta next cycle instead of silently dropping it.
+    if ok >= 1:
+        new_wm = dict(wm)
+        if ip_delta:
+            new_wm["ip"] = {"ts": ip_delta[-1][1].isoformat(), "value": ip_delta[-1][0]}
+        if dom_delta:
+            new_wm["domain"] = {"ts": dom_delta[-1][1].isoformat(), "value": dom_delta[-1][0]}
+        if url_delta:
+            new_wm["url"] = {"ts": url_delta[-1][1].isoformat(), "value": url_delta[-1][0]}
+        try:
+            await _save_watermark(r, new_wm)
+        except Exception as e:
+            logger.warning(f"firewall_feed: could not persist MDR delta cursor: {e}")
 
     # Stash the transaction IDs so a later /verify can confirm the firewall
     # actually applied them (best-effort — never break the push on a Redis error).
@@ -177,7 +274,7 @@ async def sync_mdr_threat_feed(force: bool = False) -> dict:
     except Exception as e:
         logger.debug(f"firewall_feed: could not store last-push tx ids: {e}")
 
-    return {"firewalls": results, "indicators": total}
+    return {"firewalls": results, "indicators": total, "delta": True}
 
 
 async def verify_last_push() -> dict:

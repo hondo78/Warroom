@@ -285,8 +285,13 @@ async function syncMdrFeed() {
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         if (data.skipped) { toast(t('admin.mdrSkipped', { reason: data.skipped }), 'info'); return; }
+        if (data.initialized) { toast(t('admin.mdrInitialized'), 'info'); return; }
         const fws = data.firewalls || [];
-        if (!fws.length) { toast(t('admin.mdrNoTargets', { note: data.note || '—' }), 'info'); return; }
+        if (!fws.length) {
+            // Delta feed: an empty push means nothing new was blocked since last time.
+            if (data.note === 'no new indicators') { toast(t('admin.mdrNoNew'), 'success'); return; }
+            toast(t('admin.mdrNoTargets', { note: data.note || '—' }), 'info'); return;
+        }
         const failed = fws.filter(f => f.error);
         const pushed = fws.reduce((s, f) => s + (f.pushed || 0), 0);
         const rejected = fws.reduce((s, f) => s + (f.rejected ? f.rejected.length : 0), 0);
