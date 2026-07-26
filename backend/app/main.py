@@ -20,7 +20,7 @@ from app.database import async_session, ensure_schema, get_db
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, HoneypotProcessWhitelist, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app.sophos_client import sophos_client
 from app.settings_store import (
@@ -1719,7 +1719,7 @@ async def list_honeypot_sources(
                MAX(a.acknowledged_at)                                AS acked_at
         FROM honeypot_events e
         LEFT JOIN honeypot_acks a ON a.source_ip = e.source_ip
-        WHERE e.source_ip IS NOT NULL
+        WHERE e.source_ip IS NOT NULL AND e.muted IS NOT TRUE
         GROUP BY e.source_ip
         ORDER BY MAX(e.created_at) DESC
         LIMIT :lim
@@ -1805,12 +1805,103 @@ async def list_honeypot_events(
             "id": e.id, "honeypot_id": e.honeypot_id, "honeypot": names.get(e.honeypot_id),
             "service": e.service, "event_type": e.event_type,
             "source_ip": e.source_ip, "source_port": e.source_port, "dest_port": e.dest_port,
-            "payload": e.payload,
+            "payload": e.payload, "muted": bool(e.muted),
             "country": e.attacker_country, "city": e.attacker_city, "org": e.attacker_org,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in rows
     ]}
+
+
+# --- File-honeypot process whitelist ----------------------------------------
+# Legitimate processes (e.g. a virus scanner) that routinely touch decoy files.
+# A whitelisted process's access is logged (muted) but never alarms.
+
+class ProcessWhitelistIn(BaseModel):
+    process: str = Field(min_length=1, max_length=500)
+    exe: str | None = Field(default=None, max_length=500)
+    pod_id: str | None = Field(default=None, max_length=36)      # None = all pods
+    file_path: str | None = Field(default=None, max_length=400)  # None = all files
+    comment: str | None = Field(default=None, max_length=500)
+
+
+@app.get("/api/honeypot/process-whitelist")
+async def list_process_whitelist(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(
+        select(HoneypotProcessWhitelist).order_by(HoneypotProcessWhitelist.created_at.desc())
+    )).scalars().all()
+    names = {p.id: p.name for p in (await db.execute(select(Honeypot))).scalars().all()}
+    return {"entries": [
+        {
+            "id": r.id, "process": r.process, "exe": r.exe,
+            "pod_id": r.pod_id, "pod": names.get(r.pod_id) if r.pod_id else None,
+            "file_path": r.file_path, "comment": r.comment, "created_by": r.created_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]}
+
+
+@app.post("/api/honeypot/process-whitelist")
+async def add_process_whitelist(body: ProcessWhitelistIn, request: Request,
+                                db: AsyncSession = Depends(get_db)):
+    """Whitelist a process. Idempotent on (pod, process, exe, file). Also retro-
+    mutes matching decoy-file events already recorded, so the log reflects it and
+    the source drops off the open-alert list."""
+    def _clean(v):
+        v = (v or "").strip()
+        return v or None
+    process = body.process.strip()
+    exe = _clean(body.exe)
+    pod_id = _clean(body.pod_id)
+    file_path = _clean(body.file_path)
+    if not process:
+        raise HTTPException(status_code=400, detail="process required")
+
+    existing = (await db.execute(
+        select(HoneypotProcessWhitelist).where(
+            func.coalesce(HoneypotProcessWhitelist.pod_id, "") == (pod_id or ""),
+            func.lower(HoneypotProcessWhitelist.process) == process.lower(),
+            func.coalesce(HoneypotProcessWhitelist.exe, "") == (exe or ""),
+            func.coalesce(HoneypotProcessWhitelist.file_path, "") == (file_path or ""),
+        )
+    )).scalar_one_or_none()
+    if existing is None:
+        entry = HoneypotProcessWhitelist(
+            process=process, exe=exe, pod_id=pod_id, file_path=file_path,
+            comment=_clean(body.comment),
+            created_by=getattr(getattr(request, "state", None), "user", None) or "human",
+        )
+        db.add(entry)
+        await db.flush()
+    else:
+        entry = existing
+
+    # Retro-mute matching decoy-file events (exe preferred, else process name).
+    conds = ["service = 'file'", "muted IS NOT TRUE"]
+    params: dict = {}
+    if pod_id:
+        conds.append("honeypot_id = :pod"); params["pod"] = pod_id
+    if file_path:
+        conds.append("payload->>'path' = :fp"); params["fp"] = file_path
+    if exe:
+        conds.append("payload->>'exe' = :exe"); params["exe"] = exe
+    else:
+        conds.append("lower(payload->>'process') = :proc"); params["proc"] = process.lower()
+    res = await db.execute(
+        text(f"UPDATE honeypot_events SET muted = TRUE WHERE {' AND '.join(conds)}"), params)
+    await db.commit()
+    return {"ok": True, "id": entry.id, "muted_existing": res.rowcount}
+
+
+@app.delete("/api/honeypot/process-whitelist/{entry_id}")
+async def delete_process_whitelist(entry_id: int, db: AsyncSession = Depends(get_db)):
+    row = await db.get(HoneypotProcessWhitelist, entry_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="entry not found")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True, "id": entry_id}
 
 
 # --- Shodan host intelligence (ports + CVEs) ---

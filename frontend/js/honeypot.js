@@ -117,8 +117,101 @@ async function refreshHoneypot() {
         _hpPods = pd.items || [];
         renderPods();
         renderSources((await er.json()).sources || []);
+        _fillWlPods();
+        loadProcessWhitelist();
     } catch (err) {
         console.error('honeypot refresh failed:', err);
+    }
+}
+
+// ---- file-honeypot process whitelist ----------------------------------------
+
+function _fillWlPods() {
+    const sel = document.getElementById('wlPod');
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${t('honeypot.wl_all_pods')}</option>`
+        + _hpPods.map(p => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+    sel.value = cur;
+}
+
+async function loadProcessWhitelist() {
+    const tb = document.getElementById('wlTable');
+    if (!tb) return;
+    try {
+        const d = await (await fetch('/api/honeypot/process-whitelist')).json();
+        const entries = d.entries || [];
+        if (!entries.length) {
+            tb.innerHTML = `<tr><td colspan="5" class="text-secondary py-2">${t('honeypot.wl_empty')}</td></tr>`;
+            return;
+        }
+        tb.innerHTML = entries.map(e => {
+            const scope = `${e.pod ? escapeHtml(e.pod) : t('honeypot.wl_all_pods')} · ${e.file_path ? '<code>' + escapeHtml(e.file_path) + '</code>' : t('honeypot.wl_all_files')}`;
+            return `<tr>
+                <td><code>${escapeHtml(e.process)}</code></td>
+                <td>${e.exe ? '<code style="font-size:.75rem">' + escapeHtml(e.exe) + '</code>' : '<span class="text-secondary">—</span>'}</td>
+                <td style="font-size:.78rem">${scope}</td>
+                <td class="text-secondary" style="font-size:.78rem">${escapeHtml(e.comment || '')}</td>
+                <td><button class="btn btn-sm btn-outline-danger py-0" style="font-size:.72rem" onclick="deleteWhitelist(${e.id}, this)"><i class="bi bi-trash"></i> ${t('honeypot.wl_remove')}</button></td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tb.innerHTML = `<tr><td colspan="5" class="detail-error">${escapeHtml(e.message)}</td></tr>`;
+    }
+}
+
+async function _postWhitelist(body) {
+    const r = await fetch('/api/honeypot/process-whitelist', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+    return r.json();
+}
+
+async function whitelistProcessFromBtn(btn) {
+    const process = btn.dataset.proc || '';
+    const exe = btn.dataset.exe || '';
+    const label = process || exe;
+    if (!confirm(t('honeypot.wl_confirm', {p: label}))) return;
+    btn.disabled = true;
+    try {
+        const d = await _postWhitelist({process: process || exe, exe: exe || null});
+        alert(t('honeypot.wl_added', {n: d.muted_existing || 0}));
+        refreshHoneypot();
+    } catch (e) {
+        alert(t('honeypot.wl_failed') + ': ' + e.message);
+        btn.disabled = false;
+    }
+}
+
+async function addWhitelistManual() {
+    const process = document.getElementById('wlProcess').value.trim();
+    const exe = document.getElementById('wlExe').value.trim();
+    const pod = document.getElementById('wlPod').value;
+    const comment = document.getElementById('wlComment').value.trim();
+    if (!process && !exe) { alert(t('honeypot.wl_need_process')); return; }
+    try {
+        await _postWhitelist({process: process || exe, exe: exe || null, pod_id: pod || null, comment: comment || null});
+        document.getElementById('wlProcess').value = '';
+        document.getElementById('wlExe').value = '';
+        document.getElementById('wlComment').value = '';
+        refreshHoneypot();
+    } catch (e) {
+        alert(t('honeypot.wl_failed') + ': ' + e.message);
+    }
+}
+
+async function deleteWhitelist(id, btn) {
+    if (!confirm(t('honeypot.wl_remove_confirm'))) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/honeypot/process-whitelist/${id}`, {method: 'DELETE'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        loadProcessWhitelist();
+    } catch (e) {
+        alert(t('honeypot.wl_failed') + ': ' + e.message);
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -273,7 +366,13 @@ function _payloadHtml(e) {
                 + `</div>`).join('');
             tree = `<details class="mt-1"><summary style="font-size:.72rem;cursor:pointer" class="text-secondary">${t('honeypot.proc_tree')}</summary><div class="mt-1">${nodes}</div></details>`;
         }
-        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${atk}${who}${cmd}${tree}`;
+        const muted = e.muted
+            ? `<span class="badge text-bg-secondary ms-1" title="${escapeAttr(t('honeypot.muted_hint'))}"><i class="bi bi-bell-slash"></i> ${t('honeypot.muted')}</span>`
+            : '';
+        const wl = (!e.muted && (p.process || p.exe))
+            ? `<div class="mt-1"><button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" data-proc="${escapeAttr(p.process || '')}" data-exe="${escapeAttr(p.exe || '')}" onclick="whitelistProcessFromBtn(this)"><i class="bi bi-shield-check"></i> ${t('honeypot.wl_process')}</button></div>`
+            : '';
+        return `<span class="badge text-bg-danger me-1">${escapeHtml(p.access || 'access')}</span><code>${escapeHtml(p.path || '')}</code>${muted}${atk}${who}${cmd}${tree}${wl}`;
     }
     if (p.username || p.password) return `${t('honeypot.login')}: <code>${escapeHtml(p.username || '')}</code> / <code>${escapeHtml(p.password || '')}</code>`;
     if (p.http_method) return `<code>${escapeHtml(p.http_method)} ${escapeHtml((p.path || '').slice(0, 80))}</code>${p.user_agent ? ' <span class="text-secondary" style="font-size:.7rem">' + escapeHtml(p.user_agent.slice(0, 40)) + '</span>' : ''}`;

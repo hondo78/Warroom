@@ -495,6 +495,26 @@ _MIGRATIONS = [
         acknowledged_by VARCHAR(100)
     )
     """,
+    # File-honeypot process whitelist: legitimate processes (e.g. a virus
+    # scanner) touch decoy files routinely. A whitelisted process's access is
+    # still logged (as a muted event) but never raises an alarm. Scope: pod_id
+    # NULL = all pods, file_path NULL = all decoy files. Match prefers the exe
+    # full path when present, else the process (comm) name.
+    "ALTER TABLE honeypot_events ADD COLUMN IF NOT EXISTS muted BOOLEAN NOT NULL DEFAULT FALSE",
+    """
+    CREATE TABLE IF NOT EXISTS honeypot_process_whitelist (
+        id BIGSERIAL PRIMARY KEY,
+        pod_id VARCHAR(36),
+        process VARCHAR(500) NOT NULL,
+        exe VARCHAR(500),
+        file_path VARCHAR(400),
+        comment VARCHAR(500),
+        created_by VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    """CREATE UNIQUE INDEX IF NOT EXISTS idx_hp_procwl_uniq ON honeypot_process_whitelist
+        (COALESCE(pod_id,''), lower(process), COALESCE(exe,''), COALESCE(file_path,''))""",
     # --- Attack-map rollup ---------------------------------------------------
     # Daily pre-aggregation of the geo-located firewall_logs that feed the attack
     # map. The map used to aggregate 4-11M raw rows per request (13-30s cold);

@@ -371,10 +371,28 @@ class HoneypotEvent(Base):
     dest_port = Column(Integer)
     # Captured interaction: {username, password, http_method, path, data, ...}
     payload = Column(JSONB)
+    # A whitelisted process's decoy-file access is stored but muted (no alarm).
+    muted = Column(Boolean, nullable=False, default=False)
     attacker_country = Column(String(100))
     attacker_city = Column(String(255))
     attacker_asn = Column(String(255))
     attacker_org = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HoneypotProcessWhitelist(Base):
+    """A legitimate process (e.g. a virus scanner) allowed to touch decoy files.
+    A matching file-honeypot access is still logged (as a muted event) but never
+    raises an alarm. pod_id NULL = all pods; file_path NULL = all decoy files."""
+    __tablename__ = "honeypot_process_whitelist"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    pod_id = Column(String(36))                         # NULL = all pods
+    process = Column(String(500), nullable=False)       # comm name, e.g. "clamd"
+    exe = Column(String(500))                           # full exe path (preferred match)
+    file_path = Column(String(400))                    # NULL = all decoy files
+    comment = Column(String(500))
+    created_by = Column(String(100))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

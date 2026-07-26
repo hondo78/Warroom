@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.geoip_service import get_redis, lookup_ip
-from app.models import Honeypot, HoneypotEvent
+from app.models import Honeypot, HoneypotEvent, HoneypotProcessWhitelist
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +185,43 @@ async def _should_alert(pod_id: str, ident: str) -> bool:
         return True
 
 
+def _basename(s: str) -> str:
+    return (s or "").rsplit("/", 1)[-1]
+
+
+def _access_whitelisted(entries: list[dict], pod_id: str, payload: dict) -> bool:
+    """True if a legitimate (whitelisted) process made this file access, so it
+    should be logged but not alarmed. Matching prefers the exe full path (hard
+    to spoof); falls back to the process (comm) name, basename-equivalent."""
+    if not entries or not isinstance(payload, dict):
+        return False
+    proc = (payload.get("process") or "").strip()
+    exe = (payload.get("exe") or "").strip()
+    path = (payload.get("path") or "").strip()
+    if not proc and not exe:
+        return False
+    for e in entries:
+        if e["pod_id"] and e["pod_id"] != pod_id:
+            continue
+        if e["file_path"] and e["file_path"] != path:
+            continue
+        ex = (e["exe"] or "").strip()
+        if ex and exe and ex == exe:
+            return True
+        ep = (e["process"] or "").strip()
+        if ep and proc and (ep == proc or _basename(ep) == _basename(proc)):
+            return True
+    return False
+
+
+async def load_process_whitelist(db) -> list[dict]:
+    """Fetch the file-honeypot process whitelist as plain dicts (matched in
+    memory once per ingest batch)."""
+    rows = (await db.execute(select(HoneypotProcessWhitelist))).scalars().all()
+    return [{"pod_id": r.pod_id, "process": r.process, "exe": r.exe,
+             "file_path": r.file_path} for r in rows]
+
+
 def _clean(obj):
     """Strip characters Postgres JSONB rejects (NUL / \\u0000 and other C0
     controls) from any string in the payload. Attacker-controlled bytes reach
@@ -206,6 +243,7 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
     stored = 0
     to_alert: list[tuple[dict, dict | None]] = []
     async with async_session() as db:
+        whitelist = await load_process_whitelist(db)
         for ev in events[:500]:
             src = (ev.get("source_ip") or "").strip() or None
             geo = None
@@ -214,6 +252,10 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
                     geo = await lookup_ip(src, db)
                 except Exception:
                     geo = None
+            # A whitelisted process touching a decoy file is logged but muted:
+            # stored for the audit trail, never alarmed.
+            is_file = ev.get("service") == "file"
+            muted = is_file and _access_whitelisted(whitelist, pod.id, ev.get("payload") or {})
             row = HoneypotEvent(
                 honeypot_id=pod.id,
                 service=(ev.get("service") or "")[:20] or None,
@@ -222,6 +264,7 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
                 source_port=ev.get("source_port"),
                 dest_port=ev.get("dest_port"),
                 payload=_clean(ev.get("payload")) or None,
+                muted=muted,
                 attacker_country=(geo or {}).get("country"),
                 attacker_city=(geo or {}).get("city"),
                 attacker_asn=str((geo or {}).get("asn")) if (geo or {}).get("asn") else None,
@@ -229,8 +272,10 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
             )
             db.add(row)
             stored += 1
+            if muted:
+                continue   # logged, but no dedup key and no alert
             # Dedup identity: the decoy file for file events, else the source IP.
-            if ev.get("service") == "file":
+            if is_file:
                 ident = "file:" + str((ev.get("payload") or {}).get("path") or "?")
             else:
                 ident = src

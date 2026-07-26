@@ -150,6 +150,33 @@
                     </div>
                 </div>
 
+                <!-- Process whitelist (file honeypots) -->
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="honeypot.wl_title">🛡️ Prozess-Whitelist (Datei-Honeypots)</h3></div>
+                    <div class="card-body">
+                        <p class="text-secondary mb-2" style="font-size:.82rem" data-i18n="honeypot.wl_hint">Legitime Prozesse (z. B. ein Virenscanner) greifen regelmäßig auf Köder-Dateien zu. Ein whitelisteter Prozess wird weiterhin protokolliert (stumm), löst aber keinen Alarm mehr aus. Am einfachsten direkt an einem Event über „Prozess whitelisten".</p>
+                        <div class="row g-1 mb-2 align-items-center">
+                            <div class="col-md-3"><input type="text" id="wlProcess" class="form-control form-control-sm" data-i18n-placeholder="honeypot.wl_process_ph" placeholder="Prozess (z. B. clamd)"></div>
+                            <div class="col-md-3"><input type="text" id="wlExe" class="form-control form-control-sm" data-i18n-placeholder="honeypot.wl_exe_ph" placeholder="exe-Pfad (optional)"></div>
+                            <div class="col-md-2"><select id="wlPod" class="form-select form-select-sm"></select></div>
+                            <div class="col-md-2"><input type="text" id="wlComment" class="form-control form-control-sm" data-i18n-placeholder="honeypot.wl_comment_ph" placeholder="Notiz"></div>
+                            <div class="col-md-2 text-end"><button class="btn btn-primary btn-sm" onclick="addWhitelistManual()"><i class="bi bi-plus-lg"></i> <span data-i18n="honeypot.wl_add">Hinzufügen</span></button></div>
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr>
+                                    <th data-i18n="honeypot.wl_col_process">Prozess</th>
+                                    <th data-i18n="honeypot.wl_col_exe">exe-Pfad</th>
+                                    <th data-i18n="honeypot.wl_col_scope">Geltung</th>
+                                    <th data-i18n="honeypot.wl_col_comment">Notiz</th>
+                                    <th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="wlTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </main>
