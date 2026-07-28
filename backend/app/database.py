@@ -606,6 +606,16 @@ _MIGRATIONS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)",
+    # Durable state for the MDR threat-feed delta push: per-firewall composite
+    # cursors (blocked_at, value) live here instead of Redis so a cache flush
+    # can't lose delivery progress (which would silently skip indicators).
+    """
+    CREATE TABLE IF NOT EXISTS mdr_feed_state (
+        key VARCHAR(60) PRIMARY KEY,
+        value JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
 ]
 
 

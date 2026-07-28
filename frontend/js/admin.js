@@ -278,20 +278,25 @@ async function testConnection(target) {
     }
 }
 
-async function syncMdrFeed() {
-    toast(t('admin.mdrPushing'), 'info');
+async function syncMdrFeedFull() {
+    // Explicit seed action: pushes the ENTIRE blocklists (e.g. to provision a
+    // newly added firewall). The scheduled sync stays delta-only.
+    if (!confirm(t('admin.mdrFullConfirm'))) return;
+    return syncMdrFeed(true);
+}
+
+async function syncMdrFeed(full = false) {
+    toast(t(full ? 'admin.mdrFullPushing' : 'admin.mdrPushing'), 'info');
     try {
-        const resp = await fetch('/api/firewall/mdr-feed/sync', { method: 'POST' });
+        const resp = await fetch('/api/firewall/mdr-feed/sync' + (full ? '?full=true' : ''), { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
         if (data.skipped) { toast(t('admin.mdrSkipped', { reason: data.skipped }), 'info'); return; }
+        if (data.error) { toast(t('admin.mdrPushFailedErr', { error: data.error }), 'error'); return; }
         if (data.initialized) { toast(t('admin.mdrInitialized'), 'info'); return; }
+        if (data.no_new) { toast(t('admin.mdrNoNew'), 'success'); return; }
         const fws = data.firewalls || [];
-        if (!fws.length) {
-            // Delta feed: an empty push means nothing new was blocked since last time.
-            if (data.note === 'no new indicators') { toast(t('admin.mdrNoNew'), 'success'); return; }
-            toast(t('admin.mdrNoTargets', { note: data.note || '—' }), 'info'); return;
-        }
+        if (!fws.length) { toast(t('admin.mdrNoTargets', { note: data.note || '—' }), 'info'); return; }
         const failed = fws.filter(f => f.error);
         const pushed = fws.reduce((s, f) => s + (f.pushed || 0), 0);
         const rejected = fws.reduce((s, f) => s + (f.rejected ? f.rejected.length : 0), 0);

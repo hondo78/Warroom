@@ -2986,12 +2986,14 @@ async def ioc_url_list(db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/firewall/mdr-feed/sync")
-async def mdr_feed_sync_now():
-    """Push the current blocklists to the firewalls' MDR threat feed right now.
+async def mdr_feed_sync_now(full: bool = Query(default=False)):
+    """Push the blocklist delta to the firewalls' MDR threat feed right now.
     Runs even when firewall_mdr_feed_enabled is off (admin-initiated test).
-    Returns the per-firewall push result so the admin can verify it worked."""
+    ``full=true`` is the explicit seed action: it pushes the ENTIRE current
+    blocklists once (e.g. to provision a newly added firewall) — the scheduled
+    sync always stays delta-only. Returns the per-firewall push result."""
     from app.firewall_feed import sync_mdr_threat_feed
-    return await sync_mdr_threat_feed(force=True)
+    return await sync_mdr_threat_feed(force=True, full=full)
 
 
 @app.post("/api/firewall/mdr-feed/verify")
