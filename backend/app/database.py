@@ -616,6 +616,71 @@ _MIGRATIONS = [
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
     """,
+    # --- nmap port scanning of internal hosts ---------------------------------
+    # Long-term inventory of scanned internal hosts (survives NetFlow retention).
+    """
+    CREATE TABLE IF NOT EXISTS host_inventory (
+        ip VARCHAR(45) PRIMARY KEY,
+        hostname VARCHAR(255),
+        mac VARCHAR(17),
+        os_guess VARCHAR(255),
+        open_ports INTEGER NOT NULL DEFAULT 0,
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_scan_at TIMESTAMP WITH TIME ZONE,
+        notes TEXT
+    )
+    """,
+    # One row per scan run.
+    """
+    CREATE TABLE IF NOT EXISTS host_scans (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        profile VARCHAR(20) NOT NULL,
+        status VARCHAR(12) NOT NULL DEFAULT 'running',   -- running | done | error
+        arguments TEXT,
+        ports_open INTEGER NOT NULL DEFAULT 0,
+        os_guess VARCHAR(255),
+        duration_ms INTEGER,
+        error TEXT,
+        started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        finished_at TIMESTAMP WITH TIME ZONE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_scans_ip ON host_scans(ip, started_at DESC)",
+    # Current state per (ip, port, proto), with first/last seen for history.
+    """
+    CREATE TABLE IF NOT EXISTS host_ports (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        port INTEGER NOT NULL,
+        proto VARCHAR(8) NOT NULL DEFAULT 'tcp',
+        state VARCHAR(12) NOT NULL DEFAULT 'open',       -- open | closed
+        service VARCHAR(64),
+        product VARCHAR(128),
+        version VARCHAR(128),
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_state_change TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_host_ports_uniq ON host_ports(ip, port, proto)",
+    # Transitions (opened / closed / service_change) — the long-term timeline.
+    """
+    CREATE TABLE IF NOT EXISTS host_port_events (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        port INTEGER NOT NULL,
+        proto VARCHAR(8) NOT NULL DEFAULT 'tcp',
+        event_type VARCHAR(20) NOT NULL,                 -- opened | closed | service_change
+        service VARCHAR(64),
+        detail TEXT,
+        detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        notified BOOLEAN NOT NULL DEFAULT FALSE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_port_events_ip ON host_port_events(ip, detected_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_host_port_events_time ON host_port_events(detected_at DESC)",
 ]
 
 

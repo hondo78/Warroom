@@ -198,6 +198,29 @@
                         <div class="text-end mt-3">
                             <button class="btn btn-primary btn-sm" onclick="saveSection('hostnames')" data-i18n="admin.saveHostnames">Hostname-Settings speichern</button>
                         </div>
+
+                        <hr>
+                        <h5 data-i18n="admin.nmapTitle">nmap-Portscan interner Hosts</h5>
+                        <p class="admin-hint" data-i18n-html="admin.nmapHint">Aktive Portscans einzelner interner Hosts (nur private IPs). Ergebnisse werden langfristig gespeichert; Port-Änderungen (Dienst neu/weg) werden nachvollzogen und optional alarmiert. <strong>Aktiv/intrusiv</strong> — standardmäßig aus.</p>
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.nmapEnabled">Portscan aktiv</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="host_nmap_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.nmapAlarm">Alarm bei Port-Änderung</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="host_nmap_alarm" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.nmapProfile">Standard-Profil</label></div>
+                            <div class="col-md-8"><select class="form-select form-select-sm" data-key="host_nmap_default_profile">
+                                <option value="quick">quick (Top-1000, -sV)</option>
+                                <option value="full">full (alle 65535, -sV)</option>
+                                <option value="scripts">scripts (Top-1000, -sV -sC)</option>
+                            </select></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.nmapTimeout">Timeout je Scan (Sek.)</label></div>
+                            <div class="col-md-8"><input type="number" min="30" max="21600" class="form-control form-control-sm" data-key="host_nmap_timeout_seconds" placeholder="1800"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.nmapConcurrent">Parallele Scans</label></div>
+                            <div class="col-md-8"><input type="number" min="1" max="8" class="form-control form-control-sm" data-key="host_nmap_max_concurrent" placeholder="2"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('hostNmap')" data-i18n="admin.saveNmap">nmap-Settings speichern</button>
+                        </div>
                     </div>
                 </div>
 

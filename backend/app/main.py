@@ -1362,6 +1362,22 @@ async def list_internal_hosts(
         by_ip.setdefault(ipv4, {"ip": ipv4, "last_seen": None, "first_seen": None,
                                 "bytes": 0, "flows": 0})
 
+    # Fold in the long-term scan inventory so scanned hosts stay listed even
+    # after they drop out of the NetFlow window, and attach their scan state.
+    from app.models import HostInventory
+    inv_rows = (await db.execute(select(HostInventory))).scalars().all()
+    inv_meta: dict[str, dict] = {}
+    for h in inv_rows:
+        if not is_internal(h.ip):
+            continue
+        inv_meta[h.ip] = {
+            "open_ports": h.open_ports,
+            "last_scan_at": h.last_scan_at.isoformat() if h.last_scan_at else None,
+            "os": h.os_guess,
+        }
+        by_ip.setdefault(h.ip, {"ip": h.ip, "last_seen": None, "first_seen": None,
+                                "bytes": 0, "flows": 0})
+
     ips = list(by_ip.keys())
     names = await lookup_cached(ips)
     misses = [ip for ip in ips if ip not in names]
@@ -1372,13 +1388,16 @@ async def list_internal_hosts(
     for ip, base in by_ip.items():
         nm = names.get(ip) or {}
         meta = ep_meta.get(ip) or {}
+        scan = inv_meta.get(ip) or {}
         items.append({
             **base,
             "hostname": nm.get("hostname"),
             "source": nm.get("source"),
             "mac": nm.get("mac"),
-            "os": meta.get("os"),
+            "os": meta.get("os") or scan.get("os"),
             "device_type": meta.get("device_type"),
+            "open_ports": scan.get("open_ports"),
+            "last_scan_at": scan.get("last_scan_at"),
         })
     # Named first, then by recent activity.
     items.sort(key=lambda x: (x["hostname"] is not None, x["last_seen"] or ""), reverse=True)
@@ -1464,6 +1483,118 @@ async def list_host_identity_events(
          "detected_at": e.detected_at.isoformat() if e.detected_at else None}
         for e in rows
     ]}
+
+
+# --- nmap port scanning of internal hosts -----------------------------------
+
+@app.post("/api/hosts/{ip}/scan")
+async def scan_host(ip: str, profile: str | None = Query(default=None)):
+    """Start an nmap scan of an internal host (background). Only private IPs may
+    be scanned. Returns the scan id; poll GET /api/hosts/{ip}/scan for results."""
+    if not settings.host_nmap_enabled:
+        raise HTTPException(status_code=403, detail="nmap scanning is disabled (enable host_nmap_enabled in Admin)")
+    from app.nmap_scan import start_scan
+    try:
+        return await start_scan(ip, profile)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/hosts/{ip}/scan")
+async def latest_host_scan(ip: str, db: AsyncSession = Depends(get_db)):
+    """Latest scan run for a host + its current open ports."""
+    from app.models import HostScan, HostPort
+    scan = (await db.execute(
+        select(HostScan).where(HostScan.ip == ip).order_by(HostScan.started_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    ports = (await db.execute(
+        select(HostPort).where(HostPort.ip == ip, HostPort.state == "open")
+        .order_by(HostPort.port)
+    )).scalars().all()
+    return {
+        "ip": ip,
+        "scan": None if scan is None else {
+            "id": scan.id, "profile": scan.profile, "status": scan.status,
+            "ports_open": scan.ports_open, "os_guess": scan.os_guess,
+            "duration_ms": scan.duration_ms, "error": scan.error,
+            "started_at": scan.started_at.isoformat() if scan.started_at else None,
+            "finished_at": scan.finished_at.isoformat() if scan.finished_at else None,
+        },
+        "ports": [
+            {"port": p.port, "proto": p.proto, "service": p.service,
+             "product": p.product, "version": p.version,
+             "first_seen": p.first_seen.isoformat() if p.first_seen else None,
+             "last_seen": p.last_seen.isoformat() if p.last_seen else None}
+            for p in ports
+        ],
+    }
+
+
+@app.get("/api/hosts/{ip}/port-events")
+async def host_port_events(ip: str, limit: int = Query(default=100, ge=1, le=1000),
+                           db: AsyncSession = Depends(get_db)):
+    """Port change timeline for one host (opened / closed / service_change)."""
+    from app.models import HostPortEvent
+    rows = (await db.execute(
+        select(HostPortEvent).where(HostPortEvent.ip == ip)
+        .order_by(HostPortEvent.detected_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"events": [
+        {"id": e.id, "port": e.port, "proto": e.proto, "event_type": e.event_type,
+         "service": e.service, "detail": e.detail,
+         "detected_at": e.detected_at.isoformat() if e.detected_at else None}
+        for e in rows
+    ]}
+
+
+@app.get("/api/hosts/port-events")
+async def all_host_port_events(limit: int = Query(default=100, ge=1, le=2000),
+                               db: AsyncSession = Depends(get_db)):
+    """Recent port changes across all hosts (newest first) — the global timeline."""
+    from app.models import HostPortEvent
+    rows = (await db.execute(
+        select(HostPortEvent).order_by(HostPortEvent.detected_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"events": [
+        {"id": e.id, "ip": e.ip, "port": e.port, "proto": e.proto,
+         "event_type": e.event_type, "service": e.service, "detail": e.detail,
+         "detected_at": e.detected_at.isoformat() if e.detected_at else None}
+        for e in rows
+    ]}
+
+
+@app.get("/api/hosts/export.csv", response_class=PlainTextResponse)
+async def export_hosts_csv(db: AsyncSession = Depends(get_db)):
+    """CSV export of every scanned host in the long-term inventory, including its
+    current open ports (one 'port/proto service' per cell, semicolon-separated)."""
+    import csv
+    import io
+    from app.models import HostInventory, HostPort
+
+    inv = (await db.execute(select(HostInventory).order_by(HostInventory.ip))).scalars().all()
+    ports_by_ip: dict[str, list] = {}
+    for p in (await db.execute(
+        select(HostPort).where(HostPort.state == "open").order_by(HostPort.ip, HostPort.port)
+    )).scalars().all():
+        svc = p.service or ""
+        if p.product:
+            svc = (svc + " " + p.product).strip()
+        ports_by_ip.setdefault(p.ip, []).append(f"{p.port}/{p.proto}{' ' + svc if svc else ''}")
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["ip", "hostname", "mac", "os_guess", "open_ports",
+                "first_seen", "last_seen", "last_scan_at", "ports"])
+    for h in inv:
+        w.writerow([
+            h.ip, h.hostname or "", h.mac or "", h.os_guess or "", h.open_ports,
+            h.first_seen.isoformat() if h.first_seen else "",
+            h.last_seen.isoformat() if h.last_seen else "",
+            h.last_scan_at.isoformat() if h.last_scan_at else "",
+            "; ".join(ports_by_ip.get(h.ip, [])),
+        ])
+    return PlainTextResponse(buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="warroom_hosts.csv"'})
 
 
 @app.post("/api/firewall/dhcp/test")
@@ -6005,6 +6136,11 @@ class AdminSettingsIn(BaseModel):
     host_identity_monitor_enabled: bool | None = None
     host_identity_alarm: bool | None = None
     host_identity_scan_interval_seconds: int | None = Field(default=None, ge=60, le=86400)
+    host_nmap_enabled: bool | None = None
+    host_nmap_alarm: bool | None = None
+    host_nmap_default_profile: str | None = Field(default=None, pattern="^(quick|full|scripts)$")
+    host_nmap_timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
+    host_nmap_max_concurrent: int | None = Field(default=None, ge=1, le=8)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None

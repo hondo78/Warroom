@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     host_identity_alarm: bool = True
     host_identity_scan_interval_seconds: int = 900
 
+    # --- nmap port scanning of internal hosts (opt-in; active/intrusive) ---
+    # Only PRIVATE/internal IPs may ever be scanned (hard guard in nmap_scan).
+    host_nmap_enabled: bool = False           # master switch for on-demand scans
+    host_nmap_alarm: bool = True              # alert on port open/close changes
+    host_nmap_default_profile: str = "quick"  # quick | full | scripts
+    host_nmap_timeout_seconds: int = 1800     # per-scan hard cap
+    host_nmap_max_concurrent: int = 2         # parallel scans
+
     # --- M365 login watch ---
     # Alerts (with a revoke-sessions option) when a user signs in from a device
     # or country not in their baseline. First run seeds the baseline silently.

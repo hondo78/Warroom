@@ -454,6 +454,71 @@ class HostIdentityEvent(Base):
     notified = Column(Boolean, nullable=False, default=False)
 
 
+class HostInventory(Base):
+    """Long-term record of an internal host that has been port-scanned. Survives
+    NetFlow retention so a host stays known with its scan history and open ports."""
+    __tablename__ = "host_inventory"
+
+    ip = Column(String(45), primary_key=True)
+    hostname = Column(String(255))
+    mac = Column(String(17))
+    os_guess = Column(String(255))
+    open_ports = Column(Integer, nullable=False, default=0)
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_scan_at = Column(DateTime(timezone=True))
+    notes = Column(Text)
+
+
+class HostScan(Base):
+    """One nmap scan run against an internal host."""
+    __tablename__ = "host_scans"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False)
+    profile = Column(String(20), nullable=False)         # quick | full | scripts
+    status = Column(String(12), nullable=False, default="running")  # running|done|error
+    arguments = Column(Text)
+    ports_open = Column(Integer, nullable=False, default=0)
+    os_guess = Column(String(255))
+    duration_ms = Column(Integer)
+    error = Column(Text)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+
+
+class HostPort(Base):
+    """Current state of one (ip, port, proto), with first/last seen for history."""
+    __tablename__ = "host_ports"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False)
+    port = Column(Integer, nullable=False)
+    proto = Column(String(8), nullable=False, default="tcp")
+    state = Column(String(12), nullable=False, default="open")   # open | closed
+    service = Column(String(64))
+    product = Column(String(128))
+    version = Column(String(128))
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_state_change = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HostPortEvent(Base):
+    """A detected change to a host's port (opened / closed / service_change)."""
+    __tablename__ = "host_port_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False)
+    port = Column(Integer, nullable=False)
+    proto = Column(String(8), nullable=False, default="tcp")
+    event_type = Column(String(20), nullable=False)     # opened | closed | service_change
+    service = Column(String(64))
+    detail = Column(Text)
+    detected_at = Column(DateTime(timezone=True), server_default=func.now())
+    notified = Column(Boolean, nullable=False, default=False)
+
+
 class GeoIPCache(Base):
     __tablename__ = "geoip_cache"
 
