@@ -16,6 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('hostModal').addEventListener('click', e => {
         if (e.target.id === 'hostModal') closeHostModal();
     });
+    document.getElementById('hostDetailModal').addEventListener('click', e => {
+        if (e.target.id === 'hostDetailModal') closeHostDetail();
+    });
     // Column sorting: click a header, click again to flip direction.
     document.querySelectorAll('#hostsSortRow th[data-sort]').forEach(th => {
         th.addEventListener('click', () => {
@@ -195,15 +198,12 @@ function renderHosts() {
         const mac = h.mac
             ? `<code style="font-size:.78rem">${escapeHtml(h.mac)}</code>`
             : '<span class="text-secondary">—</span>';
-        // Open-ports badge (clickable → expand). h.open_ports is null when never scanned.
+        // The whole row expands to show the host's ports (open + formerly open).
         const ip = escapeAttr(h.ip);
         const portsCell = (h.open_ports != null)
-            ? `<button class="btn btn-sm btn-outline-info py-0" style="font-size:.72rem" onclick="toggleHostPorts('${ip}', this)" title="${escapeAttr(t('hosts.ports_toggle'))}"><i class="bi bi-caret-right-fill hp-caret"></i> ${h.open_ports} <span data-i18n="hosts.ports_open">offen</span></button>`
+            ? `<span class="badge text-bg-info">${h.open_ports} <span data-i18n="hosts.ports_open">offen</span></span>`
             : '<span class="text-secondary" style="font-size:.72rem">—</span>';
-        const scanBtn = _nmapEnabled
-            ? `<button class="btn btn-sm btn-outline-primary py-0" style="font-size:.72rem" onclick="scanHost('${ip}', this)" title="${escapeAttr(t('hosts.scan_title'))}"><i class="bi bi-radar"></i> ${t('hosts.scan')}</button>`
-            : '';
-        return `<tr data-ip="${ip}">
+        return `<tr data-ip="${ip}" style="cursor:pointer" onclick="openHostDetail('${ip}')" title="${escapeAttr(t('hosts.row_toggle'))}">
             <td><code data-hn="skip" style="font-size:.82rem">${escapeHtml(h.ip)}</code></td>
             <td>${name}</td>
             <td>${src}</td>
@@ -212,8 +212,7 @@ function renderHosts() {
             <td>${portsCell}</td>
             <td style="white-space:nowrap">${fmtTime(h.last_seen)}</td>
             <td style="white-space:nowrap">${traffic}</td>
-            <td style="white-space:nowrap">${scanBtn}
-                <button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="openHostModal('${ip}')"><i class="bi bi-pencil"></i> ${t('hosts.btn_edit')}</button></td>
+            <td style="white-space:nowrap"><button class="btn btn-sm btn-outline-secondary py-0" style="font-size:.72rem" onclick="event.stopPropagation(); openHostModal('${ip}')"><i class="bi bi-pencil"></i> ${t('hosts.btn_edit')}</button></td>
         </tr>`;
     }).join('');
 }
@@ -228,76 +227,125 @@ async function loadNmapEnabled() {
     } catch (e) { /* leave off */ }
 }
 
-async function scanHost(ip, btn) {
-    const profile = document.getElementById('scanProfile')?.value || 'quick';
+function _portsTable(ports, opened) {
+    // opened=true → currently open (show "open since"); false → formerly open
+    // (show when it closed).
+    if (!ports.length) return '';
+    const sinceHdr = opened ? t('hosts.pt_since') : t('hosts.pt_closed_since');
+    const rows = ports.map(p => `<tr${opened ? '' : ' class="text-secondary"'}>
+        <td><code>${p.port}/${escapeHtml(p.proto)}</code></td>
+        <td>${escapeHtml(p.service || '—')}</td>
+        <td>${escapeHtml([p.product, p.version].filter(Boolean).join(' ') || '—')}</td>
+        <td style="white-space:nowrap">${fmtTime(opened ? p.first_seen : p.last_state_change)}</td>
+    </tr>`).join('');
+    const title = opened
+        ? `<strong>${_pcIcon('opened')} ${t('hosts.open_ports_title')} (${ports.length})</strong>`
+        : `<strong>${_pcIcon('closed')} ${t('hosts.closed_ports_title')} (${ports.length})</strong>`;
+    return `<div class="mb-2">${title}
+        <table class="table table-sm mb-1" style="background:rgba(0,0,0,.12)">
+            <thead><tr><th>${t('hosts.pt_port')}</th><th>${t('hosts.pt_service')}</th><th>${t('hosts.pt_version')}</th><th>${sinceHdr}</th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
+}
+
+// --- host detail modal -------------------------------------------------------
+let _hdIp = null;
+
+function closeHostDetail() {
+    _hdIp = null;
+    document.getElementById('hostDetailModal').classList.remove('active');
+}
+
+function editFromDetail() {
+    const ip = _hdIp;
+    closeHostDetail();
+    if (ip) openHostModal(ip);
+}
+
+async function scanFromDetail() {
+    if (!_hdIp) return;
+    const btn = document.getElementById('hdScanBtn');
+    const profile = document.getElementById('hdProfile')?.value || 'quick';
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> ${t('hosts.scanning')}`; }
     try {
-        const r = await fetch(`/api/hosts/${encodeURIComponent(ip)}/scan?profile=${encodeURIComponent(profile)}`, { method: 'POST' });
+        const r = await fetch(`/api/hosts/${encodeURIComponent(_hdIp)}/scan?profile=${encodeURIComponent(profile)}`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-        await _pollScan(ip, btn);
+        const ip = _hdIp;
+        for (let i = 0; i < 240; i++) {
+            await new Promise(res => setTimeout(res, 2500));
+            if (_hdIp !== ip) break;   // user closed / switched host
+            let s;
+            try { s = await (await fetch(`/api/hosts/${encodeURIComponent(ip)}/scan`)).json(); }
+            catch (e) { continue; }
+            const st = s.scan && s.scan.status;
+            if (st === 'done' || st === 'error') {
+                if (st === 'error') alert(t('hosts.scan_failed') + ': ' + (s.scan.error || '?'));
+                refreshHosts();
+                loadPortChanges();
+                if (_hdIp === ip) await openHostDetail(ip);   // re-render the modal
+                return;
+            }
+        }
     } catch (e) {
         alert(t('hosts.scan_failed') + ': ' + e.message);
+    } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = `<i class="bi bi-radar"></i> ${t('hosts.scan')}`; }
     }
 }
 
-async function _pollScan(ip, btn) {
-    // Poll the scan status until it finishes (scans can take minutes on 'full').
-    for (let i = 0; i < 240; i++) {
-        await new Promise(r => setTimeout(r, 2500));
-        let d;
-        try { d = await (await fetch(`/api/hosts/${encodeURIComponent(ip)}/scan`)).json(); }
-        catch (e) { continue; }
-        const st = d.scan && d.scan.status;
-        if (st === 'done' || st === 'error') {
-            if (st === 'error') alert(t('hosts.scan_failed') + ': ' + (d.scan.error || '?'));
-            await refreshHosts();
-            loadPortChanges();
-            return;
-        }
-    }
-    if (btn) { btn.disabled = false; btn.innerHTML = `<i class="bi bi-radar"></i> ${t('hosts.scan')}`; }
-}
+async function openHostDetail(ip) {
+    _hdIp = ip;
+    const modal = document.getElementById('hostDetailModal');
+    const meta = _hostsItems.find(h => h.ip === ip) || { ip };
+    document.getElementById('hdTitle').textContent = meta.hostname ? `${meta.hostname} — ${ip}` : ip;
+    document.getElementById('hdScanBtn').style.display = _nmapEnabled ? '' : 'none';
+    document.getElementById('hdProfile').style.display = _nmapEnabled ? '' : 'none';
+    const body = document.getElementById('hdBody');
+    body.innerHTML = `<div class="text-secondary">${t('common.loading')}</div>`;
+    modal.classList.add('active');
 
-async function toggleHostPorts(ip, btn) {
-    const row = btn.closest('tr');
-    const next = row.nextElementSibling;
-    if (next && next.classList.contains('hp-ports-row')) {
-        next.remove();
-        btn.querySelector('.hp-caret')?.classList.replace('bi-caret-down-fill', 'bi-caret-right-fill');
-        return;
-    }
-    btn.querySelector('.hp-caret')?.classList.replace('bi-caret-right-fill', 'bi-caret-down-fill');
-    const detail = document.createElement('tr');
-    detail.className = 'hp-ports-row';
-    detail.innerHTML = `<td></td><td colspan="8" class="py-2"><div class="text-secondary">${t('common.loading')}</div></td>`;
-    row.after(detail);
+    // Meta grid from the already-loaded row data.
+    const row = (label, val) => `<div><span class="text-secondary" style="font-size:.72rem">${label}</span><br>${val}</div>`;
+    const osType = [meta.os, meta.device_type].filter(Boolean).map(escapeHtml).join(' · ') || '—';
+    const traffic = (meta.bytes || meta.flows)
+        ? `${fmtBytes(meta.bytes)} · ${(meta.flows || 0).toLocaleString(HOSTS_LOCALE)} Flows` : '—';
+    const metaGrid = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-bottom:1rem">
+        ${row(t('hosts.col_ip'), `<code data-hn="skip">${escapeHtml(ip)}</code>`)}
+        ${row(t('hosts.col_hostname'), meta.hostname ? `<strong>${escapeHtml(meta.hostname)}</strong>` : `<span class="text-secondary">${t('hosts.unnamed')}</span>`)}
+        ${row(t('hosts.col_mac'), meta.mac ? `<code>${escapeHtml(meta.mac)}</code>` : '—')}
+        ${row(t('hosts.col_os'), osType)}
+        ${row(t('hosts.col_last'), fmtTime(meta.last_seen))}
+        ${row(t('hosts.col_traffic'), traffic)}
+    </div>`;
+
     try {
         const [scan, evs] = await Promise.all([
             fetch(`/api/hosts/${encodeURIComponent(ip)}/scan`).then(r => r.json()),
-            fetch(`/api/hosts/${encodeURIComponent(ip)}/port-events?limit=100`).then(r => r.json()),
+            fetch(`/api/hosts/${encodeURIComponent(ip)}/port-events?limit=200`).then(r => r.json()),
         ]);
-        const ports = scan.ports || [];
-        const portsHtml = ports.length
-            ? `<table class="table table-sm mb-2" style="background:rgba(0,0,0,.12)">
-                <thead><tr><th data-i18n="hosts.pt_port">Port</th><th data-i18n="hosts.pt_service">Dienst</th><th data-i18n="hosts.pt_version">Version</th><th data-i18n="hosts.pt_since">Offen seit</th></tr></thead>
-                <tbody>${ports.map(p => `<tr>
-                    <td><code>${p.port}/${escapeHtml(p.proto)}</code></td>
-                    <td>${escapeHtml(p.service || '—')}</td>
-                    <td>${escapeHtml([p.product, p.version].filter(Boolean).join(' ') || '—')}</td>
-                    <td style="white-space:nowrap">${fmtTime(p.first_seen)}</td>
-                </tr>`).join('')}</tbody></table>`
-            : `<p class="text-secondary">${t('hosts.no_open_ports')}</p>`;
-        const events = evs.events || [];
-        const evHtml = events.length
-            ? `<div style="font-size:.8rem"><strong data-i18n="hosts.pc_timeline">Verlauf</strong>${events.map(e =>
-                `<div>${_pcIcon(e.event_type)} <span class="text-secondary">${fmtTime(e.detected_at)}</span> — ${escapeHtml(e.detail || '')}</div>`).join('')}</div>`
-            : '';
-        detail.innerHTML = `<td></td><td colspan="8" class="py-2">${portsHtml}${evHtml}</td>`;
-        if (window.i18nApply) window.i18nApply(detail);
+        if (_hdIp !== ip) return;   // user navigated away while loading
+        let inner;
+        if (!scan.scan) {
+            const hint = _nmapEnabled ? t('hosts.not_scanned_hint') : t('hosts.not_scanned_disabled');
+            inner = `<p class="text-secondary">${escapeHtml(hint)}</p>`;
+        } else {
+            const all = scan.ports || [];
+            const open = all.filter(p => p.state === 'open');
+            const closed = all.filter(p => p.state !== 'open');
+            const sc = scan.scan;
+            const scanInfo = `<p class="text-secondary" style="font-size:.76rem;margin:-.3rem 0 .6rem">${t('hosts.last_scan')}: ${fmtTime(sc.finished_at || sc.started_at)} · ${escapeHtml(sc.profile)} · ${sc.ports_open} ${t('hosts.ports_open')}${sc.os_guess ? ' · ' + escapeHtml(sc.os_guess) : ''}</p>`;
+            inner = scanInfo + _portsTable(open, true);
+            if (!open.length) inner += `<p class="text-secondary">${t('hosts.no_open_ports')}</p>`;
+            inner += _portsTable(closed, false);
+            const events = evs.events || [];
+            if (events.length) {
+                inner += `<div style="font-size:.82rem;margin-top:.5rem"><strong>${t('hosts.pc_timeline')}</strong>${events.map(e =>
+                    `<div>${_pcIcon(e.event_type)} <span class="text-secondary">${fmtTime(e.detected_at)}</span> — ${escapeHtml(e.detail || '')}</div>`).join('')}</div>`;
+            }
+        }
+        body.innerHTML = metaGrid + inner;
     } catch (e) {
-        detail.innerHTML = `<td></td><td colspan="8" class="detail-error">${escapeHtml(e.message)}</td>`;
+        body.innerHTML = metaGrid + `<p class="detail-error">${escapeHtml(e.message)}</p>`;
     }
 }
 

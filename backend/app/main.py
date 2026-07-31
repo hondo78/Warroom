@@ -1507,9 +1507,11 @@ async def latest_host_scan(ip: str, db: AsyncSession = Depends(get_db)):
     scan = (await db.execute(
         select(HostScan).where(HostScan.ip == ip).order_by(HostScan.started_at.desc()).limit(1)
     )).scalar_one_or_none()
+    # All ports ever seen (open first, then formerly-open/closed), so the
+    # expanded host view can show current + historical ports together.
     ports = (await db.execute(
-        select(HostPort).where(HostPort.ip == ip, HostPort.state == "open")
-        .order_by(HostPort.port)
+        select(HostPort).where(HostPort.ip == ip)
+        .order_by(HostPort.state.desc(), HostPort.port)   # 'open' > 'closed'
     )).scalars().all()
     return {
         "ip": ip,
@@ -1521,10 +1523,11 @@ async def latest_host_scan(ip: str, db: AsyncSession = Depends(get_db)):
             "finished_at": scan.finished_at.isoformat() if scan.finished_at else None,
         },
         "ports": [
-            {"port": p.port, "proto": p.proto, "service": p.service,
+            {"port": p.port, "proto": p.proto, "state": p.state, "service": p.service,
              "product": p.product, "version": p.version,
              "first_seen": p.first_seen.isoformat() if p.first_seen else None,
-             "last_seen": p.last_seen.isoformat() if p.last_seen else None}
+             "last_seen": p.last_seen.isoformat() if p.last_seen else None,
+             "last_state_change": p.last_state_change.isoformat() if p.last_state_change else None}
             for p in ports
         ],
     }

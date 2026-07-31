@@ -25,11 +25,6 @@
                     <option value="30" data-i18n="dashboard.range_30d">30 Tage</option>
                     <option value="90" data-i18n="dashboard.range_90d">90 Tage</option>
                 </select>
-                <select id="scanProfile" class="form-select form-select-sm" style="width:auto" title="nmap-Scan-Profil" data-i18n-title="hosts.scan_profile_title">
-                    <option value="quick">quick</option>
-                    <option value="full">full</option>
-                    <option value="scripts">scripts</option>
-                </select>
                 <button class="btn btn-outline-primary btn-sm" onclick="resolveHostsNow(this)" title="Hostnamen jetzt neu abgleichen (DNS / NetBIOS / Sophos / DHCP-Leases)" data-i18n-title="hosts.resolve_title"><i class="bi bi-tags"></i> <span data-i18n="hosts.resolve">Namen abgleichen</span></button>
                 <button class="btn btn-outline-success btn-sm" onclick="exportHostsCsv()" title="Gescannte Hosts als CSV exportieren" data-i18n-title="hosts.export_title"><i class="bi bi-filetype-csv"></i> <span data-i18n="hosts.export">CSV-Export</span></button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="refreshHosts()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
@@ -182,6 +177,29 @@
             </div>
         </div>
     </main>
+</div>
+
+<!-- Host detail modal (opens on row click) -->
+<div class="modal-overlay" id="hostDetailModal">
+    <div class="modal alert-detail-modal" style="max-width:820px">
+        <div class="alert-detail-header">
+            <h3><i class="bi bi-hdd-network"></i> <span id="hdTitle">Host</span></h3>
+            <button class="modal-close" onclick="closeHostDetail()" title="Schliessen" data-i18n-title="common.close">×</button>
+        </div>
+        <div class="alert-detail-body" id="hdBody">
+            <div class="text-secondary" data-i18n="common.loading">Lädt…</div>
+        </div>
+        <div class="modal-actions">
+            <select id="hdProfile" class="form-select form-select-sm" style="width:auto;margin-right:auto">
+                <option value="quick">quick</option>
+                <option value="full">full</option>
+                <option value="scripts">scripts</option>
+            </select>
+            <button id="hdScanBtn" onclick="scanFromDetail()"><i class="bi bi-radar"></i> <span data-i18n="hosts.scan">Scan</span></button>
+            <button onclick="editFromDetail()" data-i18n="hosts.btn_edit">Bearbeiten</button>
+            <button onclick="closeHostDetail()" data-i18n="common.close">Schliessen</button>
+        </div>
+    </div>
 </div>
 
 <!-- Manual hostname modal -->
