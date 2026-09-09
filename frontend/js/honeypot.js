@@ -11,6 +11,9 @@ function _svcLabel(s) { return _hpServices[s]?.label || (s === 'file' ? t('honey
 let _hpSources = [];
 const _podsSort = { key: 'last_seen', dir: 'desc' };
 const _srcSort = { key: 'last_seen', dir: 'desc' };
+// Server-side: the table shows a slice of thousands of rows, so the order
+// has to be decided where all of them are.
+const _credSort = { key: 'created_at', dir: 'desc' };
 
 // Numeric IPv4 value so 172.16.16.9 sorts before 172.16.16.100.
 function _ipNum(ip) {
@@ -24,7 +27,8 @@ function _initSort(rowId, state, rerender) {
         th.addEventListener('click', () => {
             const key = th.dataset.sort;
             if (state.key === key) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
-            else { state.key = key; state.dir = ['name', 'host', 'country'].includes(key) ? 'asc' : 'desc'; }
+            else { state.key = key; state.dir = ['name', 'host', 'country', 'username', 'password',
+                         'source_ip', 'kind', 'action', 'path'].includes(key) ? 'asc' : 'desc'; }
             rerender();
         });
     });
@@ -52,6 +56,13 @@ document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     _initSort('podsSortRow', _podsSort, renderPods);
     _initSort('srcSortRow', _srcSort, () => renderSources(_hpSources));
+    _initSort('credSortRow', _credSort, loadCredentials);
+    loadMonitoredPasswords();
+    // Debounced: a search box that only reacts to Enter feels broken, and
+    // one that fires per keystroke hammers a table with thousands of rows.
+    const cs = document.getElementById('credSearch');
+    if (cs) { let tm = null; cs.addEventListener('input', () => {
+        clearTimeout(tm); tm = setTimeout(loadCredentials, 350); }); }
     refreshHoneypot();
     setInterval(refreshHoneypot, 30000);
     ['createPodModal', 'deployModal', 'editPodModal'].forEach(id => {
@@ -122,6 +133,106 @@ async function refreshHoneypot() {
     } catch (err) {
         console.error('honeypot refresh failed:', err);
     }
+    // Outside the try on purpose: this used to sit at the end of it, so a throw
+    // while rendering pods or sources silently skipped the credential list
+    // entirely — the table just stayed empty with the reason in a console
+    // nobody has open.
+    loadCredentials();
+}
+
+// ---- decoy login page: captured credentials ---------------------------------
+// The one place in Warroom that shows passwords in the clear. They are the
+// attacker's own guesses, and reading them is the point — a guess that
+// resembles a real password is a warning nothing else here can give.
+
+async function loadCredentials() {
+    const tbody = document.getElementById('credTable');
+    if (!tbody) return;
+    const q = document.getElementById('credSearch')?.value.trim() || '';
+    try {
+        const params = new URLSearchParams({ limit: '500', sort: _credSort.key, dir: _credSort.dir });
+        if (q) params.set('q', q);
+        const r = await fetch('/api/honeypot/logins?' + params.toString());
+        // An expired session answers 401 here while the page still looks fine.
+        // Saying so beats an empty table that reads as "nothing was captured".
+        if (!r.ok) throw new Error(r.status === 401
+            ? t('honeypot.creds_need_login') : `HTTP ${r.status}`);
+        const d = await r.json();
+        const rows = d.entries || [];
+        _sortIndicators('credSortRow', _credSort);
+
+        const status = document.getElementById('credStatus');
+        if (status) {
+            const state = d.enabled
+                ? `<span class="severity-badge severity-high">${t('honeypot.creds_on')}</span>`
+                : `<span class="severity-badge severity-low">${t('honeypot.creds_off')}</span>`;
+            const acts = [
+                d.blocks_source ? t('honeypot.creds_does_block') : null,
+                d.burns_username ? t('honeypot.creds_does_burn') : null,
+            ].filter(Boolean).join(' · ');
+            const sw = document.getElementById('credOsint');
+            if (sw) sw.checked = !!d.osint_enabled;
+            status.innerHTML = state
+                + ` <span class="text-secondary" style="font-size:.8rem">`
+                + t('honeypot.creds_counts', { n: d.total || 0, i: d.distinct_ips || 0 })
+                + (acts ? ` · ${acts}` : '') + '</span>';
+        }
+
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-secondary py-3">${t('honeypot.creds_empty')}</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(e => {
+            const act = !e.action || e.action === 'none'
+                ? `<span class="text-secondary">—</span>`
+                : e.action.split('+').map(a => `<span class="badge text-bg-danger me-1">${escapeHtml(
+                    a === 'blocked' ? t('honeypot.creds_blocked') : a === 'burned' ? t('honeypot.creds_burned') : a)}</span>`).join('');
+            const geo = [e.country, e.city].filter(Boolean).join('/');
+            // Only ever filled when the operator switched the lookup on, so an
+            // empty cell means "not asked", not "clean" — the dash says so.
+            const o = e.osint;
+            const osint = !o ? `<span class="text-secondary" title="${escapeAttr(t('honeypot.creds_osint_off'))}">—</span>` : [
+                o.abuse_score != null ? `<span class="badge ${o.abuse_score >= 50 ? 'text-bg-danger' : o.abuse_score > 0 ? 'text-bg-warning' : 'text-bg-secondary'}">Abuse ${o.abuse_score}</span>` : '',
+                o.vt_malicious ? `<span class="badge text-bg-danger ms-1">VT ${o.vt_malicious}</span>` : '',
+                o.greynoise ? `<span class="badge text-bg-info ms-1">${escapeHtml(o.greynoise)}</span>` : '',
+            ].filter(Boolean).join('') || `<span class="text-secondary">?</span>`;
+            // A probe is reconnaissance, a login is an attempt — same table,
+            // different weight, and the eye should be able to tell them apart
+            // without reading.
+            const kind = e.kind === 'probe'
+                ? `<span class="badge text-bg-secondary">${t('honeypot.creds_kind_probe')}</span>`
+                : `<span class="badge text-bg-warning">${t('honeypot.creds_kind_login')}</span>`;
+            return `<tr${e.kind === 'probe' ? ' class="text-secondary"' : ''}>
+                <td style="white-space:nowrap">${fmtTime(e.created_at)}</td>
+                <td>${kind}</td>
+                <td><code>${escapeHtml(e.username || '—')}</code>${e.method && e.method !== 'POST' ? ` <span class="badge text-bg-dark">${escapeHtml(e.method)}</span>` : ''}</td>
+                <td><code class="text-warning">${escapeHtml(e.password || '—')}</code>${
+                    // Nothing parsed but something arrived: show what came in,
+                    // or the row reads as an empty attempt when it was not.
+                    (!e.username && !e.password && e.raw_body)
+                        ? `<div class="text-secondary" style="font-size:.72rem;word-break:break-all">${escapeHtml(e.raw_body.slice(0, 120))}</div>` : ''}</td>
+                <td style="font-size:.78rem"><code>${escapeHtml(e.source_ip || '—')}</code>${geo ? ` <span class="text-secondary">${escapeHtml(geo)}</span>` : ''}${e.org ? `<div class="text-secondary" style="font-size:.72rem">${escapeHtml(e.org)}</div>` : ''}</td>
+                <td style="white-space:nowrap">${osint}</td>
+                <td>${act}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('credential capture load failed:', err);
+        // Into the table, not just the console: an empty table and a broken
+        // table look identical, and only one of them means "nothing happened".
+        tbody.innerHTML = `<tr><td colspan="7" class="detail-error" style="text-align:left">${escapeHtml(t('honeypot.creds_err') + err.message)}</td></tr>`;
+    }
+}
+
+async function purgeCredentials() {
+    if (!confirm(t('honeypot.creds_purge_confirm'))) return;
+    try {
+        const r = await fetch('/api/honeypot/logins', { method: 'DELETE' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        alert(t('honeypot.creds_purged', { n: d.deleted || 0 }));
+        loadCredentials();
+    } catch (err) { alert(t('honeypot.creds_err') + err.message); }
 }
 
 // ---- file-honeypot process whitelist ----------------------------------------
@@ -353,7 +464,7 @@ function _payloadHtml(e) {
         // remote peer up the process chain).
         const atk = p.attacker_ip
             ? `<div class="mt-1"><span class="badge text-bg-danger"><i class="bi bi-crosshair"></i> ${t('honeypot.attacker_ip')}: <code style="color:inherit">${escapeHtml(p.attacker_ip)}</code></span>`
-              + (p.attacker_via ? ` <span class="text-secondary" style="font-size:.7rem">(${t('honeypot.via_' + p.attacker_via) || escapeHtml(p.attacker_via)})</span>` : '') + '</div>'
+              + (p.attacker_via ? ` <span class="text-secondary" style="font-size:.7rem">(${escapeHtml(tOr('honeypot.via_' + p.attacker_via, p.attacker_via))})</span>` : '') + '</div>'
             : '';
         // Process tree (root → accessor) = how the access came to be.
         let tree = '';
@@ -552,4 +663,133 @@ async function deletePod() {
         closeEditPod();
         refreshHoneypot();
     } catch (err) { alert(t('honeypot.save_failed') + ': ' + err.message); }
+}
+
+
+// The lookup costs provider quota on every capture, and the decoy is taking
+// dozens an hour — so it is a switch the operator flips deliberately, sitting
+// next to the data that makes the decision.
+async function toggleCredOsint(el) {
+    const on = el.checked;
+    el.disabled = true;
+    try {
+        const r = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ honeypot_web_osint_enabled: on }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (err) {
+        alert(t('honeypot.creds_err') + err.message);
+        el.checked = !on;
+    } finally {
+        el.disabled = false;
+    }
+}
+
+// --- Monitored real passwords ----------------------------------------------
+// Registered here as fingerprints only. The plaintext is sent once on save and
+// never comes back — the table below deliberately has no "show password".
+
+async function loadMonitoredPasswords() {
+    const tbody = document.getElementById('mpTable');
+    if (!tbody) return;
+    try {
+        const r = await fetch('/api/monitored-passwords');
+        const d = await r.json();
+        const warn = document.getElementById('mpKeyWarn');
+        if (warn) {
+            // No master key means fingerprints cannot be keyed, and the feature
+            // refuses to run rather than storing a crackable plain hash.
+            warn.innerHTML = d.key_available === false
+                ? `<span class="badge text-bg-danger">${escapeHtml(t('honeypot.mp_no_key'))}</span>`
+                : (d.enabled ? '' : `<span class="badge text-bg-secondary">${escapeHtml(t('honeypot.mp_disabled'))}</span>`);
+        }
+        const rows = d.entries || [];
+        tbody.innerHTML = rows.length ? rows.map(e => `
+            <tr>
+                <td>${escapeHtml(e.label)}</td>
+                <td>${e.active
+                        ? `<span class="badge text-bg-success">${escapeHtml(t('honeypot.mp_active'))}</span>`
+                        : `<span class="badge text-bg-secondary">${escapeHtml(t('honeypot.mp_inactive'))}</span>`}</td>
+                <td>${e.hit_count > 0
+                        ? `<span class="badge text-bg-danger">${e.hit_count}</span>`
+                        : '0'}</td>
+                <td>${fmtTime(e.last_hit_at)}</td>
+                <td>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="toggleMonitoredPassword(${e.id}, ${e.active ? 'false' : 'true'})">
+                        ${escapeHtml(e.active ? t('honeypot.mp_pause') : t('honeypot.mp_resume'))}
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" onclick="deleteMonitoredPassword(${e.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>`).join('') : `<tr><td colspan="5" class="text-secondary">${escapeHtml(t('honeypot.mp_empty'))}</td></tr>`;
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-danger">${escapeHtml(String(e))}</td></tr>`;
+    }
+    loadMonitoredHits();
+}
+
+async function loadMonitoredHits() {
+    const tbody = document.getElementById('mpHitsTable');
+    if (!tbody) return;
+    try {
+        const d = await (await fetch('/api/monitored-passwords/hits?limit=50')).json();
+        const hits = d.hits || [];
+        tbody.innerHTML = hits.length ? hits.map(h => `
+            <tr>
+                <td><span class="badge text-bg-${h.severity === 'critical' ? 'danger' : 'warning'}">${escapeHtml(h.severity)}</span></td>
+                <td>${fmtTime(h.created_at)}</td>
+                <td><code>${escapeHtml(h.username || '—')}</code></td>
+                <td><code>${escapeHtml(h.source_ip || '—')}</code>${h.country ? ' ' + escapeHtml(h.country) : ''}</td>
+                <td>${escapeHtml(h.label || '—')}</td>
+            </tr>`).join('') : `<tr><td colspan="5" class="text-secondary">${escapeHtml(t('honeypot.mp_no_hits'))}</td></tr>`;
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-danger">${escapeHtml(String(e))}</td></tr>`;
+    }
+}
+
+async function addMonitoredPassword() {
+    const labelEl = document.getElementById('mpLabel');
+    const pwEl = document.getElementById('mpPassword');
+    const status = document.getElementById('mpStatus');
+    const label = labelEl?.value.trim() || '';
+    const password = pwEl?.value || '';
+    if (!label || !password) {
+        status.innerHTML = `<div class="alert alert-warning py-1 mb-0">${escapeHtml(t('honeypot.mp_need_both'))}</div>`;
+        return;
+    }
+    try {
+        const r = await fetch('/api/monitored-passwords', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({label, password}),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail || r.statusText);
+        status.innerHTML = `<div class="alert alert-success py-1 mb-0">${escapeHtml(t('honeypot.mp_saved'))}</div>`;
+        labelEl.value = '';
+        loadMonitoredPasswords();
+    } catch (e) {
+        status.innerHTML = `<div class="alert alert-danger py-1 mb-0">${escapeHtml(String(e.message || e))}</div>`;
+    } finally {
+        // Cleared on every path, success or not: the plaintext should not sit
+        // in a form field after it has been sent.
+        if (pwEl) pwEl.value = '';
+    }
+}
+
+async function toggleMonitoredPassword(id, active) {
+    await fetch(`/api/monitored-passwords/${id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({active}),
+    });
+    loadMonitoredPasswords();
+}
+
+async function deleteMonitoredPassword(id) {
+    await fetch(`/api/monitored-passwords/${id}`, {method: 'DELETE'});
+    loadMonitoredPasswords();
 }

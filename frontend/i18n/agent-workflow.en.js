@@ -114,4 +114,6 @@ window.I18N.en.agentWorkflow = {
         agent_failed_login_distributed_attempts: "Attempts //24 (guideline)",
         agent_failed_login_distributed_min_ips: "Distinct IPs //24",
     },
+    noPrompt: "no LLM",
+    noPromptHint: "This process asks no language model: the decision is a fixed rule (the username either exists or it does not). Hence there is no system prompt — and hence the rule blocks immediately, with no model round-trip and no approval step.",
 };

@@ -87,6 +87,7 @@
       <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
       <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
       <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
       <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
     </ul>
   </li>
@@ -196,6 +197,58 @@
                                 <tbody id="connAnTable"></tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Per-service anomalies: one Isolation Forest per service peer group -->
+                <div class="card mb-3 border-info">
+                    <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                        <h3 class="card-title mb-0">
+                            <i class="bi bi-hdd-network text-info"></i>
+                            <span data-i18n="fwAnomalies.svc_title">Dienst-Anomalien</span>
+                            <small class="text-secondary" data-i18n="fwAnomalies.svc_sub">— auffällig im Vergleich zum eigenen Dienst</small>
+                        </h3>
+                        <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+                            <select id="svcAnService" class="form-select form-select-sm" style="width:auto" title="Auf einen Dienst einschränken" data-i18n-title="fwAnomalies.svc_filter_title">
+                                <option value="" data-i18n="fwAnomalies.svc_all">Alle Dienste</option>
+                            </select>
+                            <select id="svcAnMinGroup" class="form-select form-select-sm" style="width:auto" title="Mindestgröße einer Dienst-Gruppe, damit sie bewertet wird" data-i18n-title="fwAnomalies.svc_mingroup_title">
+                                <option value="10">Gruppe ≥ 10</option>
+                                <option value="15" selected>Gruppe ≥ 15</option>
+                                <option value="30">Gruppe ≥ 30</option>
+                                <option value="50">Gruppe ≥ 50</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n-html="fwAnomalies.svc_hint">
+                            Jede Verbindung wird <strong>nur gegen Verbindungen desselben Dienstes</strong> verglichen —
+                            HTTPS gegen HTTPS, DNS gegen DNS. Dadurch fällt auf, was netzweit unauffällig wäre:
+                            400 MB über HTTPS sind normal, dieselben 400 MB über SMTP oder SSH nicht. Pro Dienst läuft
+                            ein eigener Isolation Forest; angezeigt wird, <strong>welche Kennzahl</strong> den Ausschlag
+                            gab (hoch oder niedrig) und um welchen <strong>Faktor sie vom Median des Dienstes</strong> abweicht.
+                            Dienste mit zu wenigen Verbindungen werden nicht bewertet und unten separat ausgewiesen.
+                        </p>
+                        <div id="svcAnStats" class="mb-2 d-flex flex-wrap gap-2 align-items-center"></div>
+                        <div class="filter-row">
+                            <input type="text" data-filter-for="svcAnTable" class="form-control form-control-sm" placeholder="Filter (IP, Dienst, Signal…)" data-i18n-placeholder="fwAnomalies.svc_filter_ph">
+                        </div>
+                        <div class="table-scroll">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead><tr id="svcAnSortRow">
+                                    <th data-sort="service" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.svc_col_service">Dienst</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="score" style="cursor:pointer;user-select:none"><span data-i18n="common.score">Score</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="src" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_src">Quelle (intern)</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="dst" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_dst">Ziel (extern)</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="country" style="cursor:pointer;user-select:none"><span data-i18n="common.country">Land</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="out" style="cursor:pointer;user-select:none"><span data-i18n="fwAnomalies.conn2_col_volume">Volumen ↑/↓</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="fwAnomalies.svc_col_drivers">Abweichung vom Dienst</th>
+                                    <th data-i18n="fwAnomalies.conn2_col_signals">Signale</th>
+                                </tr></thead>
+                                <tbody id="svcAnTable"></tbody>
+                            </table>
+                        </div>
+                        <div id="svcAnGroups" class="mt-2"></div>
                     </div>
                 </div>
 

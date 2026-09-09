@@ -142,7 +142,8 @@ async def scan(force: bool = False) -> dict:
         from app.notifications import notify
         for ev in [e for e in events if e["type"] in _ALARM_TYPES][:20]:
             try:
-                await notify(_alert_html(ev, lang), title="Warroom · Host-Identität")
+                await notify(_alert_html(ev, lang), title="Warroom · Host-Identität",
+                             event="host_identity")
                 alarms += 1
             except Exception as e:
                 logger.warning(f"host-identity alarm failed: {e}")

@@ -184,7 +184,11 @@ async def m365_login_watch(force: bool = False) -> dict:
             continue
         # Teams gets an informational card (no buttons there — approval happens
         # via Telegram or the dashboard). Telegram already gets the button prompt.
-        if settings.teams_incoming_webhook:
+        # Left as a direct Teams send on purpose: routing it through notify()
+        # would duplicate the finding, because Telegram already gets the
+        # interactive prompt above. The matrix can still mute the card.
+        from app.notification_matrix import channel_enabled
+        if settings.teams_incoming_webhook and channel_enabled("m365_login", "teams"):
             try:
                 from app.notifications import send_teams
                 await send_teams(reasoning, title="Warroom · M365-Login")

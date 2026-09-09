@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Admin: Integrationen</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="admin">
+<div class="app-wrapper">
+
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Admin</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+  <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-graph-up-arrow"></i><p><span data-i18n="nav.grp_monitoring">Monitoring</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+      <li class="nav-item"><a href="/monitored.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>Connection-Monitoring</p></a></li>
+      <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
+      <li class="nav-item"><a href="/hosts.html" class="nav-link"><i class="nav-icon bi bi-hdd-network"></i><p>Interne Hosts</p></a></li>
+      <li class="nav-item"><a href="/honeypot.html" class="nav-link"><i class="nav-icon bi bi-bug"></i><p>Honeypot</p></a></li>
+      <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-fire"></i><p><span data-i18n="nav.grp_firewall">Firewall</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+      <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-hdd-stack"></i><p>Firewalls</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-shield-check"></i><p><span data-i18n="nav.grp_sophos">Sophos Central</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+      <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+      <li class="nav-item"><a href="/xdr.html" class="nav-link"><i class="nav-icon bi bi-search-heart"></i><p>XDR</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-tools"></i><p><span data-i18n="nav.grp_tools">Tools</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
+      <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+      <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
+      <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
+      <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item menu-open"><a href="#" class="nav-link active"><i class="nav-icon bi bi-gear"></i><p><span data-i18n="nav.grp_admin">Admin</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/admin.html" class="nav-link active"><i class="nav-icon bi bi-sliders"></i><p>Admin</p></a></li>
+      <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+    </ul>
+  </li>
+</ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid d-flex flex-wrap align-items-center gap-2">
+                <h3 class="mb-0" data-i18n="admin.pageTitle">Admin</h3>
+                <span class="text-secondary">/</span>
+                <h3 class="mb-0 text-secondary" data-i18n="admin.navIntegrations">Integrationen</h3>
+                <a class="btn btn-outline-secondary btn-sm ms-auto" href="/admin.html">
+                    <i class="bi bi-arrow-left"></i> <span data-i18n="admin.backToOverview">Übersicht</span>
+                </a>
+            </div>
+        </div>
+
+        <div class="app-content">
+            <div class="container-fluid">
+
+                <div id="adminToast" class="admin-toast hidden"></div>
+
+                <ul class="nav nav-pills flex-wrap gap-1 mb-3 admin-subnav">
+                    <li class="nav-item"><a class="nav-link active" href="/admin-integrations.html" data-i18n="admin.navIntegrations">Integrationen</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/admin-ai.html" data-i18n="admin.navAi">KI &amp; Agent</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/admin-osint.html" data-i18n="admin.navOsint">OSINT &amp; GeoIP</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/admin-network.html" data-i18n="admin.navNetwork">Netzwerk &amp; Hosts</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/admin-notify.html" data-i18n="admin.navNotify">Benachrichtigungen</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/admin-users.html" data-i18n="admin.navUsers">Benutzer &amp; Daten</a></li>
+                </ul>
+
+                <!-- Sophos Central -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="admin.sophosTitle">Sophos Central API</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('sophos')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n="admin.sophosHint">OAuth2-Credentials aus dem Sophos Central API Token Management. Tenant-ID wird nach Login automatisch erkannt, falls leer.</p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientId">Client ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_client_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientSecret">Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="sophos_client_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.tenantIdOptional">Tenant ID (optional)</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="sophos_tenant_id" autocomplete="off"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('sophos')" data-i18n="admin.saveSophos">Sophos-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Microsoft 365 -->
+
+                <!-- Microsoft 365 -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="admin.o365Title">Microsoft 365 Audit-Log</h3>
+                        <button class="btn btn-outline-info btn-sm" onclick="testConnection('o365')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.o365Hint">
+                            Entra-ID-App-Registrierung mit Admin-Consent. Der Collector holt Login-Ereignisse
+                            (UserLoggedIn / UserLoginFailed); Fehlversuche landen zusätzlich als Alerts auf der Attack-Map.
+                            Anzeige unter <a href="/o365.html" class="osint-link">Microsoft 365</a>.<br>
+                            <strong>Benötigte Application-Berechtigungen:</strong><br>
+                            • <code>ActivityFeed.Read</code> (<em>Office 365 Management APIs</em>) — Login-Audit-Log.<br>
+                            • <code>User.RevokeSessions.All</code> (<em>Microsoft Graph</em>) — für die Login-Überwachung:
+                            Session-Widerruf bei Anmeldung von neuem Gerät/Standort.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.tenantId">Tenant ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_tenant_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientId">Client ID</label></div>
+                            <div class="col-md-8"><input type="text" class="form-control form-control-sm" data-key="o365_client_id" autocomplete="off"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.clientSecret">Client Secret</label></div>
+                            <div class="col-md-8"><input type="password" class="form-control form-control-sm" data-key="o365_client_secret" data-secret="1" data-i18n-placeholder="admin.secretUnchangedPlaceholder" placeholder="(unverändert lassen, um nicht zu überschreiben)" autocomplete="off"></div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('o365')" data-i18n="admin.saveO365">M365-Settings speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Internal hostname resolution -->
+
+                <!-- Entra ID conditional-access blocking -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="admin.entraTitle">Entra ID — Login-Blocking (Conditional Access)</h3>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-info btn-sm" onclick="testConnection('entra')"><i class="bi bi-plug"></i> <span data-i18n="common.test_connection">Verbindung testen</span></button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="entraSyncNow()"><i class="bi bi-arrow-repeat"></i> <span data-i18n="admin.syncNow">Jetzt syncen</span></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.entraHint">
+                            Schiebt geblockte IPs in eine Entra <em>Named Location</em>, die an eine
+                            Conditional-Access-Policy gebunden ist — M365-Logins von diesen IPs werden
+                            dann direkt bei Microsoft abgewiesen. Nutzt dieselbe App-Registrierung wie
+                            der M365-Collector, benötigt aber zusätzlich die Graph-Berechtigungen
+                            <code>Policy.ReadWrite.ConditionalAccess</code> + <code>Policy.Read.All</code>
+                            (Application, Admin-Consent).
+                            <br><strong>Sicherheit:</strong> Die Policy wird im <em>Report-Only</em>-Modus
+                            angelegt — Erzwingung musst du bewusst im Entra-Portal aktivieren.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.namedLocationSyncActive">Named-Location-Sync aktiv</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="entra_block_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.syncIntervalMinutes">Sync-Intervall (Minuten)</label></div>
+                            <div class="col-md-8"><input type="number" min="1" class="form-control form-control-sm" data-key="entra_block_sync_interval_minutes"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.excludedUsers">Ausgeschlossene Benutzer (Break-Glass)</label></div>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control form-control-sm" data-key="entra_ca_exclude_users" data-i18n-placeholder="admin.excludedUsersPlaceholder" placeholder="notfall@deinedomain.at, weitere-objektid, …" autocomplete="off">
+                                <small class="admin-hint" data-i18n-html="admin.excludedUsersHint">Pflicht für die <em>automatische</em> Policy-Anlage — UPN(s) oder Objekt-ID(s), kommagetrennt. Diese Konten werden nie geblockt (Schutz gegen Selbst-Aussperrung).</small>
+                            </div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('entra')" data-i18n="admin.saveEntra">Entra-Settings speichern</button>
+                        </div>
+
+                        <hr>
+                        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                            <div>
+                                <div class="form-label mb-1" data-i18n="admin.caPolicyEnforcement">Conditional-Access-Policy (Erzwingung)</div>
+                                <div class="admin-hint mb-0" id="caPolicyStatus" data-i18n="admin.statusLoading">Status wird geladen…</div>
+                            </div>
+                            <div class="form-check form-switch fs-5">
+                                <input class="form-check-input" type="checkbox" role="switch" id="caPolicyToggle" onchange="toggleCaPolicy(this)" disabled>
+                                <label class="form-check-label fs-6" for="caPolicyToggle" id="caPolicyToggleLabel">—</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Telegram approvals -->
+
+                <!-- IOC-Auslieferung an die Firewall -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="admin.iocTitle">IOC-Auslieferung an die Firewall</h3>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-info btn-sm" onclick="syncMdrFeed()"><i class="bi bi-arrow-repeat"></i> <span data-i18n="admin.mdrPushTest">MDR-Feed jetzt pushen/testen</span></button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="syncMdrFeedFull()"><i class="bi bi-cloud-upload"></i> <span data-i18n="admin.mdrFullPush">Vollbestand pushen (Seed)</span></button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="verifyMdrFeed()"><i class="bi bi-check2-circle"></i> <span data-i18n="admin.verifyLastPush">Letzten Push verifizieren</span></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.iocHint">
+                            Zwei voneinander unabhängige Wege, die Blocklisten an die Firewall zu bringen — beide können gleichzeitig aktiv sein.
+                            Pflege der Listen siehe <a href="/blocked.html" class="osint-link">Blocklist-Seite</a>.
+                        </p>
+
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.threatFeedsPull">1) Threat Feeds (Pull, TXT)</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch mt-1">
+                                    <input class="form-check-input" type="checkbox" data-key="firewall_threat_feed_enabled" data-bool="1">
+                                </div>
+                                <small class="admin-hint" data-i18n-html="admin.threatFeedsPullHint">
+                                    Die Firewall holt die Blocklisten als TXT-Feeds (ein Eintrag pro Zeile) selbst ab — als Third-Party-Threat-Feed konfiguriert, mit <code>X-API-Key</code>-Header.
+                                    Aus ⇒ die Feeds liefern einen leeren Body (eine pollende Firewall leert damit ihre Liste).
+                                </small>
+                                <div class="admin-readonly mt-2">
+                                    <div><span class="ro-label" data-i18n="admin.ipFeed">IP-Feed:</span> <code id="iocFeedUrl">/ioc_IP</code></div>
+                                    <div><span class="ro-label" data-i18n="admin.domainFeed">Domain-Feed:</span> <code id="iocFeedDomainUrl">/ioc_domain</code></div>
+                                    <div><span class="ro-label" data-i18n="admin.urlFeed">URL-Feed:</span> <code id="iocFeedUrlUrl">/ioc_url</code></div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrThreatFeedPush">2) MDR Threat Feed (Push, API)</label></div>
+                            <div class="col-md-8">
+                                <div class="form-check form-switch mt-1">
+                                    <input class="form-check-input" type="checkbox" data-key="firewall_mdr_feed_enabled" data-bool="1">
+                                </div>
+                                <small class="admin-hint" data-i18n-html="admin.mdrThreatFeedPushHint">
+                                    Warroom pusht die Blocklisten aktiv über die Sophos-Central-Firewall-API in den MDR-Threat-Feed der Firewall
+                                    (<code>POST /firewall/v1/firewalls/{id}/mdr-threat-feed/indicators</code>). Nutzt die oben konfigurierten Sophos-Central-Zugangsdaten.
+                                </small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrFirewallIds">MDR: Firewall-IDs (optional)</label></div>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control form-control-sm" data-key="firewall_mdr_feed_firewall_ids" data-i18n-placeholder="admin.mdrFirewallIdsPlaceholder" placeholder="leer = alle Central-verwalteten Firewalls; sonst kommagetrennte IDs" autocomplete="off">
+                                <small class="admin-hint" data-i18n="admin.mdrFirewallIdsHint">Leer lassen, um an alle von Sophos Central gemeldeten Firewalls zu pushen.</small>
+                            </div>
+
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.mdrSyncIntervalSeconds">MDR: Sync-Intervall (Sekunden)</label></div>
+                            <div class="col-md-8">
+                                <input type="number" class="form-control form-control-sm" data-key="firewall_mdr_feed_sync_interval_seconds" min="30" max="86400" placeholder="300">
+                            </div>
+                        </div>
+
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('firewallFeed')" data-i18n="admin.saveIoc">IOC-Auslieferung speichern</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GeoIP / OSINT -->
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/admin.de.js"></script>
+    <script src="/i18n/admin.en.js"></script>
+    <script src="/js/i18n.js"></script>
+<script src="/js/auth.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/admin.js"></script>
+<script src="/js/hostnames.js"></script>
+</body>
+</html>

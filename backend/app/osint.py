@@ -700,13 +700,14 @@ async def enrich_cached(ips: list[str], cap: int = 30) -> dict[str, dict]:
     return out
 
 
-async def enrich_live(ips: list[str], cap: int = 10) -> dict[str, dict]:
+async def enrich_live(ips: list[str], cap: int = 10,
+                      context: str | None = None) -> dict[str, dict]:
     """Run real (cache-aware, no-Shodan) OSINT lookups for distinct public IPs,
     capped. Use only after the user approves enriching OSINT-uncached IPs."""
     out: dict[str, dict] = {}
     for ip in _distinct_public(ips, cap):
         try:
-            payload = await lookup(ip)
+            payload = await lookup(ip, context=context)
             summary = _risk_summary(payload)
             summary["cached"] = bool(payload.get("cached"))
             summary["tor_exit_node"] = bool((payload.get("tor") or {}).get("is_exit_node"))
@@ -716,7 +717,129 @@ async def enrich_live(ips: list[str], cap: int = 10) -> dict[str, dict]:
     return out
 
 
-async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> dict[str, Any]:
+# --- provider matrix ----------------------------------------------------------
+# Which provider may be asked from which part of the system. One global on/off
+# per provider was never enough: the honeypot sees dozens of fresh addresses an
+# hour and would drain a daily quota by lunchtime, while an analyst opening a
+# dossier wants everything there is. Same provider, opposite answer, depending
+# only on who is asking — so the switch belongs at the intersection.
+
+# Free or effectively unmetered; listed so the matrix is honest about what runs,
+# but they are not worth switching off and are enabled everywhere by default.
+FREE_PROVIDERS = ("tor", "rdns", "dns")
+# Metered: every call costs quota or a credit.
+PAID_PROVIDERS = ("abuseipdb", "virustotal", "greynoise", "ipinfo", "intelix", "shodan")
+PROVIDERS = PAID_PROVIDERS + FREE_PROVIDERS
+
+# Where a lookup can originate. Adding one here plus a default row below is all
+# it takes to bring a new call site under the matrix.
+CONTEXTS = {
+    "manual":   "Analyst on the OSINT page / dossier button",
+    "dossier":  "IP dossier view",
+    "agent":    "Automatic agent triage",
+    "honeypot": "Decoy login captures",
+    "mcp":      "MCP tools (LLM clients)",
+    "command":  "Teams / Telegram commands",
+}
+
+# Defaults chosen by cost per context, not by taste:
+#   manual/dossier — a human asked; give them everything except the scarce credit
+#   agent/command  — automated but low volume; the cheap providers
+#   honeypot       — highest volume by far; nothing metered runs unattended
+#   mcp            — a model is asking, often in a loop; cheap providers only
+_DEFAULT_MATRIX: dict[str, dict[str, bool]] = {
+    "manual":   {p: True for p in PAID_PROVIDERS if p != "shodan"} | {"shodan": False},
+    "dossier":  {p: True for p in PAID_PROVIDERS if p != "shodan"} | {"shodan": False},
+    "agent":    {"abuseipdb": True, "virustotal": True, "greynoise": True,
+                 "ipinfo": True, "intelix": True, "shodan": False},
+    "command":  {"abuseipdb": True, "virustotal": True, "greynoise": True,
+                 "ipinfo": True, "intelix": True, "shodan": False},
+    "honeypot": {p: False for p in PAID_PROVIDERS},
+    "mcp":      {"abuseipdb": True, "virustotal": True, "greynoise": True,
+                 "ipinfo": True, "intelix": False, "shodan": False},
+}
+
+
+def default_matrix() -> dict[str, dict[str, bool]]:
+    """The built-in defaults, free providers included, as the UI shows them."""
+    return {ctx: {**{f: True for f in FREE_PROVIDERS}, **row}
+            for ctx, row in _DEFAULT_MATRIX.items()}
+
+
+def _configured_matrix() -> dict[str, dict[str, bool]]:
+    """Operator overrides from the ``osint_provider_matrix`` setting.
+
+    Malformed JSON yields an empty override rather than an exception: a typo in
+    a settings field must not be able to stop every OSINT lookup in the system.
+    """
+    raw = (getattr(settings, "osint_provider_matrix", "") or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception as e:
+        logger.warning(f"osint_provider_matrix is not valid JSON, ignoring it: {e}")
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, dict[str, bool]] = {}
+    for ctx, row in parsed.items():
+        if ctx in CONTEXTS and isinstance(row, dict):
+            out[ctx] = {p: bool(v) for p, v in row.items() if p in PROVIDERS}
+    return out
+
+
+def effective_matrix() -> dict[str, dict[str, bool]]:
+    """Defaults with the operator's overrides applied — what actually runs."""
+    merged = default_matrix()
+    for ctx, row in _configured_matrix().items():
+        merged.setdefault(ctx, {}).update(row)
+    return merged
+
+
+def provider_enabled(provider: str, context: str | None) -> bool:
+    """May ``provider`` be queried on behalf of ``context``?
+
+    An unknown context is treated as "manual", the most permissive row: a new
+    call site that forgets to declare itself should behave like a human asked,
+    not silently return nothing.
+    """
+    if provider not in PROVIDERS:
+        return True
+    row = effective_matrix().get(context if context in CONTEXTS else "manual", {})
+    return bool(row.get(provider, provider in FREE_PROVIDERS))
+
+
+# Returned in place of a provider's payload when the matrix switched it off, so
+# the response shape stays identical and callers can say *why* a field is empty.
+def _disabled(provider: str, context: str | None) -> dict[str, Any]:
+    return {"skipped": True, "reason": "disabled_by_matrix",
+            "provider": provider, "context": context or "manual"}
+
+
+class _CacheStale(Exception):
+    """Cached entry predates a matrix change and must not be served."""
+
+
+def _cache_is_stale_for(payload: dict[str, Any], providers, context: str | None) -> bool:
+    """True when the cached entry lacks a provider this context is now allowed
+    to use.
+
+    Without this, switching a provider on would appear to do nothing for an hour:
+    the cached payload still carries the "disabled" sentinel from the run that
+    happened while it was off, and a cache hit would keep serving it.
+    """
+    for p in providers:
+        if not provider_enabled(p, context):
+            continue
+        entry = payload.get(p)
+        if isinstance(entry, dict) and entry.get("reason") == "disabled_by_matrix":
+            return True
+    return False
+
+
+async def lookup(ip: str, force: bool = False, allow_shodan: bool = False,
+                 context: str | None = None) -> dict[str, Any]:
     """Run the OSINT providers and return a merged dict.
 
     Shodan is NEVER queried here by default — it costs a scarce credit and must
@@ -734,9 +857,12 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
     # button) or an automated caller follows up on a malicious IP. An explicit
     # human request (allow_shodan) always goes through; the automatic path is
     # hard-capped at the configured daily/monthly Shodan quota.
-    do_shodan = bool(allow_shodan)
+    # An explicit human request still wins, but only if the matrix lets this
+    # context near Shodan at all.
+    shodan_allowed = provider_enabled("shodan", context)
+    do_shodan = bool(allow_shodan) and shodan_allowed
     quota_blocked = False
-    if not do_shodan and getattr(settings, "shodan_auto_every_lookup", False):
+    if not do_shodan and shodan_allowed and getattr(settings, "shodan_auto_every_lookup", False):
         try:
             from app.osint_metrics import quota_exhausted
             quota_blocked = await quota_exhausted("shodan")
@@ -751,8 +877,11 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
     if redis and not force:
         try:
             cached = await redis.get(cache_key)
-            if cached:
-                payload = json.loads(cached)
+            payload = json.loads(cached) if cached is not None else None
+            if payload is not None and _cache_is_stale_for(
+                    payload, PAID_PROVIDERS + ("tor", "rdns"), context):
+                payload = None
+            if payload is not None:
                 payload["cached"] = True
                 # Upgrade a cached entry that skipped Shodan when we're now
                 # allowed to query it (auto-enabled, or a human opens the panel).
@@ -769,14 +898,32 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
+    async def _maybe(provider: str, coro_factory):
+        """Run a provider only if the matrix allows it for this context.
+
+        The coroutine is built lazily — constructing it for a disabled provider
+        would leave an un-awaited coroutine behind and, worse, invite someone to
+        "just await it anyway" later.
+        """
+        if not provider_enabled(provider, context):
+            return _disabled(provider, context)
+        return await _track(provider, coro_factory())
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         abuse, vt, gn, ipi, intelix, rdns = await asyncio.gather(
-            _track("abuseipdb", _abuseipdb(client, ip)),
-            _track("virustotal", _virustotal(client, ip)),
-            _track("greynoise", _greynoise(client, ip)),
-            _track("ipinfo", _ipinfo(client, ip)),
-            _track("intelix", _intelix(client, ip)),
-            reverse_dns(ip),
+            _maybe("abuseipdb", lambda: _abuseipdb(client, ip)),
+            _maybe("virustotal", lambda: _virustotal(client, ip)),
+            _maybe("greynoise", lambda: _greynoise(client, ip)),
+            _maybe("ipinfo", lambda: _ipinfo(client, ip)),
+            _maybe("intelix", lambda: _intelix(client, ip)),
+            reverse_dns(ip) if provider_enabled("rdns", context)
+            # The sentinel, not a bare None: _cache_is_stale_for() recognises a
+            # switched-off provider by "disabled_by_matrix", and it is asked
+            # about rdns. Cached as None it looked exactly like "resolved, no
+            # PTR", so switching rdns back on kept serving the empty entry for
+            # the rest of the cache TTL — the very thing that check exists to
+            # prevent.
+            else asyncio.sleep(0, result=_disabled("rdns", context)),
         )
 
     # Query Shodan when enabled (auto-every-lookup or explicit permission);
@@ -797,7 +944,8 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
         "greynoise": gn,
         "ipinfo": ipi,
         "intelix": intelix,
-        "tor": await tor_check(ip),
+        "tor": (await tor_check(ip)) if provider_enabled("tor", context)
+               else _disabled("tor", context),
         "rdns": rdns,
         "cached": False,
     }
@@ -812,6 +960,17 @@ async def lookup(ip: str, force: bool = False, allow_shodan: bool = False) -> di
     await _persist_osint(ip, "ip", payload)
 
     return payload
+
+
+# Which stored column each provider is the only source of — used to keep a
+# provider that did not run from overwriting the last answer it gave.
+_PERSIST_PROVIDER_COLS = {
+    "abuseipdb": ("abuse_score",),
+    "virustotal": ("vt_malicious",),
+    "greynoise": ("greynoise",),
+    "intelix": ("intelix_category",),
+    "ipinfo": ("country", "city", "org", "asn", "lat", "lon"),
+}
 
 
 async def _persist_osint(value: str, itype: str, payload: dict[str, Any]) -> None:
@@ -851,12 +1010,26 @@ async def _persist_osint(value: str, itype: str, payload: dict[str, Any]) -> Non
             "raw": payload,
             "last_seen": datetime.now(timezone.utc),
         }
+        # A provider the matrix switched off returns the "disabled" sentinel, not
+        # data, so its columns come out None — and writing that None over the
+        # stored row erased real enrichment: an IP AbuseIPDB scored 100 read back
+        # as unrated after a single honeypot lookup, which runs with the paid
+        # providers off. A provider that did not run does not get to overwrite
+        # what the last one that did found.
+        skipped_cols = {
+            c
+            for prov, provider_cols in _PERSIST_PROVIDER_COLS.items()
+            for c in provider_cols
+            if isinstance(payload.get(prov), dict)
+            and payload[prov].get("reason") == "disabled_by_matrix"
+        }
         async with async_session() as db:
             stmt = pg_insert(OsintResult).values(lookup_count=1, **cols)
             # On repeat lookup: refresh summary + bump the counter, keep first_seen.
             stmt = stmt.on_conflict_do_update(
                 index_elements=["value"],
-                set_={**{k: cols[k] for k in cols if k != "value"},
+                set_={**{k: cols[k] for k in cols
+                         if k != "value" and k not in skipped_cols},
                       "lookup_count": OsintResult.lookup_count + 1},
             )
             await db.execute(stmt)
@@ -1109,7 +1282,8 @@ def _is_resolvable_host(host: str) -> bool:
     return "." in host and not host.startswith(".") and not host.endswith(".")
 
 
-async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
+async def lookup_domain(domain: str, force: bool = False,
+                        context: str | None = None) -> dict[str, Any]:
     """Run domain-capable OSINT providers in parallel."""
     if not _is_resolvable_host(domain):
         return {"domain": domain, "error": "not a usable domain"}
@@ -1121,9 +1295,13 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
             cached = await redis.get(cache_key)
             if cached:
                 payload = json.loads(cached)
+                if _cache_is_stale_for(payload, ("virustotal", "intelix", "dns"), context):
+                    raise _CacheStale()
                 payload["cached"] = True
                 await _record_cache_hit(["virustotal", "intelix"])
                 return payload
+        except _CacheStale:
+            pass
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
@@ -1131,11 +1309,20 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
     intelix_target = domain[2:] if domain.startswith("*.") else domain
     intelix_url = f"http://{intelix_target}/"
 
+    async def _maybe_d(provider: str, coro_factory):
+        if not provider_enabled(provider, context):
+            return _disabled(provider, context)
+        return await _track(provider, coro_factory())
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         vt, intelix, dns = await asyncio.gather(
-            _track("virustotal", _vt_domain(client, domain)),
-            _track("intelix", _intelix_url(client, intelix_url)),
-            _dns_a_records(intelix_target),
+            _maybe_d("virustotal", lambda: _vt_domain(client, domain)),
+            _maybe_d("intelix", lambda: _intelix_url(client, intelix_url)),
+            _dns_a_records(intelix_target) if provider_enabled("dns", context)
+            # Same sentinel as every other provider: the response shape stays
+            # identical and the panel can say *why* the field is empty instead
+            # of showing a resolution that simply looks like it found nothing.
+            else asyncio.sleep(0, result=_disabled("dns", context)),
         )
 
     payload = {
@@ -1157,7 +1344,8 @@ async def lookup_domain(domain: str, force: bool = False) -> dict[str, Any]:
     return payload
 
 
-async def lookup_url(url: str, force: bool = False) -> dict[str, Any]:
+async def lookup_url(url: str, force: bool = False,
+                     context: str | None = None) -> dict[str, Any]:
     """Run URL-capable OSINT providers in parallel."""
     if not url or "://" not in url or len(url) > 2048:
         return {"url": url, "error": "not a usable URL"}
@@ -1171,16 +1359,25 @@ async def lookup_url(url: str, force: bool = False) -> dict[str, Any]:
             cached = await redis.get(cache_key)
             if cached:
                 payload = json.loads(cached)
+                if _cache_is_stale_for(payload, ("virustotal", "intelix", "dns"), context):
+                    raise _CacheStale()
                 payload["cached"] = True
                 await _record_cache_hit(["virustotal", "intelix"])
                 return payload
+        except _CacheStale:
+            pass
         except Exception as e:
             logger.warning(f"OSINT redis read failed: {e}")
 
+    async def _maybe_u(provider: str, coro_factory):
+        if not provider_enabled(provider, context):
+            return _disabled(provider, context)
+        return await _track(provider, coro_factory())
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         vt, intelix = await asyncio.gather(
-            _track("virustotal", _vt_url(client, url)),
-            _track("intelix", _intelix_url(client, url)),
+            _maybe_u("virustotal", lambda: _vt_url(client, url)),
+            _maybe_u("intelix", lambda: _intelix_url(client, url)),
         )
 
     payload = {

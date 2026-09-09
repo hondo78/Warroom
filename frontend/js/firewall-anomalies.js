@@ -13,6 +13,8 @@ const AN_DIMS = [
     { key: 'packets', label: t('fwAnomalies.dim_packets'), axis: 'log',    color: '#6f42c1' },
     { key: 'night',   label: t('fwAnomalies.dim_night'),   axis: 'linear', color: '#0d6efd' },
     { key: 'country', label: t('fwAnomalies.dim_country'), axis: 'linear', color: '#198754' },
+    { key: 'services',       label: t('fwAnomalies.dim_services'),       axis: 'linear', color: '#d63384' },
+    { key: 'service_rarity', label: t('fwAnomalies.dim_service_rarity'), axis: 'linear', color: '#adb5bd' },
 ];
 const AN_DIM_BY_KEY = Object.fromEntries(AN_DIMS.map(d => [d.key, d]));
 const AN_DEFAULT_DIMS = ['volume', 'ports', 'night'];
@@ -38,7 +40,9 @@ const AN_LOCALE = AN_LANG === 'de' ? 'de-DE' : 'en-US';
 function fmtDimVal(key, v) {
     if (key === 'volume') return fmtBytes(v);
     if (key === 'night') return Math.round((v || 0) * 100) + '%';
-    if (key === 'country') return 'r' + (Number(v) || 0).toFixed(1);
+    // Both rarity dimensions are -log(share): unbounded, only comparable
+    // relative to each other, so they share the "r<x>" notation.
+    if (key === 'country' || key === 'service_rarity') return 'r' + (Number(v) || 0).toFixed(1);
     return (Number(v) || 0).toLocaleString(AN_LOCALE);
 }
 
@@ -57,6 +61,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Connection-anomaly controls reload only that table (not the whole forest).
     document.getElementById('connAnKind')?.addEventListener('change', loadConnAnomalies);
     document.getElementById('connAnMinScore')?.addEventListener('change', loadConnAnomalies);
+    // Service-anomaly controls likewise reload only their own table.
+    document.getElementById('svcAnService')?.addEventListener('change', loadServiceAnomalies);
+    document.getElementById('svcAnMinGroup')?.addEventListener('change', loadServiceAnomalies);
+    document.querySelectorAll('#svcAnSortRow th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (_svcAnSort.key === key) {
+                _svcAnSort.dir = _svcAnSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                _svcAnSort.key = key;
+                _svcAnSort.dir = ['src', 'dst', 'country', 'service'].includes(key) ? 'asc' : 'desc';
+            }
+            _renderSvcAnRows();
+        });
+    });
     // Sortable columns for the connection-anomaly table (client-side re-sort).
     document.querySelectorAll('#connAnSortRow th[data-sort]').forEach(th => {
         th.addEventListener('click', () => {
@@ -273,8 +292,9 @@ async function anomalyRefresh() {
         renderScatter(_anScatterData);
         render3d(_anScatterData);
         renderTable(d.anomalies || []);
-        // Per-connection anomalies share the verdict map; load in parallel.
+        // Per-connection and per-service anomalies share the verdict map.
         loadConnAnomalies();
+        loadServiceAnomalies();
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="${AN_COLS}" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
     }
@@ -1012,4 +1032,203 @@ function renderConnBody(d) {
         if (fbIn) { parts.push(`<div class="text-secondary" style="font-size:.78rem;margin:.5rem 0 .25rem">${t('fwAnomalies.inbound')} (${t('fwAnomalies.source')} → ${escapeHtml(d.ip)})</div>`); parts.push(fbIn); }
     }
     return parts.join('');
+}
+
+// ---- Per-service anomalies: one Isolation Forest per service peer group ------
+// Each connection is scored only against connections of the SAME service, so a
+// value that is unremarkable network-wide can still be the outlier of its own
+// service. The table therefore shows not just a score but WHICH metric deviates
+// and by what factor from that service's median — the reason, not just the rank.
+
+let _svcAnItems = [];
+let _svcAnData = null;
+const _svcAnSort = { key: 'score', dir: 'desc' };
+
+// Feature key -> short label. Mirrors service_anomaly.FEATURES.
+function svcDimLabel(dim) {
+    return tOr('fwAnomalies.svc_dim_' + dim, dim);
+}
+
+function _svcAnSortVal(a, k) {
+    switch (k) {
+        case 'service': return a.service || '';
+        case 'src': return a.src || '';
+        case 'dst': return a.dst || '';
+        case 'country': return a.country || '';
+        case 'out': return a.out_bytes || 0;
+        case 'score':
+        default: return a.score || 0;
+    }
+}
+
+function _svcAnUpdateSortIndicators() {
+    document.querySelectorAll('#svcAnSortRow th[data-sort]').forEach(th => {
+        const ind = th.querySelector('.sort-ind');
+        if (ind) ind.textContent = th.dataset.sort === _svcAnSort.key ? (_svcAnSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    });
+}
+
+async function loadServiceAnomalies() {
+    const hours = document.getElementById('anHours').value || '24';
+    const minGroup = document.getElementById('svcAnMinGroup')?.value || '15';
+    const service = document.getElementById('svcAnService')?.value || '';
+    const tbody = document.getElementById('svcAnTable');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center text-secondary py-3">${t('fwAnomalies.analyzing')}</td></tr>`;
+    try {
+        const params = new URLSearchParams({ hours, min_flows: '5', min_group: minGroup, limit: '300' });
+        if (service) params.set('service', service);
+        const r = await fetch('/api/firewall/service-anomalies?' + params.toString());
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${r.status}`); }
+        const d = await r.json();
+        _svcAnData = d;
+        _svcAnItems = d.anomalies || [];
+        _svcAnFillServiceFilter(d);
+        _renderSvcAnStats(d);
+        _renderSvcAnGroups(d);
+        _renderSvcAnRows();
+    } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="detail-error">${t('fwAnomalies.analysis_failed')}: ${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+// Populate the service dropdown from the scored groups, keeping the selection.
+function _svcAnFillServiceFilter(d) {
+    const sel = document.getElementById('svcAnService');
+    if (!sel) return;
+    const keep = sel.value;
+    // Only groups that were actually scored are selectable — picking a skipped
+    // one would always come back empty.
+    const opts = (d.services || []).map(g =>
+        `<option value="${escapeAttr(g.service)}">${escapeHtml(g.service)} (${g.size})</option>`).join('');
+    sel.innerHTML = `<option value="">${t('fwAnomalies.svc_all')}</option>` + opts;
+    if (keep && sel.querySelector(`option[value="${CSS.escape(keep)}"]`)) sel.value = keep;
+}
+
+function _renderSvcAnStats(d) {
+    const el = document.getElementById('svcAnStats');
+    if (!el) return;
+    el.innerHTML =
+        `<span class="badge text-bg-info" style="font-size:.75rem">${t('fwAnomalies.svc_stat_found', { n: (d.anomaly_count || 0).toLocaleString(AN_LOCALE) })}</span> `
+        + `<span class="badge text-bg-secondary" style="font-size:.75rem">${t('fwAnomalies.svc_stat_groups', { n: (d.services || []).length })}</span>`
+        + ` <span class="text-secondary" style="font-size:.72rem">`
+        + t('fwAnomalies.svc_meta', {
+            c: (d.scored || 0).toLocaleString(AN_LOCALE),
+            a: (d.analyzed || 0).toLocaleString(AN_LOCALE),
+        }) + '</span>';
+}
+
+// Coverage line: which services were scored, and what was too small to judge.
+// Skipped groups are shown on purpose — otherwise the page silently implies
+// full coverage while hundreds of connections were never evaluated.
+function _renderSvcAnGroups(d) {
+    const el = document.getElementById('svcAnGroups');
+    if (!el) return;
+    const scored = (d.services || []).map(g =>
+        `<span class="badge text-bg-light text-dark" style="font-size:.68rem" title="${escapeAttr(t('fwAnomalies.svc_group_title', { n: g.size, a: g.anomalies }))}">`
+        + `${escapeHtml(g.service)} <span class="text-secondary">${g.size}</span>`
+        + (g.anomalies ? ` <span class="text-danger">▲${g.anomalies}</span>` : '') + '</span>').join(' ');
+    const skipped = (d.skipped_services || []).length;
+    let html = `<div class="text-secondary" style="font-size:.72rem">${t('fwAnomalies.svc_groups_label')}: ${scored || '—'}</div>`;
+    if (skipped) {
+        const names = (d.skipped_services || []).slice(0, 12)
+            .map(g => `${escapeHtml(g.service)} (${g.size})`).join(', ');
+        const more = skipped > 12 ? ` … +${skipped - 12}` : '';
+        html += `<div class="text-secondary mt-1" style="font-size:.72rem" title="${escapeAttr(t('fwAnomalies.svc_skipped_title'))}">`
+            + `⚠ ${t('fwAnomalies.svc_skipped', { g: skipped, c: (d.skipped_connections || 0).toLocaleString(AN_LOCALE) })}: `
+            + names + more + '</div>';
+    }
+    el.innerHTML = html;
+}
+
+// "out_bytes hoch · 143× Median" — the concrete deviation, both directions.
+function svcDriverChips(drivers) {
+    return (drivers || []).slice(0, 3).map(dv => {
+        const up = dv.dir === 'high';
+        const cls = up ? 'text-bg-warning' : 'text-bg-secondary';
+        // Below-median deviations are shown as "÷n" derived from the RAW values,
+        // not from 1/factor: a rounded factor of 0 would render as "÷Infinity".
+        let factor = '';
+        if (dv.factor !== null && dv.factor !== undefined) {
+            if (dv.factor >= 1) factor = ` ${dv.factor.toLocaleString(AN_LOCALE)}×`;
+            else if (dv.value > 0) factor = ` ÷${(dv.median / dv.value).toLocaleString(AN_LOCALE, { maximumFractionDigits: 1 })}`;
+            else factor = ` ${t('fwAnomalies.svc_driver_zero')}`;
+        }
+        const title = t('fwAnomalies.svc_driver_title', {
+            d: svcDimLabel(dv.dim),
+            v: (dv.value ?? 0).toLocaleString(AN_LOCALE),
+            m: (dv.median ?? 0).toLocaleString(AN_LOCALE),
+            p: Math.round((dv.extremity || 0) * 100),
+        });
+        return `<span class="badge ${cls}" style="font-size:.66rem" title="${escapeAttr(title)}">`
+            + `${up ? '▲' : '▼'} ${escapeHtml(svcDimLabel(dv.dim))}${factor}</span>`;
+    }).join(' ');
+}
+
+function svcSignalChips(signals) {
+    return (signals || []).map(s => {
+        let label = s.code, cls = 'text-bg-light text-dark';
+        switch (s.code) {
+            case 'new_service_for_host':      label = t('fwAnomalies.svc_sig_new_service'); cls = 'text-bg-danger'; break;
+            case 'uncommon_service_for_host': label = t('fwAnomalies.svc_sig_uncommon_service', { d: s.days }); cls = 'text-bg-warning'; break;
+            case 'rare_service_on_network':   label = t('fwAnomalies.svc_sig_rare_service'); cls = 'text-bg-warning'; break;
+            case 'unidentified_service':
+                // Several ports can share one service key (the ephemeral bucket),
+                // in which case there is no single port number to name.
+                label = (s.port_count > 1 || s.port === null || s.port === undefined)
+                    ? t('fwAnomalies.svc_sig_unidentified_n', { n: s.port_count || 0 })
+                    : t('fwAnomalies.svc_sig_unidentified', { p: s.port });
+                cls = 'text-bg-secondary'; break;
+            case 'rare_dst':                  label = t('fwAnomalies.sig_rare'); cls = 'text-bg-warning'; break;
+            case 'offhours':                  label = t('fwAnomalies.sig_offhours', { p: Math.round((s.ratio || 0) * 100) }); cls = 'text-bg-dark'; break;
+            case 'upload_skew':               label = t('fwAnomalies.svc_sig_upload_skew', { b: fmtBytes(s.bytes), p: Math.round((s.ratio || 0) * 100) }); cls = 'text-bg-warning'; break;
+            case 'peer_group':                label = t('fwAnomalies.svc_sig_peer_group', { s: s.service, n: s.size }); cls = 'text-bg-light text-dark'; break;
+        }
+        return `<span class="badge ${cls}" style="font-size:.66rem">${escapeHtml(label)}</span>`;
+    }).join(' ');
+}
+
+function _renderSvcAnRows() {
+    const tbody = document.getElementById('svcAnTable');
+    if (!tbody) return;
+    _svcAnUpdateSortIndicators();
+    if (!_svcAnItems.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center text-secondary py-3">${t('fwAnomalies.svc_none')}</td></tr>`;
+        return;
+    }
+    const mul = _svcAnSort.dir === 'asc' ? 1 : -1;
+    const skey = _svcAnSort.key;
+    const sorted = _svcAnItems.slice().sort((a, b) => {
+        const va = _svcAnSortVal(a, skey), vb = _svcAnSortVal(b, skey);
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return mul * String(va).localeCompare(String(vb), AN_LANG, { numeric: true });
+        }
+        return mul * (va - vb);
+    });
+    tbody.innerHTML = sorted.map(a => {
+        const verdict = _anVerdicts[a.dst];
+        let bg = '';
+        if (verdict?.verdict === 'malicious') bg = 'background:rgba(220,53,69,.18);';
+        else if (verdict?.verdict === 'suspicious') bg = 'background:rgba(255,193,7,.14);';
+        else if (verdict?.verdict === 'benign') bg = 'background:rgba(120,144,170,.10);opacity:.7;';
+        const osint = typeof osintButton === 'function' ? osintButton(a.dst, 'osint-btn', 'ip') : '';
+        const country = a.country ? escapeHtml(a.country) : '<span class="text-secondary">—</span>';
+        // Ports behind the service: one number, or "n Ports" when several
+        // collapsed into the same service (e.g. the ephemeral bucket).
+        const portInfo = a.port_count > 1
+            ? `<span class="text-secondary" style="font-size:.7rem">${t('fwAnomalies.svc_ports_n', { n: a.port_count })}</span>`
+            : (a.port ? `<span class="text-secondary" style="font-size:.7rem">:${a.port}</span>` : '');
+        const vol = `<span style="white-space:nowrap">`
+            + `<span class="text-warning">↑${fmtBytes(a.out_bytes)}</span> `
+            + `<span class="text-secondary">↓${fmtBytes(a.in_bytes)}</span></span>`;
+        return `<tr style="${bg}">
+            <td><span class="badge text-bg-info" title="${escapeAttr(a.service_label || a.service)}">${escapeHtml(a.service)}</span> ${portInfo}</td>
+            <td>${scoreBadge(a.score)}</td>
+            <td><code style="font-size:.8rem">${escapeHtml(a.src)}</code></td>
+            <td><code style="font-size:.8rem">${escapeHtml(a.dst)}</code>${watchlistBadge(a.dst)}${blocklistBadge(a.dst)}${osint}</td>
+            <td>${country}</td>
+            <td>${vol}</td>
+            <td>${svcDriverChips(a.drivers)}</td>
+            <td>${svcSignalChips(a.signals)}</td>
+        </tr>`;
+    }).join('');
 }

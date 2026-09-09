@@ -2,7 +2,7 @@ const SECTIONS = {
     sophos: ['sophos_client_id', 'sophos_client_secret', 'sophos_tenant_id'],
     o365: ['o365_tenant_id', 'o365_client_id', 'o365_client_secret'],
     hostnames: ['hostname_resolve_enabled', 'internal_dns_servers', 'hostname_netbios_enabled', 'hostname_cache_ttl_hours', 'hostname_negative_ttl_hours',
-        'firewall_api_enabled', 'firewall_api_host', 'firewall_api_port', 'firewall_api_user', 'firewall_api_password', 'firewall_api_verify_tls', 'firewall_dhcp_entity', 'firewall_dhcp_refresh_seconds'],
+        'firewall_api_enabled', 'firewall_api_host', 'firewall_api_port', 'firewall_api_user', 'firewall_api_password', 'firewall_api_verify_tls', 'firewall_dhcp_entity', 'firewall_dhcp_refresh_seconds', 'firewall_central_sync_enabled'],
     entra: ['entra_block_enabled', 'entra_block_sync_interval_minutes', 'entra_ca_exclude_users'],
     telegram: ['telegram_enabled', 'telegram_bot_token', 'telegram_chat_id', 'telegram_poll_interval_seconds'],
     teams: ['teams_outgoing_secret', 'teams_incoming_webhook'],
@@ -19,8 +19,9 @@ const SECTIONS = {
     firewallFeed: ['firewall_threat_feed_enabled', 'firewall_mdr_feed_enabled', 'firewall_mdr_feed_firewall_ids', 'firewall_mdr_feed_sync_interval_seconds'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],
-    hostNmap: ['host_nmap_enabled', 'host_nmap_alarm', 'host_nmap_default_profile', 'host_nmap_timeout_seconds', 'host_nmap_max_concurrent'],
+    hostNmap: ['host_nmap_enabled', 'host_nmap_alarm', 'host_nmap_default_profile', 'host_nmap_timeout_seconds', 'host_nmap_max_concurrent', 'host_presence_enabled', 'host_presence_interval_seconds', 'host_presence_online_seconds', 'host_presence_probe_ports'],
     mcp: ['mcp_enabled', 'mcp_api_key'],
+    kali: ['kali_mcp_enabled', 'kali_require_approval', 'kali_target_allowlist', 'kali_timeout_seconds'],
     auth: ['auth_enabled'],
     agent: ['agent_enabled', 'agent_provider', 'agent_base_url', 'agent_api_key', 'agent_model', 'agent_interval_seconds', 'agent_temperature', 'agent_max_tokens', 'agent_auto_execute', 'agent_language', 'agent_event_enabled', 'agent_event_interval_seconds', 'agent_event_types', 'agent_waf_enabled', 'agent_waf_threshold', 'agent_waf_interval_seconds', 'agent_ips_enabled', 'agent_ips_threshold', 'agent_ips_interval_seconds', 'agent_failed_login_enabled', 'agent_failed_login_threshold', 'agent_failed_login_interval_seconds', 'agent_failed_login_subnet_attempts', 'agent_failed_login_subnet_min_ips', 'agent_failed_login_distributed_enabled', 'agent_failed_login_distributed_window_minutes', 'agent_failed_login_distributed_attempts', 'agent_failed_login_distributed_min_ips', 'agent_failed_login_network_block_enabled'],
     // System-Prompts werden auf /agent-workflow.html bearbeitet (nicht mehr hier).
@@ -44,6 +45,20 @@ function adminEsc(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
+}
+
+// For values placed inside a single-quoted JS string in an inline handler,
+// e.g. onclick="doThing('${adminEscJs(v)}')". adminEsc() alone is not enough:
+// the HTML parser turns &#39; back into ' BEFORE the handler is compiled, so an
+// apostrophe in a user-chosen name closes the string literal and the rest runs
+// as code in the operator's session. Escape for JavaScript first, for HTML
+// second — the quote then reaches the JS parser as \'. Mirrors escapeJsAttr()
+// in js/common.js, which the admin pages do not load.
+function adminEscJs(str) {
+    return adminEsc(String(str ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/[\r\n\u2028\u2029]/g, ' '));
 }
 
 // --- Conditional-Access block policy on/off ---
@@ -426,8 +441,8 @@ async function loadUsers() {
                 ${['viewer', 'analyst', 'admin'].map(r => `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('')}
             </select></td>
             <td class="admin-hint">${u.last_login ? new Date(u.last_login).toLocaleString() : '—'}</td>
-            <td><button class="btn btn-outline-danger btn-sm py-0" onclick="deleteUser(${u.id}, '${adminEsc(u.username)}')"><i class="bi bi-trash"></i></button></td>
-        </tr>`).join('') || `<tr><td colspan="4" class="admin-hint">${t('admin.authNoUsers') || 'Keine Benutzer / no users'}</td></tr>`;
+            <td><button class="btn btn-outline-danger btn-sm py-0" onclick="deleteUser(${u.id}, '${adminEscJs(u.username)}')"><i class="bi bi-trash"></i></button></td>
+        </tr>`).join('') || `<tr><td colspan="4" class="admin-hint">${tOr('admin.authNoUsers', 'No users')}</td></tr>`;
     } catch (e) { /* ignore */ }
 }
 
@@ -435,7 +450,7 @@ async function createUser() {
     const username = document.getElementById('newUser').value.trim();
     const password = document.getElementById('newPass').value;
     const role = document.getElementById('newRole').value;
-    if (!username || password.length < 6) { alert(t('admin.authPwShort') || 'Benutzername + Passwort (min. 6 Zeichen) nötig.'); return; }
+    if (!username || password.length < 6) { alert(tOr('admin.authPwShort', 'Username and a password of at least 6 characters are required.')); return; }
     const r = await fetch('/api/auth/users', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, role }),
@@ -454,7 +469,7 @@ async function updateRole(id, role) {
 }
 
 async function deleteUser(id, name) {
-    if (!confirm((t('admin.authDelConfirm') || 'Benutzer löschen?') + ' ' + name)) return;
+    if (!confirm((tOr('admin.authDelConfirm', 'Delete user?')) + ' ' + name)) return;
     const r = await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
     if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || 'Fehler'); }
     loadUsers();
@@ -465,7 +480,7 @@ async function loadAudit() {
     if (!tb) return;
     try {
         const r = await fetch('/api/audit?limit=200');
-        if (!r.ok) { tb.innerHTML = `<tr><td colspan="5" class="admin-hint">${t('admin.authAuditNeedAdmin') || 'Nur für Admins bei aktiver Anmeldung.'}</td></tr>`; return; }
+        if (!r.ok) { tb.innerHTML = `<tr><td colspan="5" class="admin-hint">${tOr('admin.authAuditNeedAdmin', 'Admins only, and only while login is enabled.')}</td></tr>`; return; }
         const d = await r.json();
         tb.innerHTML = (d.entries || []).map(e => `<tr>
             <td>${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
@@ -476,3 +491,155 @@ async function loadAudit() {
         </tr>`).join('') || `<tr><td colspan="5" class="admin-hint">—</td></tr>`;
     } catch (e) { /* ignore */ }
 }
+
+// ---- OSINT provider matrix --------------------------------------------------
+// Which source may be asked from which part of the system. Rendered from the
+// server's own context/provider lists so a new context or provider appears here
+// without touching this file.
+
+let _osintMatrix = null;
+
+async function loadOsintMatrix() {
+    const head = document.getElementById('osintMatrixHead');
+    const body = document.getElementById('osintMatrixBody');
+    if (!head || !body) return;
+    try {
+        const d = await (await fetch('/api/osint/matrix')).json();
+        _osintMatrix = d;
+        const cols = [...d.paid_providers, ...d.free_providers];
+        head.innerHTML = `<tr><th>${t('admin.matrixContext')}</th>${
+            cols.map(p => `<th class="text-center" style="font-size:.78rem">${adminEsc(p)}${
+                d.free_providers.includes(p) ? `<div class="text-secondary" style="font-size:.68rem">${t('admin.matrixFree')}</div>` : ''}</th>`).join('')}</tr>`;
+        body.innerHTML = Object.entries(d.contexts).map(([ctx, label]) => `<tr>
+            <td><strong>${adminEsc(ctx)}</strong><div class="text-secondary" style="font-size:.72rem">${adminEsc(label)}</div></td>
+            ${cols.map(p => {
+                // Free providers are shown for honesty about what runs, but
+                // there is nothing to decide about them.
+                const free = d.free_providers.includes(p);
+                const on = !!(d.effective[ctx] || {})[p];
+                return `<td class="text-center"><input type="checkbox" class="form-check-input" data-ctx="${adminEsc(ctx)}" data-prov="${adminEsc(p)}" ${on ? 'checked' : ''} ${free ? 'disabled title="' + adminEsc(t('admin.matrixFreeHint')) + '"' : ''}></td>`;
+            }).join('')}
+        </tr>`).join('');
+    } catch (err) {
+        body.innerHTML = `<tr><td class="detail-error">${adminEsc(err.message)}</td></tr>`;
+    }
+}
+
+async function saveOsintMatrix() {
+    if (!_osintMatrix) return;
+    // Only the metered providers are stored: the free ones are not gated, and
+    // writing them would put decisions in the setting that nobody can act on.
+    const out = {};
+    document.querySelectorAll('#osintMatrixBody input[data-ctx]').forEach(cb => {
+        if (cb.disabled) return;
+        (out[cb.dataset.ctx] = out[cb.dataset.ctx] || {})[cb.dataset.prov] = cb.checked;
+    });
+    const st = document.getElementById('osintMatrixStatus');
+    try {
+        const r = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ osint_provider_matrix: JSON.stringify(out) }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        st.innerHTML = `<span class="text-success">${t('admin.matrixSaved')}</span>`;
+        await loadOsintMatrix();
+    } catch (err) {
+        st.innerHTML = `<span class="detail-error">${adminEsc(err.message)}</span>`;
+    }
+}
+
+async function resetOsintMatrix() {
+    if (!confirm(t('admin.matrixResetConfirm'))) return;
+    const st = document.getElementById('osintMatrixStatus');
+    try {
+        const r = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ osint_provider_matrix: '' }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        st.innerHTML = `<span class="text-success">${t('admin.matrixSaved')}</span>`;
+        await loadOsintMatrix();
+    } catch (err) {
+        st.innerHTML = `<span class="detail-error">${adminEsc(err.message)}</span>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadOsintMatrix);
+
+// --- Notification routing matrix -------------------------------------------
+// Which alert goes out over which channel. Same shape as the OSINT matrix, on
+// purpose: an operator who has understood one has understood the other.
+
+let _notifyMatrix = null;
+
+async function loadNotifyMatrix() {
+    const head = document.getElementById('notifyMatrixHead');
+    const body = document.getElementById('notifyMatrixBody');
+    if (!head || !body) return;
+    try {
+        const d = await (await fetch('/api/notifications/matrix')).json();
+        _notifyMatrix = d;
+        head.innerHTML = `<tr><th>${t('admin.notifyMatrixEvent')}</th>${
+            d.channels.map(c => `<th class="text-center" style="font-size:.78rem">${adminEsc(c)}</th>`).join('')}</tr>`;
+        body.innerHTML = d.events.map(ev => {
+            const row = d.effective[ev.key] || {};
+            const def = d.defaults[ev.key] || {};
+            // Mark rows the operator has moved away from the default, so it is
+            // visible at a glance what was deliberately changed.
+            const changed = d.channels.some(c => !!row[c] !== !!def[c]);
+            return `<tr>
+            <td><strong>${adminEsc(ev.label)}</strong>${
+                changed ? ` <span class="badge text-bg-info" style="font-size:.62rem">${adminEsc(t('admin.notifyMatrixChanged'))}</span>` : ''
+            }<div class="text-secondary" style="font-size:.7rem"><code>${adminEsc(ev.key)}</code></div></td>
+            ${d.channels.map(c => `<td class="text-center"><input type="checkbox" class="form-check-input" data-ev="${adminEsc(ev.key)}" data-chan="${adminEsc(c)}" ${row[c] ? 'checked' : ''}></td>`).join('')}
+        </tr>`;
+        }).join('');
+    } catch (err) {
+        body.innerHTML = `<tr><td class="detail-error">${adminEsc(err.message)}</td></tr>`;
+    }
+}
+
+async function saveNotifyMatrix() {
+    if (!_notifyMatrix) return;
+    const out = {};
+    document.querySelectorAll('#notifyMatrixBody input[data-ev]').forEach(cb => {
+        (out[cb.dataset.ev] = out[cb.dataset.ev] || {})[cb.dataset.chan] = cb.checked;
+    });
+    const st = document.getElementById('notifyMatrixStatus');
+    try {
+        const r = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ notification_matrix: JSON.stringify(out) }),
+        });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.detail || `HTTP ${r.status}`);
+        }
+        st.innerHTML = `<span class="text-success">${t('admin.matrixSaved')}</span>`;
+        await loadNotifyMatrix();
+    } catch (err) {
+        st.innerHTML = `<span class="detail-error">${adminEsc(err.message)}</span>`;
+    }
+}
+
+async function resetNotifyMatrix() {
+    if (!confirm(t('admin.notifyMatrixResetConfirm'))) return;
+    const st = document.getElementById('notifyMatrixStatus');
+    try {
+        const r = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ notification_matrix: '' }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        st.innerHTML = `<span class="text-success">${t('admin.matrixReset')}</span>`;
+        await loadNotifyMatrix();
+    } catch (err) {
+        st.innerHTML = `<span class="detail-error">${adminEsc(err.message)}</span>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadNotifyMatrix(); });

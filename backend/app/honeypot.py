@@ -8,6 +8,7 @@ Telegram/Teams alert. Pods are created here (name + chosen services), get a
 one-time token, and pull their desired service config on each heartbeat.
 """
 import hashlib
+import html
 import logging
 import secrets
 import uuid
@@ -15,6 +16,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from app import monitored_passwords
+from app.config import settings
 from app.database import async_session
 from app.geoip_service import get_redis, lookup_ip
 from app.models import Honeypot, HoneypotEvent, HoneypotProcessWhitelist
@@ -140,6 +143,18 @@ async def touch(pod_id: str, host_ip: str | None, host_info: dict | None) -> dic
     }
 
 
+def _e(value, default: str = "?") -> str:
+    """Escape a payload field for Telegram's HTML parse mode.
+
+    Everything in an event payload was typed by the visitor — a username, a
+    password, a requested path. Interpolated raw, a "<b>" in there reformats the
+    operator's alert, an "<a href>" plants a link that looks like ours, and an
+    unbalanced tag makes Telegram reject the whole message, which loses the
+    alarm entirely."""
+    text = value if value not in (None, "") else default
+    return html.escape(str(text), quote=False)
+
+
 def _alert_html(pod_name: str, ev: dict, geo: dict | None) -> str:
     # File-honeypot events (a decoy file was touched) read very differently from
     # a network hit — surface the path + accessing process/user.
@@ -147,26 +162,28 @@ def _alert_html(pod_name: str, ev: dict, geo: dict | None) -> str:
         p = ev.get("payload") or {}
         who = ""
         if p.get("process") or p.get("user"):
-            who = f"\nProzess: <code>{p.get('process','?')}</code> · User: <code>{p.get('user','?')}</code>"
+            who = f"\nProzess: <code>{_e(p.get('process'))}</code> · User: <code>{_e(p.get('user'))}</code>"
         return (f"🪤 <b>Datei-Honeypot ausgelöst</b>\n"
-                f"Pod: <b>{pod_name}</b>\n"
-                f"Datei: <code>{p.get('path','?')}</code>\n"
-                f"Zugriff: {p.get('access','?')}{who}")
+                f"Pod: <b>{_e(pod_name)}</b>\n"
+                f"Datei: <code>{_e(p.get('path'))}</code>\n"
+                f"Zugriff: {_e(p.get('access'))}{who}")
     svc = SERVICES.get(ev.get("service"), {}).get("label", ev.get("service") or "?")
     src = ev.get("source_ip") or "?"
     loc = ""
     if geo and geo.get("country"):
-        loc = f" ({geo['country']}{'/' + geo['city'] if geo.get('city') else ''})"
+        loc = f" ({_e(geo['country'])}{'/' + _e(geo['city']) if geo.get('city') else ''})"
     p = ev.get("payload") or {}
     cred = ""
-    if p.get("username") or p.get("password"):
-        cred = f"\nLogin: <code>{p.get('username','')}</code> / <code>{p.get('password','')}</code>"
+    if p.get("username") or p.get("password") or p.get("password_redacted"):
+        shown = ("<i>[redacted — a registered real password]</i>"
+                 if p.get("password_redacted") else f"<code>{_e(p.get('password'), '')}</code>")
+        cred = f"\nLogin: <code>{_e(p.get('username'), '')}</code> / {shown}"
     req = ""
     if p.get("http_method"):
-        req = f"\n{p.get('http_method')} <code>{(p.get('path') or '')[:120]}</code>"
-    return (f"🍯 <b>Honeypot-Zugriff</b> — {svc}\n"
-            f"Pod: <b>{pod_name}</b>\n"
-            f"Quelle: <code>{src}</code>{loc} → Port {ev.get('dest_port','?')}"
+        req = f"\n{_e(p.get('http_method'))} <code>{_e((p.get('path') or '')[:120], '')}</code>"
+    return (f"🍯 <b>Honeypot-Zugriff</b> — {_e(svc)}\n"
+            f"Pod: <b>{_e(pod_name)}</b>\n"
+            f"Quelle: <code>{_e(src)}</code>{loc} → Port {_e(ev.get('dest_port'))}"
             f"{cred}{req}")
 
 
@@ -242,6 +259,10 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
         return 0
     stored = 0
     to_alert: list[tuple[dict, dict | None]] = []
+    # Credential alarms are collected separately from `to_alert`: that list is
+    # debounced per source, and a real password turning up must never be the
+    # notification that got suppressed as a duplicate.
+    cred_alarms: list[tuple[dict, str | None, str | None]] = []
     async with async_session() as db:
         whitelist = await load_process_whitelist(db)
         for ev in events[:500]:
@@ -256,6 +277,40 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
             # stored for the audit trail, never alarmed.
             is_file = ev.get("service") == "file"
             muted = is_file and _access_whitelisted(whitelist, pod.id, ev.get("payload") or {})
+            # Service decoys (fake FTP/SSH/…) capture credentials into the
+            # payload, so the same rule applies here as on the web decoy: if the
+            # password is one of ours it is redacted rather than stored, and it
+            # raises the loud alarm instead of the routine one.
+            payload = _clean(ev.get("payload")) or None
+            if (settings.monitored_password_enabled and isinstance(payload, dict)
+                    and payload.get("password")):
+                try:
+                    v = await monitored_passwords.evaluate(
+                        db, payload.get("username"), payload.get("password"))
+                except Exception as e:
+                    v = None
+                    logger.warning(f"monitored password check failed: {e}")
+                if v:
+                    # Other keys can carry the same secret verbatim — a service
+                    # decoy sends the raw protocol exchange ("PASS <password>")
+                    # next to the parsed fields. Redacting only `password` would
+                    # leave the credential in the very row the comment below
+                    # promises never holds it.
+                    secret = payload.get("password") or ""
+                    payload = {
+                        **{k: (x.replace(secret, "***")
+                               if secret and isinstance(x, str) and secret in x else x)
+                           for k, x in payload.items()},
+                        "password": None,
+                        "password_redacted": True,
+                        "credential_alarm": v["severity"],
+                    }
+                    # The notification path reads ev["payload"], so the redaction
+                    # has to land there too — otherwise the real password would
+                    # travel to Telegram/Teams even though the DB never got it.
+                    ev = {**ev, "payload": payload}
+                    cred_alarms.append((v, payload.get("username"), src))
+
             row = HoneypotEvent(
                 honeypot_id=pod.id,
                 service=(ev.get("service") or "")[:20] or None,
@@ -263,7 +318,7 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
                 source_ip=src,
                 source_port=ev.get("source_port"),
                 dest_port=ev.get("dest_port"),
-                payload=_clean(ev.get("payload")) or None,
+                payload=payload,
                 muted=muted,
                 attacker_country=(geo or {}).get("country"),
                 attacker_city=(geo or {}).get("city"),
@@ -283,12 +338,31 @@ async def ingest_events(pod: Honeypot, events: list[dict]) -> int:
                 to_alert.append((ev, geo))
         await db.commit()
 
+    # A real credential outranks everything else here and is never debounced.
+    if cred_alarms:
+        from app.notifications import notify
+        for verdict, user, src in cred_alarms[:20]:
+            try:
+                await notify(
+                    monitored_passwords.alarm_text(verdict, user, src),
+                    title=("Warroom · CRITICAL credential compromise"
+                           if verdict["severity"] == "critical"
+                           else "Warroom · real password used"),
+                    event="monitored_password")
+                logger.warning(
+                    f"MONITORED PASSWORD {verdict['severity'].upper()}: "
+                    f"registered credential {verdict['label']!r} submitted to "
+                    f"honeypot pod {pod.name!r} from {src} as user {user!r}")
+            except Exception as e:
+                logger.warning(f"monitored password alarm failed: {e}")
+
     # Fan out alerts after commit (best-effort).
     if to_alert:
         from app.notifications import notify
         for ev, geo in to_alert[:20]:
             try:
-                await notify(_alert_html(pod.name, ev, geo), title="Warroom · Honeypot")
+                await notify(_alert_html(pod.name, ev, geo), title="Warroom · Honeypot",
+                             event="honeypot_access")
             except Exception as e:
                 logger.warning(f"honeypot alert failed: {e}")
     return stored

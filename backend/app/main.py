@@ -10,18 +10,19 @@ from urllib.parse import urlparse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Body, FastAPI, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, text, case, literal_column
+from sqlalchemy import select, func, text, case, literal_column, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import cached
 from app.collector import collect_all, collect_o365
 from app.config import settings
-from app.database import async_session, ensure_schema, get_db
+from app.database import async_session, ensure_schema, get_db, request_session
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, HoneypotProcessWhitelist, M365LoginProfile, MonitoredConnection, MonitoredEvent, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, KnownUserOverride, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, HoneypotLogin, HoneypotProcessWhitelist, M365LoginProfile, MonitoredConnection, MonitoredEvent, MonitoredPassword, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
+from app import services as service_catalog
 from app.sophos_client import sophos_client
 from app.settings_store import (
     MANAGED_KEYS,
@@ -46,6 +47,11 @@ async def verify_api_key(request: Request, x_api_key: str | None = Header(defaul
     # per-pod bearer token) never send X-API-Key and verify inline.
     if path.startswith("/api/teams/") or path.startswith("/api/honeypot/agent/"):
         return
+    # The decoy login page must accept submissions from strangers — that is its
+    # entire job. Demanding a key would make it reject exactly the visitors it
+    # exists to record.
+    if path.startswith("/api/honeypot/decoy"):
+        return
     # Auth endpoints manage their own access (login must always be reachable).
     if path.startswith("/api/auth/"):
         return
@@ -59,8 +65,22 @@ async def verify_api_key(request: Request, x_api_key: str | None = Header(defaul
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="invalid or missing X-API-Key")
 
-    # Non-/api paths are machine endpoints (IOC feeds /ioc_*): always the legacy
-    # key rule, regardless of auth_enabled — the firewall pulls them with the key.
+    # IOC blocklist feeds: deliberately unauthenticated.
+    #
+    # The firewall could not be made to send the key — it offered the value only
+    # as a query parameter (which then sat in every access log in the clear) or
+    # dropped the header entirely. Weighing that against what the feeds contain:
+    # a list of addresses we already refuse to talk to. Someone reading it learns
+    # who attacked us, not how to get in, and every one of those entries is on
+    # its way into a public blocklist anyway.
+    #
+    # The trade is deliberate and narrow. It buys back a working blocklist —
+    # which is the point of the whole system — at the cost of a list that was
+    # never secret. /api/* keeps the key.
+    if path.startswith("/ioc_"):
+        return
+
+    # Other non-/api paths stay on the legacy key rule regardless of auth_enabled.
     if not path.startswith("/api/"):
         _legacy_key_check()
         return
@@ -101,9 +121,16 @@ async def lifespan(app: FastAPI):
     # never block it (and vice versa). Idles until the O365 app is configured.
     scheduler.add_job(collect_o365, "interval", seconds=settings.collector_interval, id="o365_collector")
     # Keep the heavy dashboard endpoints warm in Redis so the first user after
-    # an idle period doesn't pay the cold-query price. Tighter than the lowest
-    # @cached TTL (30s) so cache entries always overlap.
-    scheduler.add_job(warm_dashboard_cache, "interval", seconds=25, id="cache_warmer")
+    # an idle period doesn't pay the cold-query price.
+    #
+    # 25s was far tighter than needed (the shortest @cached TTL is 60s) and a
+    # single pass over the ~20 targets never finished in time, so APScheduler
+    # logged "maximum number of running instances reached" continuously while
+    # each overrun kept hammering the DB. 45s with coalesce + an explicit
+    # max_instances gives a pass room to complete and still refreshes every
+    # 60s-TTL entry before it goes stale.
+    scheduler.add_job(warm_dashboard_cache, "interval", seconds=45, id="cache_warmer",
+                      max_instances=1, coalesce=True, misfire_grace_time=30)
     scheduler.add_job(warm_dashboard_cache, "date", id="initial_warm")
     # Slow-tier warmer for the heavy 30-day stat views (JSON-heavy aggregates).
     scheduler.add_job(warm_heavy_stats, "interval", seconds=600, id="heavy_stats_warmer",
@@ -124,7 +151,8 @@ async def lifespan(app: FastAPI):
     from app.agent import (agent_loop, agent_event_loop, agent_waf_loop, agent_ips_loop,
                            agent_anomaly_loop, agent_connection_anomaly_loop,
                            agent_connection_triage_loop,
-                           agent_failed_login_loop, agent_user_login_alert_loop)
+                           agent_failed_login_loop, agent_user_login_alert_loop,
+                           agent_invalid_user_block_loop)
     scheduler.add_job(
         agent_loop, "interval",
         seconds=max(30, settings.agent_interval_seconds),
@@ -167,6 +195,14 @@ async def lifespan(app: FastAPI):
         agent_failed_login_loop, "interval",
         seconds=max(30, settings.agent_failed_login_interval_seconds),
         id="agent_failed_login_loop",
+    )
+    # Invalid-username brute-force: blocks immediately, no LLM in the path.
+    # Independent of agent_failed_login_enabled — this rule needs no model and
+    # should keep working when the LLM-backed stages are switched off.
+    scheduler.add_job(
+        agent_invalid_user_block_loop, "interval",
+        seconds=max(30, settings.agent_invalid_user_interval_seconds),
+        id="agent_invalid_user_block_loop",
     )
     # User-centric brute-force alerting (stores attempts in Redis, classifies via
     # LLM, Telegram-warns when a user is endangered). Notify-only; independent of
@@ -237,6 +273,18 @@ async def lifespan(app: FastAPI):
         id="host_identity_scan",
     )
     scheduler.add_job(host_identity_scan, "date", id="initial_host_identity_scan")
+    # Live online status: periodic nmap ping-sweep of the known internal hosts
+    # (no-op while host_presence_enabled is off).
+    # max_instances=1: a sweep of a large inventory can outrun a 30s interval,
+    # and without it APScheduler answers every overrun with "maximum number of
+    # running instances reached" — the same way the cache warmer failed above,
+    # except here the symptom is presence data that quietly stops updating.
+    scheduler.add_job(
+        _run_presence_sweep, "interval",
+        seconds=max(30, settings.host_presence_interval_seconds),
+        id="host_presence_sweep",
+        max_instances=1, coalesce=True,
+    )
     # M365 login watch — alerts (with revoke option) on sign-ins from new
     # devices / locations. First pass seeds the baseline silently.
     from app.m365_watch import m365_login_watch
@@ -283,6 +331,21 @@ app.mount("/mcp", mcp_asgi_app())
 
 # --- User auth, roles & audit log (opt-in via auth_enabled) -----------------
 
+def actor_name(request: Request) -> str:
+    """Who is doing this, as a string fit for a VARCHAR audit column.
+
+    ``request.state.user`` is the session dict (``{"uid", "u", "r"}``), not a
+    name. Passing it straight into a column looks fine until auth is switched
+    on, at which point every insert fails with a DataError — so the extraction
+    lives here once instead of being re-derived per endpoint."""
+    user = getattr(getattr(request, "state", None), "user", None)
+    if isinstance(user, dict):
+        return str(user.get("u") or "human")[:100]
+    if isinstance(user, str) and user:
+        return user[:100]
+    return "human"
+
+
 @app.middleware("http")
 async def _audit_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -294,7 +357,9 @@ async def _audit_middleware(request: Request, call_next):
                 and not path.startswith("/api/teams/")):
             user = getattr(request.state, "user", None) or {}
             from app.models import AuditLog
-            async with async_session() as db:
+            # Request path — use the request pool, not the background one, so an
+            # audit write can never queue behind heavy background aggregates.
+            async with request_session() as db:
                 db.add(AuditLog(
                     username=user.get("u"), role=user.get("r"),
                     method=request.method, path=path, status=response.status_code,
@@ -347,8 +412,18 @@ class UserUpdateIn(BaseModel):
 def _require_admin(request: Request) -> dict:
     from app.auth import get_current_user, has_role
     user = getattr(request.state, "user", None) or get_current_user(request)
+    # No session at all is a different problem from the wrong role, and saying
+    # "admin role required" to someone who is merely logged out sends them
+    # hunting for a permission they already have. /api/auth/* is exempt from the
+    # global login check (the login itself must stay reachable), so this is the
+    # only place that distinction can be drawn — and 401 is what makes the
+    # frontend redirect to the login page instead of showing a dead end.
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="login required")
     if not has_role(user, "admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="admin role required")
     return user
 
 
@@ -684,7 +759,15 @@ async def get_summary(db: AsyncSession = Depends(get_db)):
         )
     )).scalar() or 0
 
-    total_fw_logs = (await db.execute(select(func.count(FirewallLog.id)))).scalar() or 0
+    # An exact COUNT(*) over firewall_logs is a full scan of ~55M rows / 113GB
+    # and took minutes, pinning a pool connection on every cache miss — for a
+    # headline tile that only ever shows a rounded magnitude. The planner's
+    # row estimate (kept current by autovacuum/ANALYZE) is accurate to well
+    # under a percent here and costs a single catalog lookup.
+    total_fw_logs = (await db.execute(text(
+        "SELECT GREATEST(reltuples, 0)::bigint FROM pg_class "
+        "WHERE oid = 'firewall_logs'::regclass"
+    ))).scalar() or 0
     fw_logs_24h = (await db.execute(
         select(func.count(FirewallLog.id)).where(FirewallLog.created_at >= day_ago)
     )).scalar() or 0
@@ -1384,6 +1467,18 @@ async def list_internal_hosts(
     if misses:
         await queue_for_resolution(misses)
 
+    # Live online status from the ping-sweep presence table.
+    from app.models import HostPresence
+    online_window = timedelta(seconds=int(settings.host_presence_online_seconds or 600))
+    now_ts = datetime.now(timezone.utc)
+    presence: dict[str, dict] = {}
+    for p in (await db.execute(select(HostPresence))).scalars().all():
+        online = bool(p.last_online and (now_ts - p.last_online) <= online_window)
+        presence[p.ip] = {
+            "online": online if p.last_checked else None,
+            "last_online": p.last_online.isoformat() if p.last_online else None,
+        }
+
     items = []
     for ip, base in by_ip.items():
         nm = names.get(ip) or {}
@@ -1398,6 +1493,8 @@ async def list_internal_hosts(
             "device_type": meta.get("device_type"),
             "open_ports": scan.get("open_ports"),
             "last_scan_at": scan.get("last_scan_at"),
+            "online": (presence.get(ip) or {}).get("online"),
+            "last_online": (presence.get(ip) or {}).get("last_online"),
         })
     # Named first, then by recent activity.
     items.sort(key=lambda x: (x["hostname"] is not None, x["last_seen"] or ""), reverse=True)
@@ -1500,6 +1597,199 @@ async def scan_host(ip: str, profile: str | None = Query(default=None)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def _presence_target_ips(days: int = 7) -> list[str]:
+    """Internal IPs to ping for live status: the scan inventory + hosts seen in
+    recent NetFlow + managed endpoints (deduped)."""
+    from app.hostname_service import is_internal
+    from app.models import HostInventory
+    ips: set[str] = set()
+    async with async_session() as db:
+        for (ip,) in (await db.execute(select(HostInventory.ip))).all():
+            if ip and is_internal(ip):
+                ips.add(ip)
+        for (ip,) in (await db.execute(select(Endpoint.ipv4).where(Endpoint.ipv4.isnot(None)))).all():
+            if ip and is_internal(ip):
+                ips.add(ip)
+    for a in await _internal_netflow_agg(days):
+        if a.get("ip") and is_internal(a["ip"]):
+            ips.add(a["ip"])
+    return list(ips)
+
+
+async def _run_presence_sweep():
+    """Scheduled worker — ping-sweep the known internal hosts (no-op if disabled)."""
+    if not settings.host_presence_enabled:
+        return
+    try:
+        ips = await _presence_target_ips()
+        if ips:
+            from app.nmap_scan import presence_sweep
+            await presence_sweep(ips)
+    except Exception as e:
+        logger.warning(f"presence sweep failed: {e}")
+
+
+@app.post("/api/hosts/ping")
+async def ping_hosts_now():
+    """Run a live online-status ping-sweep of the known internal hosts now."""
+    if not settings.host_presence_enabled:
+        raise HTTPException(status_code=403, detail="presence checks are disabled (enable host_presence_enabled in Admin)")
+    from app.nmap_scan import presence_sweep
+    ips = await _presence_target_ips()
+    if not ips:
+        return {"checked": 0, "online": 0, "note": "no internal hosts known yet"}
+    try:
+        return await presence_sweep(ips)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)[:300])
+
+
+def _availability(events: list[tuple], start, end) -> tuple[float | None, int]:
+    """From a host's transition events (list of (at, online), ascending; may
+    include one synthetic entry at `start`), compute (availability_fraction,
+    changes_in_window). Segments are clipped to [max(start, first_event), end]."""
+    evs = [(a, o) for a, o in events if a <= end]
+    if not evs:
+        return None, 0
+    eff_start = max(start, evs[0][0])
+    online_time = 0.0
+    for i, (at, online) in enumerate(evs):
+        seg_end = evs[i + 1][0] if i + 1 < len(evs) else end
+        s = max(at, eff_start)
+        e = min(seg_end, end)
+        if e > s and online:
+            online_time += (e - s).total_seconds()
+    total = (end - eff_start).total_seconds()
+    avail = (online_time / total) if total > 0 else None
+    # Strictly after `start`: the caller prepends a synthetic (start, state)
+    # entry for the state the host was already in when the window opened.
+    # Counting that as a transition gave every host with prior history one
+    # phantom flap, so a machine that has been up for weeks never reported a
+    # clean zero.
+    changes = sum(1 for a, _ in events if start < a <= end)
+    return avail, changes
+
+
+async def _presence_host_analytics(db, days: int) -> list[dict]:
+    """Per-host online reliability over the window."""
+    from app.models import HostPresence, HostPresenceEvent
+    from app.hostname_service import lookup_cached
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    pres = (await db.execute(select(HostPresence))).scalars().all()
+    if not pres:
+        return []
+    # Events in-window (grouped) + the state entering the window (pre-start).
+    in_win: dict[str, list] = {}
+    for ip, online, at in (await db.execute(
+        select(HostPresenceEvent.ip, HostPresenceEvent.online, HostPresenceEvent.at)
+        .where(HostPresenceEvent.at >= start).order_by(HostPresenceEvent.ip, HostPresenceEvent.at)
+    )).all():
+        in_win.setdefault(ip, []).append((at, online))
+    pre: dict[str, bool] = {}
+    for ip, online in (await db.execute(text(
+        "SELECT DISTINCT ON (ip) ip, online FROM host_presence_events "
+        "WHERE at < :start ORDER BY ip, at DESC"), {"start": start})).all():
+        pre[ip] = online
+    names = await lookup_cached([p.ip for p in pres])
+    out = []
+    for p in pres:
+        evs = list(in_win.get(p.ip, []))
+        if p.ip in pre:
+            evs = [(start, pre[p.ip])] + evs
+        avail, changes = _availability(evs, start, end)
+        out.append({
+            "ip": p.ip,
+            "hostname": (names.get(p.ip) or {}).get("hostname"),
+            "online": p.online,
+            "availability_pct": round(avail * 100, 1) if avail is not None else None,
+            "changes": changes,
+            "last_online": p.last_online.isoformat() if p.last_online else None,
+            "last_checked": p.last_checked.isoformat() if p.last_checked else None,
+        })
+    out.sort(key=lambda x: (x["availability_pct"] is None, x["availability_pct"] or 0))
+    return out
+
+
+@app.get("/api/hosts/presence/summary")
+async def presence_summary(days: int = Query(default=7, ge=1, le=90),
+                           db: AsyncSession = Depends(get_db)):
+    """Headline online-status metrics: currently online/offline, never seen, and
+    the average availability over the window."""
+    from app.models import HostPresence, HostPresenceSnapshot
+    total = await db.scalar(select(func.count()).select_from(HostPresence)) or 0
+    online_now = await db.scalar(select(func.count()).select_from(HostPresence)
+                                 .where(HostPresence.online.is_(True))) or 0
+    offline_now = await db.scalar(select(func.count()).select_from(HostPresence)
+                                  .where(HostPresence.online.is_(False))) or 0
+    never = await db.scalar(select(func.count()).select_from(HostPresence)
+                            .where(HostPresence.last_online.is_(None))) or 0
+    last_sweep = await db.scalar(select(func.max(HostPresenceSnapshot.checked_at)))
+    hosts = await _presence_host_analytics(db, days)
+    avails = [h["availability_pct"] for h in hosts if h["availability_pct"] is not None]
+    return {
+        "enabled": bool(settings.host_presence_enabled),
+        "total_known": int(total), "online_now": int(online_now),
+        "offline_now": int(offline_now), "never_online": int(never),
+        "avg_availability_pct": round(sum(avails) / len(avails), 1) if avails else None,
+        "window_days": days,
+        "last_sweep": last_sweep.isoformat() if last_sweep else None,
+    }
+
+
+@app.get("/api/hosts/presence/trend")
+async def presence_trend(hours: int = Query(default=24, ge=1, le=2160),
+                         db: AsyncSession = Depends(get_db)):
+    """Fleet online-count over time (one point per ping-sweep)."""
+    from app.models import HostPresenceSnapshot
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    rows = (await db.execute(
+        select(HostPresenceSnapshot.checked_at, HostPresenceSnapshot.total, HostPresenceSnapshot.online)
+        .where(HostPresenceSnapshot.checked_at >= since)
+        .order_by(HostPresenceSnapshot.checked_at)
+    )).all()
+    return {"points": [
+        {"ts": r[0].isoformat() if r[0] else None, "total": int(r[1]), "online": int(r[2])}
+        for r in rows
+    ]}
+
+
+@app.get("/api/hosts/presence/hosts")
+async def presence_hosts(days: int = Query(default=7, ge=1, le=90),
+                         db: AsyncSession = Depends(get_db)):
+    """Per-host availability (%) and flapping (state changes) over the window."""
+    return {"hosts": await _presence_host_analytics(db, days), "window_days": days}
+
+
+@app.post("/api/hosts/scan-network")
+async def scan_network(cidr: str = Query(...), profile: str | None = Query(default=None)):
+    """Scan a whole internal network (CIDR) with nmap in the background. Every
+    responsive host is added to the inventory (existing hosts updated, new ones
+    added). Only private ranges may be scanned. Poll /api/hosts/scans/{id}."""
+    if not settings.host_nmap_enabled:
+        raise HTTPException(status_code=403, detail="nmap scanning is disabled (enable host_nmap_enabled in Admin)")
+    from app.nmap_scan import start_network_scan
+    try:
+        return await start_network_scan(cidr, profile)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/hosts/scans/{scan_id}")
+async def get_host_scan(scan_id: int, db: AsyncSession = Depends(get_db)):
+    """Status of one scan run by id — used to poll a network scan (whose target
+    is a CIDR and so can't go in the /api/hosts/{ip}/scan path)."""
+    from app.models import HostScan
+    s = await db.get(HostScan, scan_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="scan not found")
+    return {"id": s.id, "target": s.ip, "profile": s.profile, "status": s.status,
+            "ports_open": s.ports_open, "os_guess": s.os_guess, "error": s.error,
+            "duration_ms": s.duration_ms,
+            "started_at": s.started_at.isoformat() if s.started_at else None,
+            "finished_at": s.finished_at.isoformat() if s.finished_at else None}
+
+
 @app.get("/api/hosts/{ip}/scan")
 async def latest_host_scan(ip: str, db: AsyncSession = Depends(get_db)):
     """Latest scan run for a host + its current open ports."""
@@ -1600,16 +1890,152 @@ async def export_hosts_csv(db: AsyncSession = Depends(get_db)):
         "Content-Disposition": 'attachment; filename="warroom_hosts.csv"'})
 
 
+# --- Tor-only Kali box: audit + human-in-the-loop ---------------------------
+
+@app.get("/api/kali/status")
+async def kali_status():
+    """Whether the Kali/Tor MCP surface is on, the target allow-list, approval
+    policy, and the current Tor exit IP (best-effort)."""
+    from app import kali_client
+
+    allowlist = [e.strip() for e in (settings.kali_target_allowlist or "").split(",") if e.strip()]
+    out = {
+        "enabled": bool(settings.kali_mcp_enabled),
+        "require_approval": bool(settings.kali_require_approval),
+        "allowlist": allowlist,
+        "timeout_seconds": settings.kali_timeout_seconds,
+        # Served rather than hard-coded in the page: a copy of this list in the
+        # frontend would silently drift from the one actually enforced.
+        "allowed_binaries": sorted(kali_client.ALLOWED_BINARIES),
+        "exit_ip": None, "is_tor": None, "reachable": False,
+    }
+    if settings.kali_mcp_enabled:
+        try:
+            ip = await kali_client.get_exit_ip()
+            out.update(exit_ip=ip.get("exit_ip"), is_tor=ip.get("is_tor"), reachable=True)
+        except Exception as e:
+            out["error"] = str(e)[:200]
+    return out
+
+
+@app.get("/api/kali/commands")
+async def list_kali_commands(limit: int = Query(default=100, ge=1, le=1000),
+                             status: str | None = Query(default=None),
+                             db: AsyncSession = Depends(get_db)):
+    """The Kali command audit trail (newest first), optionally filtered by status."""
+    from app.models import KaliCommand
+    q = select(KaliCommand).order_by(KaliCommand.created_at.desc())
+    if status:
+        q = q.where(KaliCommand.status == status)
+    rows = (await db.execute(q.limit(limit))).scalars().all()
+    return {"commands": [
+        {"id": r.id, "command": r.command, "targets": r.targets, "actor": r.actor,
+         "status": r.status, "reason": r.reason, "exit_code": r.exit_code,
+         "tor_exit_ip": r.tor_exit_ip,
+         "stdout": (r.stdout or "")[:20000], "stderr": (r.stderr or "")[:20000],
+         "created_at": r.created_at.isoformat() if r.created_at else None,
+         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+         "decided_by": r.decided_by}
+        for r in rows
+    ]}
+
+
+class KaliRunIn(BaseModel):
+    command: str = Field(min_length=1, max_length=2000)
+
+
+@app.post("/api/kali/check")
+async def check_kali_command(body: KaliRunIn):
+    """Would this command pass the guards? Writes nothing, runs nothing.
+
+    The rules are strict on purpose, which makes them easy to trip over. Without
+    this every typo in the console would land in the audit trail as a ``blocked``
+    row, and a trail full of typos is one nobody reads."""
+    from app import kali_client
+
+    argv, targets, reason = kali_client.guard(body.command)
+    return {
+        "allowed": argv is not None,
+        "reason": reason or None,
+        "targets": targets,
+        "binary": argv[0].rsplit("/", 1)[-1] if argv else None,
+        "allowed_binaries": sorted(kali_client.ALLOWED_BINARIES),
+    }
+
+
+@app.post("/api/kali/commands")
+async def run_kali_command(body: KaliRunIn, request: Request):
+    """Run a command the operator typed in the console — through Tor, now.
+
+    Deliberately bypasses ``kali_require_approval``: that setting guards against
+    an *agent* acting unattended, and the person sending this is the approval it
+    asks for. The guards that matter (target allow-list, binary allow-list,
+    dangerous patterns) still run, here and again on the box."""
+    if not settings.kali_mcp_enabled:
+        raise HTTPException(status_code=403, detail="Kali/Tor-Anbindung ist deaktiviert")
+    from app import kali_client
+
+    actor = actor_name(request)
+    result = await kali_client.submit_command(
+        body.command, actor=actor, require_approval=False)
+    logger.info(f"kali console: {actor} ran {body.command[:200]!r} -> "
+                f"{result.get('status')}")
+    return result
+
+
+@app.post("/api/kali/commands/{cmd_id}/approve")
+async def approve_kali_command(cmd_id: int, request: Request):
+    """Approve a pending Kali command → it runs on the box (through Tor) now."""
+    if not settings.kali_mcp_enabled:
+        raise HTTPException(status_code=403, detail="Kali/Tor MCP surface is disabled")
+    from app import kali_client
+    actor = actor_name(request)
+    return await kali_client.approve_command(cmd_id, decided_by=actor)
+
+
+@app.post("/api/kali/commands/{cmd_id}/reject")
+async def reject_kali_command(cmd_id: int, request: Request):
+    """Reject a pending Kali command (it never runs)."""
+    from app import kali_client
+    actor = actor_name(request)
+    return await kali_client.reject_command(cmd_id, decided_by=actor)
+
+
 @app.post("/api/firewall/dhcp/test")
 async def test_firewall_dhcp(debug: bool = Query(default=False)):
-    """Test the Sophos Firewall XML API DHCP read with the saved settings.
-    Returns how many IP↔hostname mappings were found + a small sample, or the
-    error. ``debug=1`` also returns the firewall's raw response so the entity /
-    schema can be diagnosed (it may contain credentials-adjacent config — keep it
-    to troubleshooting)."""
+    """Test the Sophos Firewall DHCP read with the saved settings.
+
+    Works against whichever transport is active (v23 REST or the legacy XML
+    API) and reports which one that was. Returns how many IP↔hostname mappings
+    were found + a small sample, or the error. ``debug=1`` also returns the
+    firewall's raw response so the entity / schema can be diagnosed (it may
+    contain credentials-adjacent config — keep it to troubleshooting)."""
     if not settings.firewall_api_enabled:
         return {"ok": False, "error": "firewall API is disabled (enable it in Admin)"}
-    from app.sfos_client import fetch_dhcp_map, fetch_dhcp_raw, probe_entities
+    from app.sfos_client import (fetch_dhcp_map, fetch_dhcp_raw, fetch_rest_raw,
+                                 probe_entities, transport_status)
+    try:
+        status_info = await transport_status()
+    except Exception as e:
+        return {"ok": False, "error": f"transport probe failed: {str(e)[:300]}"}
+
+    # REST has no single raw document — dump one payload per endpoint instead.
+    if status_info.get("active") == "rest":
+        raw_info = {}
+        if debug:
+            try:
+                raw_info = {"rest_raw": await fetch_rest_raw()}
+            except Exception as e:
+                return {"ok": False, "error": str(e)[:400], "transport": status_info}
+        try:
+            m = await fetch_dhcp_map()
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:400],
+                    "transport": status_info, **raw_info}
+        sample = [{"ip": ip, "hostname": hn} for ip, hn in list(m.items())[:10]]
+        return {"ok": True, "count": len(m), "sample": sample,
+                "transport": status_info, **raw_info}
+
     raw_info = {}
     if debug:
         try:
@@ -1618,14 +2044,16 @@ async def test_firewall_dhcp(debug: bool = Query(default=False)):
                         "entity": settings.firewall_dhcp_entity,
                         "entities": probe_entities(text)}
         except Exception as e:
-            return {"ok": False, "error": str(e)[:400]}
+            return {"ok": False, "error": str(e)[:400], "transport": status_info}
     try:
         m = await fetch_dhcp_map()
     except Exception as e:
-        return {"ok": False, "error": str(e)[:400], **raw_info}
+        return {"ok": False, "error": str(e)[:400],
+                "transport": status_info, **raw_info}
     sample = [{"ip": ip, "hostname": hn} for ip, hn in list(m.items())[:10]]
     return {"ok": True, "count": len(m), "sample": sample,
-            "entity": settings.firewall_dhcp_entity, **raw_info}
+            "entity": settings.firewall_dhcp_entity,
+            "transport": status_info, **raw_info}
 
 
 # --- Honeypot: remote decoy pods managed by Warroom -------------------------
@@ -1920,6 +2348,248 @@ async def ack_all_honeypot_sources(db: AsyncSession = Depends(get_db)):
     return {"ok": True, "acknowledged": res.rowcount}
 
 
+@app.post("/api/honeypot/decoy-probe")
+@app.get("/api/honeypot/decoy-probe")
+async def honeypot_decoy_probe(request: Request):
+    """Someone requested the decoy without submitting anything.
+
+    Fed by an nginx `mirror`, so the page itself is still served straight from
+    disk — the visitor waits on nothing and notices nothing. Answers 204 because
+    nobody is listening: the mirrored response is discarded."""
+    from fastapi.responses import Response
+
+    from app import honeypot_login
+
+    if settings.honeypot_web_enabled and settings.honeypot_web_log_probes:
+        await honeypot_login.capture_probe(request)
+    return Response(status_code=204)
+
+
+@app.api_route("/api/honeypot/decoy-login",
+               methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+async def honeypot_decoy_login(request: Request):
+    """The decoy's login API. Accepts anything, records everything, grants nothing.
+
+    Deliberately permissive about *shape*: JSON, form posts, nested objects,
+    HTTP Basic, unusual field names, any method. A decoy that only understands
+    ``username``/``password`` still answers the scanner but throws away the one
+    thing it exists to collect — and every portal and every tool has its own
+    vocabulary. The raw body is kept as well, so a parsing gap costs a second
+    look rather than the evidence.
+
+    Responses stay in character: a credential attempt is refused like a real
+    login (401), a method a login API would not take is refused like a real API
+    (405). Everything else about the answer is constant — a different message
+    for an unknown user, or a faster reply to a malformed request, would tell
+    the visitor there is nothing behind it."""
+    from fastapi.responses import JSONResponse
+
+    from app import honeypot_login
+
+    payload: object = None
+    visited = None
+    raw = ""
+    try:
+        raw_bytes = await request.body()
+        raw = raw_bytes.decode("utf-8", "replace") if raw_bytes else ""
+        ctype = (request.headers.get("content-type") or "").lower()
+        if raw and "json" in ctype:
+            import json as _json
+
+            payload = _json.loads(raw)
+        elif raw:
+            form = await request.form()
+            payload = dict(form)
+        elif raw == "":
+            payload = None
+    except Exception:
+        # Malformed input is still a visit worth recording — the raw body above
+        # survives regardless of whether it parses.
+        payload = None
+
+    if isinstance(payload, dict):
+        visited = payload.get("path")
+    # Query parameters count as a body here. Plenty of appliance portals take
+    # credentials on the URL, and a scanner that sends them that way was trying
+    # to get in — reading only the body would file the attempt as a bare probe
+    # and throw away the one thing this endpoint exists to collect.
+    query = dict(request.query_params)
+    username, password = honeypot_login.extract_credentials(
+        [payload, query] if query else payload, request.headers)
+    if not visited and isinstance(query.get("path"), str):
+        visited = query["path"]
+
+    # No credentials and no body: somebody is checking whether the endpoint is
+    # there, not trying to get in. Recorded as reconnaissance.
+    if username is None and password is None and not raw:
+        if settings.honeypot_web_enabled and settings.honeypot_web_log_probes:
+            await honeypot_login.capture_probe(request)
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return JSONResponse(status_code=405,
+                                content={"ok": False, "error": "Method not allowed."})
+        await honeypot_login.respond_delay()
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "Missing credentials."})
+
+    if settings.honeypot_web_enabled:
+        await honeypot_login.capture(request, username, password,
+                                     visited_path=visited, raw_body=raw)
+    await honeypot_login.respond_delay()
+    # English, matching the page. A German error from an English portal is the
+    # kind of seam that makes someone look twice.
+    return JSONResponse(
+        status_code=401,
+        content={"ok": False, "error": "Your username or password is incorrect."},
+    )
+
+
+# Sortable columns, allow-listed: the value goes into the ORDER BY clause, so it
+# must never come straight from the client.
+_LOGIN_SORT_COLS = {
+    "created_at": "created_at", "username": "username", "password": "password",
+    "source_ip": "source_ip", "country": "attacker_country", "kind": "kind",
+    "action": "action", "path": "path",
+}
+
+# Ceiling for the CSV export below. High enough that a real operator never
+# meets it, low enough that a bot flooding the decoy cannot turn the export
+# into a query that times out and returns nothing at all.
+MAX_LOGIN_EXPORT_ROWS = 100_000
+
+
+@app.get("/api/honeypot/logins")
+async def honeypot_logins(limit: int = Query(default=200, ge=1, le=2000),
+                          q: str | None = Query(default=None, max_length=255),
+                          sort: str = Query(default="created_at"),
+                          dir: str = Query(default="desc"),
+                          db: AsyncSession = Depends(get_db)):
+    """Everything typed into the decoy, newest first — passwords included.
+
+    This is the one view in Warroom that shows credentials in the clear. They
+    are the attacker's own guesses, and reading them is the point: a password
+    here that resembles a real one is an early warning nothing else gives you."""
+    from app.models import HoneypotLogin
+
+    stmt = select(HoneypotLogin)
+    if q:
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(or_(HoneypotLogin.username.ilike(term),
+                              HoneypotLogin.password.ilike(term),
+                              HoneypotLogin.source_ip.ilike(term)))
+    # Ordered in the database, not in the browser: with thousands of rows the
+    # page only ever holds a slice, and sorting that slice would answer a
+    # different question than the one the operator asked.
+    col = getattr(HoneypotLogin, _LOGIN_SORT_COLS.get(sort, "created_at"))
+    order = col.asc() if dir == "asc" else col.desc()
+    rows = (await db.execute(
+        # created_at as the tie-breaker keeps equal values in a stable, sensible
+        # order instead of whatever the planner happens to return.
+        stmt.order_by(order.nullslast(), HoneypotLogin.created_at.desc()).limit(limit)
+    )).scalars().all()
+
+    total = (await db.execute(text("SELECT count(*) FROM honeypot_logins"))).scalar() or 0
+    distinct_ips = (await db.execute(
+        text("SELECT count(DISTINCT source_ip) FROM honeypot_logins"))).scalar() or 0
+    return {
+        "entries": [{
+            "id": r.id,
+            "username": r.username,
+            "password": r.password,
+            "source_ip": r.source_ip,
+            "country": r.attacker_country,
+            "city": r.attacker_city,
+            "org": r.attacker_org,
+            "user_agent": r.user_agent,
+            "path": r.path,
+            "action": r.action,
+            "kind": r.kind,
+            "method": r.method,
+            "raw_body": r.raw_body,
+            "osint": r.osint,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+        "total": int(total),
+        "distinct_ips": int(distinct_ips),
+        "enabled": bool(settings.honeypot_web_enabled),
+        "blocks_source": bool(settings.honeypot_web_block_source),
+        "burns_username": bool(settings.honeypot_web_burn_username),
+        "osint_enabled": bool(settings.honeypot_web_osint_enabled),
+        "sort": sort if sort in _LOGIN_SORT_COLS else "created_at",
+        "dir": "asc" if dir == "asc" else "desc",
+        "shown": len(rows),
+    }
+
+
+@app.get("/api/honeypot/logins/export")
+async def honeypot_logins_export(db: AsyncSession = Depends(get_db)):
+    """Every captured credential as CSV, passwords included.
+
+    Server-side rather than assembled in the browser: the export must cover the
+    whole table, not the page the operator happens to be looking at, and CSV
+    quoting is easier to get right once here than in five places in JavaScript.
+
+    Semicolon-separated with a BOM — Excel in a German locale opens comma-CSV as
+    a single column, and an export nobody can open is not an export."""
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    from app.models import HoneypotLogin
+
+    # Bounded, unlike the table it reads: honeypot_logins is written by
+    # unauthenticated internet traffic, so "the whole table" is a number an
+    # attacker chooses. Past this many rows the query would hit the request
+    # pool's 45s statement_timeout and the export would fail outright — a
+    # capped export beats none, and the newest rows are the ones wanted.
+    rows = (await db.execute(
+        select(HoneypotLogin).order_by(HoneypotLogin.created_at.desc())
+        .limit(MAX_LOGIN_EXPORT_ROWS)
+    )).scalars().all()
+
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_ALL)
+    w.writerow(["Zeitpunkt", "Typ", "Methode", "Benutzername", "Passwort", "Quell-IP",
+                "Land", "Stadt", "Organisation", "Pfad", "User-Agent", "Rohkoerper",
+                "Abuse-Score", "VT-Malicious", "GreyNoise", "Reaktion"])
+    for r in rows:
+        w.writerow([
+            r.created_at.isoformat() if r.created_at else "", r.kind or "",
+            r.method or "", r.username or "", r.password or "", r.source_ip or "",
+            r.attacker_country or "", r.attacker_city or "", r.attacker_org or "",
+            r.path or "", (r.user_agent or "").replace("\n", " "),
+            (r.raw_body or "").replace("\n", " "),
+            (r.osint or {}).get("abuse_score", ""), (r.osint or {}).get("vt_malicious", ""),
+            (r.osint or {}).get("greynoise", "") or "", r.action or "",
+        ])
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+    return StreamingResponse(
+        iter(["﻿" + buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="koeder-logins-{stamp}.csv"'},
+    )
+
+
+@app.delete("/api/honeypot/logins")
+async def honeypot_logins_purge(before_days: int = Query(default=0, ge=0, le=3650),
+                                db: AsyncSession = Depends(get_db)):
+    """Delete captured credentials — all of them, or those older than N days.
+
+    Exists because a plaintext credential store should be emptyable without a
+    database client. What was learned from a row lives on in the blocklist and
+    the username list; the row itself is not worth keeping forever."""
+    if before_days:
+        res = await db.execute(text(
+            "DELETE FROM honeypot_logins WHERE created_at < now() - make_interval(days => :d)"
+        ), {"d": before_days})
+    else:
+        res = await db.execute(text("DELETE FROM honeypot_logins"))
+    await db.commit()
+    return {"ok": True, "deleted": res.rowcount or 0, "before_days": before_days}
+
+
 @app.get("/api/honeypot/events")
 async def list_honeypot_events(
     limit: int = Query(default=200, ge=1, le=1000),
@@ -1957,6 +2627,85 @@ class ProcessWhitelistIn(BaseModel):
     pod_id: str | None = Field(default=None, max_length=36)      # None = all pods
     file_path: str | None = Field(default=None, max_length=400)  # None = all files
     comment: str | None = Field(default=None, max_length=500)
+
+
+class MonitoredPasswordIn(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    # Received once, fingerprinted, and dropped. It is never stored, echoed back,
+    # or logged — see app.monitored_passwords.
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class MonitoredPasswordToggleIn(BaseModel):
+    active: bool
+
+
+@app.get("/api/monitored-passwords")
+async def list_monitored_passwords(db: AsyncSession = Depends(get_db)):
+    """Registered real passwords, by label. Never returns the fingerprint —
+    that is the one field that would let someone test guesses offline."""
+    from app import monitored_passwords
+    return {"entries": await monitored_passwords.list_entries(db),
+            "enabled": bool(settings.monitored_password_enabled),
+            "key_available": monitored_passwords.available()}
+
+
+@app.post("/api/monitored-passwords")
+async def add_monitored_password(body: MonitoredPasswordIn, request: Request,
+                                 db: AsyncSession = Depends(get_db)):
+    """Register a password that is genuinely in use, so a decoy submission of it
+    can be recognised as a leak rather than a lucky guess."""
+    from app import monitored_passwords
+    actor = actor_name(request)
+    try:
+        row = await monitored_passwords.add(db, body.label, body.password, actor)
+    except monitored_passwords.MonitoredPasswordError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "entry": monitored_passwords.serialize(row)}
+
+
+@app.patch("/api/monitored-passwords/{entry_id}")
+async def toggle_monitored_password(entry_id: int, body: MonitoredPasswordToggleIn,
+                                    db: AsyncSession = Depends(get_db)):
+    from app import monitored_passwords
+    if not await monitored_passwords.set_active(db, entry_id, body.active):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
+@app.delete("/api/monitored-passwords/{entry_id}")
+async def delete_monitored_password(entry_id: int, db: AsyncSession = Depends(get_db)):
+    from app import monitored_passwords
+    if not await monitored_passwords.remove(db, entry_id):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
+@app.get("/api/monitored-passwords/hits")
+async def monitored_password_hits(limit: int = Query(default=50, ge=1, le=500),
+                                  db: AsyncSession = Depends(get_db)):
+    """Decoy submissions that matched a registered password — the alarm history.
+
+    The password column is NULL on every one of these rows by design, so there
+    is nothing sensitive to withhold here."""
+    rows = (await db.execute(
+        select(HoneypotLogin)
+        .where(HoneypotLogin.credential_alarm.isnot(None))
+        .order_by(HoneypotLogin.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    labels = {r.id: r.label for r in (await db.execute(
+        select(MonitoredPassword))).scalars().all()}
+    return {"hits": [
+        {
+            "id": r.id, "severity": r.credential_alarm,
+            "username": r.username, "source_ip": r.source_ip,
+            "label": labels.get(r.monitored_password_id),
+            "path": r.path, "country": r.attacker_country,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]}
 
 
 @app.get("/api/honeypot/process-whitelist")
@@ -2004,7 +2753,7 @@ async def add_process_whitelist(body: ProcessWhitelistIn, request: Request,
         entry = HoneypotProcessWhitelist(
             process=process, exe=exe, pod_id=pod_id, file_path=file_path,
             comment=_clean(body.comment),
-            created_by=getattr(getattr(request, "state", None), "user", None) or "human",
+            created_by=actor_name(request),
         )
         db.add(entry)
         await db.flush()
@@ -3492,6 +4241,56 @@ async def refresh_whitelist(db: AsyncSession = Depends(get_db)):
 
 # --- Firewall overview (extended with interfaces + log/flow counts) ---
 
+# Per-firewall log statistics without touching the whole table.
+#
+# This used to be a plain `GROUP BY firewall_ip` with `COUNT(id)` over all of
+# firewall_logs. The docstring claimed it stayed an index-only scan on
+# idx_fw_logs_ip_created, but COUNT(id) references a column that index does not
+# carry, so the planner fell back to a parallel seq scan: ~96GB read, 66s, to
+# produce a single row (this deployment has exactly one firewall_ip). Rewriting
+# it to COUNT(*) is worse still — the index-only scan then does ~14.5M heap
+# fetches because continuous ingest keeps the visibility map cold (200s).
+#
+# firewall_ip has a handful of distinct values at most, so instead:
+#   * a loose index scan (recursive "skip scan") enumerates the distinct IPs,
+#     each step an instant index lookup rather than a scan of all rows;
+#   * last_log / name are per-IP index lookups (LIMIT 1, no aggregation);
+#   * log_count is ESTIMATED — the planner's table-wide row estimate split by
+#     the per-IP ratio from a 0.05% sample.
+#
+# log_count only feeds a "N logs" label on the firewall overview, so an
+# estimate is appropriate; an exact all-time count is not worth a 96GB scan.
+# Runtime: ~0.8s instead of 66s.
+_FIREWALL_LOG_STATS_SQL = """
+WITH RECURSIVE walk AS (
+    (SELECT firewall_ip FROM firewall_logs WHERE firewall_ip IS NOT NULL
+      ORDER BY firewall_ip LIMIT 1)
+    UNION ALL
+    SELECT (SELECT f.firewall_ip FROM firewall_logs f
+             WHERE f.firewall_ip > w.firewall_ip AND f.firewall_ip IS NOT NULL
+             ORDER BY f.firewall_ip LIMIT 1)
+      FROM walk w WHERE w.firewall_ip IS NOT NULL
+),
+ips AS (SELECT firewall_ip FROM walk WHERE firewall_ip IS NOT NULL),
+sample AS (
+    SELECT firewall_ip, count(*)::numeric AS c
+      FROM firewall_logs TABLESAMPLE SYSTEM (0.05)
+     WHERE firewall_ip IS NOT NULL GROUP BY firewall_ip
+),
+tot AS (SELECT GREATEST(COALESCE(sum(c), 0), 1) AS s FROM sample),
+est AS (SELECT GREATEST(reltuples, 0)::numeric AS total
+          FROM pg_class WHERE oid = 'firewall_logs'::regclass)
+SELECT i.firewall_ip,
+       (SELECT f.firewall_name FROM firewall_logs f
+         WHERE f.firewall_ip = i.firewall_ip AND f.firewall_name IS NOT NULL
+         ORDER BY f.created_at DESC LIMIT 1) AS name,
+       COALESCE(round(est.total * s.c / tot.s), 0)::bigint AS log_count,
+       (SELECT max(f.created_at) FROM firewall_logs f
+         WHERE f.firewall_ip = i.firewall_ip) AS last_log
+  FROM ips i CROSS JOIN tot CROSS JOIN est
+  LEFT JOIN sample s ON s.firewall_ip = i.firewall_ip
+"""
+
 
 @app.get("/api/firewalls/extended")
 @cached(ttl=120)
@@ -3500,23 +4299,10 @@ async def list_firewalls_extended(db: AsyncSession = Depends(get_db)):
     that's both manually configured AND sends syslog from a different IP
     shows up once with both IPs listed underneath.
 
-    The per-firewall log aggregation scans the whole firewall_logs table, so the
-    result is cached (120s) and relies on the covering index
-    idx_fw_logs_ip_created (firewall_ip, created_at) INCLUDE (firewall_name) to
-    stay an index-only scan instead of a 40GB heap scan — see
-    db/migrations/003_fw_ip_index.sql."""
+    The per-firewall log_count is an ESTIMATE — see _FIREWALL_LOG_STATS_SQL."""
     locs = (await db.execute(select(FirewallLocation))).scalars().all()
 
-    log_stats = (await db.execute(
-        select(
-            FirewallLog.firewall_ip,
-            func.max(FirewallLog.firewall_name).label("name"),
-            func.count(FirewallLog.id).label("log_count"),
-            func.max(FirewallLog.created_at).label("last_log"),
-        )
-        .where(FirewallLog.firewall_ip.isnot(None))
-        .group_by(FirewallLog.firewall_ip)
-    )).all()
+    log_stats = (await db.execute(text(_FIREWALL_LOG_STATS_SQL))).all()
 
     iface_stats = (await db.execute(
         select(
@@ -3685,6 +4471,15 @@ ANOMALY_DIMENSIONS = [
     {"key": "packets", "label": "Pakete",            "axis": "log"},
     {"key": "night",   "label": "Tageszeit (Nacht)", "axis": "linear"},
     {"key": "country", "label": "Land-Seltenheit",   "axis": "linear"},
+    # Service dimensions: *which* services an IP speaks, not just how many ports.
+    # "services" separates a host using one service from one touching a dozen
+    # (lateral movement / scanning); "service_rarity" isolates the host speaking
+    # something almost nobody else on this network speaks — a single SMB or RDP
+    # talker among a crowd of HTTPS clients. Both derive from the service behind
+    # the port (app.services), so ephemeral ports collapse instead of inflating
+    # the count.
+    {"key": "services",       "label": "Dienste",          "axis": "linear"},
+    {"key": "service_rarity", "label": "Dienst-Seltenheit", "axis": "linear"},
 ]
 _ANOMALY_DIM_KEYS = {d["key"] for d in ANOMALY_DIMENSIONS}
 _ANOMALY_DEFAULT_DIMS = ["volume", "ports", "night"]
@@ -3788,7 +4583,10 @@ async def firewall_anomalies(
                COUNT(DISTINCT n.{peer_col}) AS dips,
                SUM(CASE WHEN EXTRACT(hour FROM n.bucket_start) < 6 THEN n.flows ELSE 0 END) AS night_flows,
                MAX(n.bucket_start) AS last_seen,
-               MAX(g.country) AS country
+               MAX(g.country) AS country,
+               array_agg(DISTINCT n.dst_port) AS ports,
+               mode() WITHIN GROUP (ORDER BY n.dst_port) AS top_port,
+               mode() WITHIN GROUP (ORDER BY n.protocol) AS top_proto
         FROM netflow_buckets n
         LEFT JOIN geoip_cache g ON g.ip = n.{entity_col}
         WHERE {" AND ".join(where)}
@@ -3804,9 +4602,24 @@ async def firewall_anomalies(
     counts = Counter((r[8] or "(intern)") for r in rows)
     total = max(1, len(rows))
 
-    items = []
+    # Service encoding, same rarity idea one layer up: resolve every port an IP
+    # touched to the service *class* behind it, then measure how common that IP's
+    # dominant service is across the scored population. service_class (not
+    # resolve) is deliberate — it collapses unnamed and ephemeral ports into one
+    # bucket each, so "Dienste" counts services rather than silently duplicating
+    # the existing "Ziel-Ports" dimension.
+    svc_sets: list[set[str]] = []
+    top_services: list[str] = []
     for r in rows:
-        entity, byts, flows, pkts, dports, dips, night_flows, last_seen, country = r
+        proto = r[11]
+        svc_sets.append({service_catalog.service_class(p, proto) for p in (r[9] or [])})
+        top_services.append(service_catalog.service_class(r[10], proto))
+    svc_counts = Counter(top_services)
+
+    items = []
+    for idx, r in enumerate(rows):
+        (entity, byts, flows, pkts, dports, dips, night_flows, last_seen,
+         country, _ports, top_port, top_proto) = r
         byts = int(byts or 0)
         flows = int(flows or 0) or 1
         pkts = int(pkts or 0)
@@ -3816,16 +4629,22 @@ async def firewall_anomalies(
         rarity = -math.log(share)
         night_ratio = int(night_flows or 0) / flows
 
+        n_services = len(svc_sets[idx]) or 1
+        top_service = top_services[idx]
+        svc_rarity = -math.log(svc_counts[top_service] / total)
+
         # raw = the human value shown on each axis / hover; feat = the
         # Isolation-Forest input (higher = more anomalous, log-scaled for the
         # heavy-tailed count/volume metrics).
         raw = {"volume": byts, "ports": dports, "dst_ips": dips,
                "flows": flows, "packets": pkts,
-               "night": round(night_ratio, 3), "country": round(rarity, 3)}
+               "night": round(night_ratio, 3), "country": round(rarity, 3),
+               "services": n_services, "service_rarity": round(svc_rarity, 3)}
         feat = {"volume": math.log1p(byts), "ports": math.log1p(dports),
                 "dst_ips": math.log1p(dips), "flows": math.log1p(flows),
                 "packets": math.log1p(pkts), "night": night_ratio,
-                "country": rarity}
+                "country": rarity,
+                "services": math.log1p(n_services), "service_rarity": svc_rarity}
 
         it = {
             "ip": entity,
@@ -3837,6 +4656,9 @@ async def firewall_anomalies(
             "distinct_dst_ips": dips,
             "night_ratio": round(night_ratio, 3),
             "country_rarity": round(rarity, 3),
+            "services": n_services,
+            "top_service": top_service,
+            "service_rarity": round(svc_rarity, 3),
             "last_seen": last_seen.isoformat() if last_seen else None,
             # Raw values for every dimension so the chart can plot any chosen 3.
             "vals": raw,
@@ -3943,6 +4765,46 @@ async def firewall_connection_anomalies(
     if kind in ("c2", "exfil", "new"):
         res["anomalies"] = [a for a in res["anomalies"] if a["kind"] == kind]
     return res
+
+
+@app.get("/api/firewall/service-anomalies")
+@cached(ttl=300)
+async def firewall_service_anomalies(
+    hours: int = Query(default=24, ge=1, le=168),
+    min_flows: int = Query(default=5, ge=1, le=100000),
+    min_group: int = Query(default=15, ge=5, le=500,
+                           description="Minimum peer-group size. Services with "
+                                       "fewer connections are reported under "
+                                       "skipped_services instead of scored."),
+    threshold: float = Query(default=0.62, ge=0.0, le=1.0),
+    service: str = Query(default="", description="Restrict to one service key, "
+                                                 "e.g. 'https', 'ssh', 'ephemeral'."),
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-**service** NetFlow anomaly detection (see ``service_anomaly``).
+
+    The third engine next to ``/api/firewall/anomalies`` (Isolation Forest over
+    whole IPs) and ``/api/firewall/connection-anomalies`` (rule-based C2/exfil):
+    connections are grouped by the **service behind the destination port**, and
+    a separate Isolation Forest runs *inside each group*. A connection is
+    therefore judged against its own peers — HTTPS against HTTPS, DNS against
+    DNS — which surfaces the host that is unremarkable network-wide but odd for
+    the service it is speaking (a 400 MB push over SMTP, an SSH session where
+    everyone else runs 200-byte keepalives).
+
+    Groups below ``min_group`` are not scored — an "outlier" among five peers is
+    noise — and are listed in ``skipped_services`` so the coverage gap is
+    visible. Each finding carries two-sided ``drivers`` (which dimension, high or
+    low, and the factor against the group median) plus ``signals`` such as a
+    service this host never used before. Result is cached (300s)."""
+    from app import service_anomaly as svc_anom
+
+    return await svc_anom.analyze(
+        db, hours=hours, min_flows=min_flows, limit=limit,
+        service=(service.strip() or None),
+        overrides={"min_group": min_group, "threshold": threshold},
+    )
 
 
 @app.post("/api/firewall/connection-anomalies/scan-now")
@@ -5292,6 +6154,31 @@ async def health():
 # routes must be declared BEFORE the catch-all /api/osint/{ip}, otherwise
 # FastAPI matches the catch-all first and treats "url" / "domain" as IP
 # values.
+@app.get("/api/notifications/matrix")
+async def notifications_matrix():
+    """Which alert is delivered over which channel, as the admin UI renders it,
+    plus the built-in defaults so the operator can see what they changed."""
+    from app import notification_matrix
+
+    return notification_matrix.describe()
+
+
+@app.get("/api/osint/matrix")
+async def osint_matrix():
+    """The provider matrix as the admin UI renders it: which provider may be
+    queried from which part of the system, plus the built-in defaults so the
+    operator can see what they changed."""
+    from app import osint
+
+    return {
+        "contexts": osint.CONTEXTS,
+        "paid_providers": list(osint.PAID_PROVIDERS),
+        "free_providers": list(osint.FREE_PROVIDERS),
+        "effective": osint.effective_matrix(),
+        "defaults": osint.default_matrix(),
+    }
+
+
 @app.get("/api/osint/url")
 async def osint_lookup_url(
     u: str = Query(..., min_length=8, max_length=2048),
@@ -5304,7 +6191,7 @@ async def osint_lookup_url(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"invalid url: {e}")
     from app.osint import lookup_url as osint_url_fn
-    return await osint_url_fn(normalised, force=force)
+    return await osint_url_fn(normalised, force=force, context="manual")
 
 
 @app.get("/api/osint/domain/{domain}")
@@ -5316,7 +6203,7 @@ async def osint_lookup_domain(domain: str, force: bool = Query(default=False)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"invalid domain: {e}")
     from app.osint import lookup_domain as osint_domain_fn
-    return await osint_domain_fn(normalised, force=force)
+    return await osint_domain_fn(normalised, force=force, context="manual")
 
 
 @app.get("/api/osint/history")
@@ -5385,7 +6272,7 @@ async def osint_lookup(ip: str, force: bool = Query(default=False)):
         raise HTTPException(status_code=400, detail="invalid IP address")
 
     from app.osint import lookup as osint_lookup_fn
-    return await osint_lookup_fn(ip, force=force)
+    return await osint_lookup_fn(ip, force=force, context="manual")
 
 
 # --- AI command interface (chat + Teams) ---
@@ -5563,18 +6450,14 @@ async def teams_command(request: Request):
 # --- NetFlow analytics ---
 
 # Map of common ports/protocols → human-readable label, used in chart legends.
-_PROTO_NAMES = {1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP", 51: "AH", 58: "ICMPv6"}
-_PORT_SERVICES = {
-    20: "ftp-data", 21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
-    67: "dhcp", 68: "dhcp", 69: "tftp", 80: "http", 110: "pop3", 123: "ntp",
-    143: "imap", 161: "snmp", 162: "snmp-trap", 389: "ldap", 443: "https",
-    445: "smb", 465: "smtps", 514: "syslog", 587: "submission", 636: "ldaps",
-    993: "imaps", 995: "pop3s", 1433: "mssql", 1521: "oracle", 1723: "pptp",
-    1812: "radius", 1813: "radius-acct", 3306: "mysql", 3389: "rdp",
-    5432: "postgres", 5900: "vnc", 5985: "winrm", 5986: "winrm-https",
-    8080: "http-alt", 8443: "https-alt", 6379: "redis", 11211: "memcached",
-    27017: "mongodb",
-}
+# The tables themselves live in app.services, which is also what the per-service
+# anomaly engine groups by — one catalogue, so a port added for the detection
+# side immediately labels the charts too. These aliases keep the existing
+# ``.get(port)`` call sites working unchanged.
+_PROTO_NAMES = service_catalog.PROTO_NAMES
+_PORT_SERVICES = {port: name
+                  for (port, proto), name in service_catalog.PORT_SERVICES.items()
+                  if proto is None}
 
 
 def _netflow_filter(since: datetime, firewall: str | None):
@@ -6130,6 +7013,9 @@ class AdminSettingsIn(BaseModel):
     firewall_api_user: str | None = Field(default=None, max_length=128)
     firewall_api_password: str | None = Field(default=None, max_length=256)
     firewall_api_verify_tls: bool | None = None
+    firewall_api_mode: str | None = Field(default=None, pattern="^(auto|xml|rest)$")
+    firewall_api_key: str | None = Field(default=None, max_length=512)
+    firewall_rest_base_path: str | None = Field(default=None, max_length=200)
     firewall_central_sync_enabled: bool | None = None
     auth_enabled: bool | None = None
     mcp_enabled: bool | None = None
@@ -6144,6 +7030,14 @@ class AdminSettingsIn(BaseModel):
     host_nmap_default_profile: str | None = Field(default=None, pattern="^(quick|full|scripts)$")
     host_nmap_timeout_seconds: int | None = Field(default=None, ge=30, le=21600)
     host_nmap_max_concurrent: int | None = Field(default=None, ge=1, le=8)
+    host_presence_enabled: bool | None = None
+    host_presence_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    host_presence_online_seconds: int | None = Field(default=None, ge=60, le=86400)
+    host_presence_probe_ports: str | None = Field(default=None, max_length=200, pattern=r"^[0-9,\s]*$")
+    kali_mcp_enabled: bool | None = None
+    kali_target_allowlist: str | None = Field(default=None, max_length=4000)
+    kali_require_approval: bool | None = None
+    kali_timeout_seconds: int | None = Field(default=None, ge=10, le=3600)
     entra_block_enabled: bool | None = None
     entra_block_sync_interval_minutes: int | None = None
     entra_ca_exclude_users: str | None = None
@@ -6216,6 +7110,32 @@ class AdminSettingsIn(BaseModel):
     agent_conntriage_alarm: bool | None = None
     agent_conntriage_system_prompt: str | None = Field(default=None, max_length=20000)
     agent_failed_login_enabled: bool | None = None
+    # Invalid-username brute-force rule. Declared here too, or the PUT silently
+    # drops them: the request model filters by declared field, MANAGED_KEYS only
+    # filters what survives that.
+    agent_invalid_user_block_enabled: bool | None = None
+    agent_invalid_user_min_unknown: int | None = None
+    agent_invalid_user_min_attempts: int | None = None
+    agent_invalid_user_window_minutes: int | None = None
+    agent_invalid_user_interval_seconds: int | None = None
+    agent_invalid_user_max_blocks_per_run: int | None = None
+    agent_invalid_user_burn_enabled: bool | None = None
+    # Decoy login page. A key missing from this model is silently dropped by the
+    # PUT — the setting exists, the UI offers it, and nothing happens.
+    honeypot_web_enabled: bool | None = None
+    honeypot_web_block_source: bool | None = None
+    honeypot_web_burn_username: bool | None = None
+    honeypot_web_alert: bool | None = None
+    monitored_password_enabled: bool | None = None
+    honeypot_web_delay_ms: int | None = Field(default=None, ge=0, le=10000)
+    honeypot_web_log_probes: bool | None = None
+    honeypot_web_probe_dedup_minutes: int | None = Field(default=None, ge=1, le=1440)
+    honeypot_web_osint_enabled: bool | None = None
+    mcp_honeypot_reveal_passwords: bool | None = None
+    # JSON: {"<context>": {"<provider>": bool}} — validated in the endpoint, not
+    # here, so a malformed value gets a real error message instead of a 422.
+    osint_provider_matrix: str | None = Field(default=None, max_length=8000)
+    notification_matrix: str | None = Field(default=None, max_length=8000)
     agent_failed_login_threshold: int | None = Field(default=None, ge=1, le=10000)
     agent_failed_login_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     agent_failed_login_subnet_attempts: int | None = Field(default=None, ge=1, le=10000)
@@ -6251,7 +7171,66 @@ async def update_admin_settings(body: AdminSettingsIn):
         if lvl not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise HTTPException(status_code=400, detail="invalid log_level")
         updates["log_level"] = lvl
+    if updates.get("notification_matrix"):
+        # Same reasoning as the OSINT matrix below: the resolver ignores a broken
+        # value so one typo cannot mute every alert, which is exactly why a typo
+        # has to be rejected here instead of failing silently later.
+        from app import notification_matrix as nm
+
+        try:
+            parsed = json.loads(updates["notification_matrix"])
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"notification_matrix is not valid JSON: {e}")
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400,
+                                detail="notification_matrix must be an object")
+        unknown_ev = sorted(set(parsed) - set(nm.EVENTS))
+        if unknown_ev:
+            raise HTTPException(status_code=400,
+                                detail=f"unknown event(s): {', '.join(unknown_ev)}")
+        for ev, row in parsed.items():
+            if not isinstance(row, dict):
+                raise HTTPException(status_code=400,
+                                    detail=f"event '{ev}' must map channels to booleans")
+            unknown_ch = sorted(set(row) - set(nm.CHANNELS))
+            if unknown_ch:
+                raise HTTPException(status_code=400,
+                                    detail=f"unknown channel(s) in '{ev}': {', '.join(unknown_ch)}")
+
+    if updates.get("osint_provider_matrix"):
+        # Validated on the way in, not on the way out: the resolver deliberately
+        # ignores a broken matrix so one bad value cannot stop every OSINT
+        # lookup — which means a typo saved here would fail utterly silently.
+        from app import osint
+
+        try:
+            parsed = json.loads(updates["osint_provider_matrix"])
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"osint_provider_matrix is not valid JSON: {e}")
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400,
+                                detail="osint_provider_matrix must be an object")
+        unknown_ctx = sorted(set(parsed) - set(osint.CONTEXTS))
+        if unknown_ctx:
+            raise HTTPException(status_code=400,
+                                detail=f"unknown context(s): {', '.join(unknown_ctx)}")
+        for ctx, row in parsed.items():
+            if not isinstance(row, dict):
+                raise HTTPException(status_code=400,
+                                    detail=f"context '{ctx}' must map providers to booleans")
+            unknown_p = sorted(set(row) - set(osint.PROVIDERS))
+            if unknown_p:
+                raise HTTPException(status_code=400,
+                                    detail=f"unknown provider(s) in '{ctx}': {', '.join(unknown_p)}")
     saved = await save_settings(updates)
+    # A changed key/mode/host must take effect now, not at the next restart:
+    # the transport choice is probed once and remembered.
+    if any(k.startswith("firewall_api_") or k == "firewall_rest_base_path"
+           for k in saved):
+        from app.sfos_client import reset_transport_cache
+        reset_transport_cache()
     return {"updated": list(saved.keys()), "settings": serialize_settings()}
 
 
@@ -6387,6 +7366,10 @@ async def list_agent_decisions(
     status: str | None = Query(default=None),
     decided_by: str | None = Query(default=None),
     action: str | None = Query(default=None),
+    source_type: str | None = Query(
+        default=None,
+        description="Filter by originating process, e.g. 'invalid_user', "
+                    "'failed_login', 'waf'."),
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
@@ -6397,6 +7380,8 @@ async def list_agent_decisions(
         stmt = stmt.where(AgentDecision.decided_by == decided_by)
     if action:
         stmt = stmt.where(AgentDecision.action == action)
+    if source_type:
+        stmt = stmt.where(AgentDecision.source_type == source_type)
     stmt = stmt.limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
@@ -6975,6 +7960,26 @@ async def get_agent_workflow():
             "run_now": "/api/agent/failed-login-run-now",
         },
         {
+            # No prompt: this rule never asks the LLM — guessing usernames that
+            # do not exist is not a judgement call, and the block must land while
+            # the spray is still running.
+            "key": "invalid_user", "label": "Ungültige Benutzer (Sofort-Block)",
+            "trigger": "Öffentliche IP probiert mehrere nicht existierende Benutzernamen → sofortiger Block ohne LLM. Deren Namen kommen auf eine Liste; jede spätere IP, die einen davon probiert, wird beim ersten Versuch gesperrt.",
+            "enabled_key": "agent_invalid_user_block_enabled",
+            "enabled": settings.agent_invalid_user_block_enabled,
+            "prompt_source": None, "prompt_key": None,
+            "prompt_overridden": False,
+            "allowed_actions": ["block_ip"],
+            "settings": [
+                {"key": "agent_invalid_user_min_unknown", "label": "Ungültige Benutzer (min.)", "value": settings.agent_invalid_user_min_unknown, "type": "int", "min": 1, "max": 100},
+                {"key": "agent_invalid_user_min_attempts", "label": "Fehlversuche (min.)", "value": settings.agent_invalid_user_min_attempts, "type": "int", "min": 1, "max": 1000},
+                {"key": "agent_invalid_user_window_minutes", "label": "Fenster (min)", "value": settings.agent_invalid_user_window_minutes, "type": "int", "min": 1, "max": 1440},
+                {"key": "agent_invalid_user_interval_seconds", "label": "Intervall (s)", "value": settings.agent_invalid_user_interval_seconds, "type": "int", "min": 30, "max": 86400},
+                {"key": "agent_invalid_user_max_blocks_per_run", "label": "Max. Blocks je Lauf", "value": settings.agent_invalid_user_max_blocks_per_run, "type": "int", "min": 1, "max": 1000},
+            ],
+            "run_now": "/api/agent/invalid-user-run-now",
+        },
+        {
             "key": "triage", "label": "Triage (OSINT-Übergabe)",
             "trigger": "Manuelle Übergabe eines Werts von der OSINT-Seite",
             "enabled_key": None, "enabled": True,
@@ -7047,6 +8052,449 @@ async def agent_anomaly_run_now(all: bool = Query(default=False)):
         kwargs={"force": True, "no_cap": bool(all)},
     )
     return {"ok": True, "all": bool(all)}
+
+
+@app.post("/api/agent/invalid-user-run-now")
+async def agent_invalid_user_run_now():
+    """Run the invalid-username brute-force rule immediately (admin-initiated,
+    also when the rule is switched off). Blocks are applied right away — the
+    rule is deterministic and has no approval step."""
+    from app.agent import agent_invalid_user_block_loop
+    scheduler.add_job(
+        agent_invalid_user_block_loop, "date",
+        id="agent_invalid_user_manual", replace_existing=True,
+        kwargs={"force": True},
+    )
+    return {"ok": True}
+
+
+@app.get("/api/agent/invalid-user-status")
+async def agent_invalid_user_status(db: AsyncSession = Depends(get_db)):
+    """Health of the known-user directory the rule depends on.
+
+    ``armed`` is the field that matters: while it is false the rule blocks
+    nothing, because an empty or unreadable directory would make every username
+    look invalid."""
+    from app import login_bruteforce
+
+    users = await login_bruteforce.known_users(db)
+    return {
+        "enabled": settings.agent_invalid_user_block_enabled,
+        "armed": users is not None,
+        "directory_size": len(users) if users is not None else 0,
+        "min_directory": login_bruteforce.MIN_DIRECTORY,
+        "window_minutes": settings.agent_invalid_user_window_minutes,
+        "min_unknown_users": settings.agent_invalid_user_min_unknown,
+        "min_attempts": settings.agent_invalid_user_min_attempts,
+        "max_blocks_per_run": settings.agent_invalid_user_max_blocks_per_run,
+    }
+
+
+# Row cap for the database path. Generous — three days of this network's failed
+# logins are ~1850 rows — but a bounded query beats an unbounded one, and the
+# response says when it bit rather than quietly returning a partial picture.
+_BACKTEST_DB_MAX_ROWS = 200_000
+
+
+async def _run_invalid_user_backtest(db: AsyncSession, hours: int,
+                                     min_unknown: int | None,
+                                     min_attempts: int | None) -> dict:
+    """Replay the rule over past login attempts **without blocking anything**.
+
+    A deterministic rule that only acts during an attack gives no feedback on a
+    quiet day, and its thresholds are otherwise tuned blind. This answers both
+    questions from the operator's own traffic: what would have been hit, and
+    which of those are genuinely new versus already covered by another block.
+
+    Two sources, because they answer subtly different questions. Up to 24 h it
+    reads the Redis login cache — literally the input the armed rule sees, so
+    the replay is faithful. Beyond that the cache has nothing left, and it reads
+    ``firewall_logs`` directly with the same filter the cache is built from.
+    That query is index-supported (~0.2 s for three days), not the full scan the
+    table's size suggests.
+
+    Shared by the preview and the retro-block below, so what the operator sees
+    and what actually gets blocked can never drift apart."""
+    from app import login_bruteforce, login_cache
+
+    mu = min_unknown if min_unknown is not None else settings.agent_invalid_user_min_unknown
+    ma = min_attempts if min_attempts is not None else settings.agent_invalid_user_min_attempts
+
+    now = datetime.now(timezone.utc)
+    known = await login_bruteforce.known_users(db)
+    cache_hours = login_cache.RETENTION_SECONDS // 3600
+    truncated = False
+
+    if hours <= cache_hours:
+        source = "cache"
+        attempts = await login_cache.recent(hours * 60, now)
+        if attempts is None:
+            # Distinct from "no attacks": the cache is down, so the answer is
+            # unknown rather than clean, and the UI must not read it as all-clear.
+            raise HTTPException(status_code=503, detail="Login-Cache nicht verfügbar")
+    else:
+        from app.agent import _fallback_window_attempts
+
+        source = "database"
+        attempts = await _fallback_window_attempts(
+            now, hours * 60, limit=_BACKTEST_DB_MAX_ROWS)
+        truncated = len(attempts) >= _BACKTEST_DB_MAX_ROWS
+
+    result = login_bruteforce.summarise(
+        attempts, known, min_unknown_users=int(mu or 3), min_attempts=int(ma or 3))
+    offenders = result.pop("offenders")
+
+    # Annotate against reality: an offender already blocked (by this rule or any
+    # other stage) or whitelisted is not something a live run would newly act on.
+    ips = [o["ip"] for o in offenders]
+    blocked: set[str] = set()
+    whitelisted: set[str] = set()
+    if ips:
+        blocked = set((await db.execute(
+            select(BlockedIp.ip).where(BlockedIp.ip.in_(ips)))).scalars().all())
+        whitelisted = set((await db.execute(
+            select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(ips)))).scalars().all())
+    for o in offenders:
+        o["already_blocked"] = o["ip"] in blocked
+        o["whitelisted"] = o["ip"] in whitelisted
+        o["would_block"] = not (o["already_blocked"] or o["whitelisted"])
+
+    return {
+        **result,
+        "offenders": offenders,
+        "hours": hours,
+        "armed": known is not None,
+        "would_block_count": sum(1 for o in offenders if o["would_block"]),
+        "live_window_minutes": settings.agent_invalid_user_window_minutes,
+        "max_blocks_per_run": settings.agent_invalid_user_max_blocks_per_run,
+        # Which input was replayed, and whether the row cap cut it short — a
+        # truncated backtest that looked complete would understate the traffic.
+        "source": source,
+        "cache_hours": cache_hours,
+        "truncated": truncated,
+        "row_cap": _BACKTEST_DB_MAX_ROWS,
+    }
+
+
+@app.get("/api/agent/invalid-user-backtest")
+async def agent_invalid_user_backtest(
+    hours: int = Query(default=24, ge=1, le=720),
+    min_unknown: int | None = Query(default=None, ge=1, le=100),
+    min_attempts: int | None = Query(default=None, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview only — see :func:`_run_invalid_user_backtest`. Blocks nothing."""
+    return await _run_invalid_user_backtest(db, hours, min_unknown, min_attempts)
+
+
+class BacktestBlockIn(BaseModel):
+    hours: int = Field(default=24, ge=1, le=720)
+    min_unknown: int | None = Field(default=None, ge=1, le=100)
+    min_attempts: int | None = Field(default=None, ge=1, le=1000)
+    # The IPs the operator actually saw in the preview. Not a convenience: the
+    # server re-evaluates and blocks only the intersection, so a stale tab can
+    # never block a source the operator never looked at, and a tampered list can
+    # never block one the evidence does not support.
+    ips: list[str] = Field(min_length=1, max_length=1000)
+
+
+@app.post("/api/agent/invalid-user-backtest-block")
+async def agent_invalid_user_backtest_block(body: BacktestBlockIn,
+                                            db: AsyncSession = Depends(get_db)):
+    """Block the sources a backtest turned up — the operator's decision, not the
+    rule's.
+
+    The armed rule only ever sees a 15-minute window, so a spray that ran days
+    ago is out of its reach forever. This closes that gap deliberately: it is a
+    human action on historical evidence, recorded as such (``blocked_by=human``,
+    ``source=invalid_user_backtest``) so the audit trail never confuses it with
+    something the rule did on its own."""
+    from app import login_bruteforce
+
+    result = await _run_invalid_user_backtest(
+        db, body.hours, body.min_unknown, body.min_attempts)
+    if not result["armed"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Benutzer-Verzeichnis nicht nutzbar — es wird nichts gesperrt")
+
+    requested = {(ip or "").strip() for ip in body.ips}
+    # Re-derived, not trusted: only offenders the fresh evaluation still counts
+    # as blockable, and only those the operator had in front of them.
+    candidates = [o for o in result["offenders"]
+                  if o["would_block"] and o["ip"] in requested]
+    stale = sorted(requested - {o["ip"] for o in candidates})
+
+    now = datetime.now(timezone.utc)
+    blocked: list[dict] = []
+    for o in candidates:
+        db.add(BlockedIp(
+            ip=o["ip"],
+            comment=login_bruteforce.block_comment(o),
+            blocked_at=now, blocked_by="human", source="invalid_user_backtest",
+        ))
+        blocked.append(o)
+    if blocked:
+        await db.commit()
+
+    # Same audit trail the automatic path writes, so every block carries the
+    # evidence that caused it regardless of who pulled the trigger.
+    for o in blocked:
+        await _store_backtest_block_decision(o, body.hours)
+
+    logger.info(f"invalid_user backtest: operator blocked {len(blocked)} source(s) "
+                f"from a {body.hours}h replay")
+    return {
+        "ok": True,
+        "blocked": [o["ip"] for o in blocked],
+        "blocked_count": len(blocked),
+        # Anything the operator asked for that the re-evaluation no longer backs:
+        # already blocked meanwhile, whitelisted, or below the threshold now.
+        "skipped": stale,
+        "hours": body.hours,
+    }
+
+
+async def _store_backtest_block_decision(offender: dict, hours: int) -> None:
+    """Mirror of the rule's own decision record, marked as operator-initiated."""
+    from app.models import AgentDecision
+
+    rec = AgentDecision(
+        alert_id=None,
+        source_type="invalid_user",
+        source_ip=offender["ip"],
+        action="block_ip",
+        action_args={"ip": offender["ip"], "context": {
+            "rule": "invalid-username-bruteforce",
+            "retro": True,
+            "backtest_hours": hours,
+            "window_minutes": hours * 60,
+            "attempts": offender["attempts"],
+            "users_tried": offender["users_tried"],
+            "unknown_user_count": offender["unknown_user_count"],
+            "unknown_users": offender["unknown_users"],
+            "components": offender["components"],
+            "country": offender["country"],
+        }},
+        reasoning=(
+            f"Nachträglich vom Betreiber gesperrt: {offender['unknown_user_count']} "
+            f"nicht existierende Benutzernamen in {offender['attempts']} "
+            f"Fehlversuchen über einen Testlauf der letzten {hours} Stunden "
+            f"({', '.join(offender['unknown_users'][:5])}). Die scharfe Regel "
+            f"sieht nur ein kurzes Fenster und konnte das nicht mehr erfassen."
+        ),
+        status="executed",
+        decided_by="human",
+        model=None,
+        decided_at=datetime.now(timezone.utc),
+    )
+    async with async_session() as sess:
+        sess.add(rec)
+        await sess.commit()
+
+
+class InvalidUsernameIn(BaseModel):
+    user: str = Field(min_length=1, max_length=255)
+    # active = sperrt beim ersten Versuch, ignored = bleibt dokumentiert, löst nie aus
+    status: str = Field(default="active")
+    comment: str | None = None
+
+
+@app.get("/api/agent/invalid-usernames")
+async def agent_invalid_usernames(
+    limit: int = Query(default=500, ge=1, le=5000),
+    q: str | None = Query(default=None, max_length=255),
+    db: AsyncSession = Depends(get_db),
+):
+    """The burned-username list: names proven to come from a brute-force spray.
+
+    Any public source trying one of these is blocked on its first attempt, so
+    the list has to be inspectable and correctable — ``block_hits`` shows which
+    entries have actually earned their place."""
+    from app.models import InvalidUsername
+
+    stmt = select(InvalidUsername)
+    if q:
+        stmt = stmt.where(InvalidUsername.user_name.ilike(f"%{q.strip().lower()}%"))
+    rows = (await db.execute(
+        stmt.order_by(InvalidUsername.block_hits.desc(),
+                      InvalidUsername.last_seen.desc().nullslast()).limit(limit)
+    )).scalars().all()
+
+    totals = (await db.execute(text(
+        "SELECT status, count(*) FROM invalid_usernames GROUP BY status"
+    ))).all()
+    counts = {s: int(c) for s, c in totals}
+
+    # A name declared a real account in the directory no longer fires, even
+    # while it sits here as "active" — say so, or the operator fixes the
+    # directory and still sees a list that looks armed against their colleague.
+    from app import login_bruteforce
+    known = await login_bruteforce.known_users(db) or set()
+
+    return {
+        "entries": [{
+            "user": r.user_name,
+            "first_seen": r.first_seen.isoformat() if r.first_seen else None,
+            "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+            "burned_by_ip": r.burned_by_ip,
+            "block_hits": r.block_hits or 0,
+            "origin": r.origin,
+            "status": r.status,
+            "comment": r.comment,
+            "shadowed": r.user_name in known,
+        } for r in rows],
+        "active_count": counts.get("active", 0),
+        "ignored_count": counts.get("ignored", 0),
+        "shown": len(rows),
+        "enabled": bool(settings.agent_invalid_user_burn_enabled),
+    }
+
+
+@app.post("/api/agent/invalid-usernames")
+async def agent_invalid_usernames_set(body: InvalidUsernameIn,
+                                      request: Request,
+                                      db: AsyncSession = Depends(get_db)):
+    """Add a name by hand, or park an auto-learned one as ``ignored``.
+
+    Parking exists because deleting is not enough: the next spray using the name
+    would simply re-learn it. ``ignored`` keeps the record and the decision."""
+    from app import login_bruteforce
+    from app.models import InvalidUsername
+
+    name = login_bruteforce.normalise(body.user)
+    if not name:
+        raise HTTPException(status_code=400, detail="Benutzername fehlt")
+    status = body.status if body.status in ("active", "ignored") else "active"
+
+    actor = actor_name(request)
+    existing = await db.get(InvalidUsername, name)
+    if existing:
+        existing.status = status
+        if body.comment is not None:
+            existing.comment = body.comment
+    else:
+        db.add(InvalidUsername(
+            user_name=name, status=status, origin="manual",
+            comment=body.comment, created_by=actor,
+            last_seen=datetime.now(timezone.utc),
+        ))
+    await db.commit()
+    return {"ok": True, "user": name, "status": status}
+
+
+@app.delete("/api/agent/invalid-usernames/{user}")
+async def agent_invalid_usernames_delete(user: str, db: AsyncSession = Depends(get_db)):
+    """Remove an entry entirely. A later spray using the same name re-learns it —
+    use status ``ignored`` to make the exclusion stick."""
+    from app import login_bruteforce
+    from app.models import InvalidUsername
+
+    name = login_bruteforce.normalise(user)
+    row = await db.get(InvalidUsername, name)
+    if not row:
+        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True, "user": name}
+
+
+@app.post("/api/agent/invalid-usernames/backfill")
+async def agent_invalid_usernames_backfill(
+    hours: int = Query(default=72, ge=1, le=720),
+    db: AsyncSession = Depends(get_db),
+):
+    """Seed the list from past sprays instead of waiting for the next one.
+
+    Runs the same replay as the backtest and burns every name its offenders
+    tried. Blocks nothing by itself — but from here on, any source reusing one
+    of those names is blocked on sight."""
+    from app import login_bruteforce
+
+    result = await _run_invalid_user_backtest(db, hours, None, None)
+    if not result["armed"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Benutzer-Verzeichnis nicht nutzbar — es wird nichts gelernt")
+
+    offenders = result["offenders"]
+    burned = await login_bruteforce.burn_from_offenders(db, offenders)
+    logger.info(f"invalid_user: backfilled {burned} burned username(s) from a "
+                f"{hours}h replay of {len(offenders)} spraying source(s)")
+    return {"ok": True, "burned": burned, "offenders": len(offenders), "hours": hours}
+
+
+class KnownUserIn(BaseModel):
+    user: str = Field(min_length=1, max_length=255)
+    # allow = zählt als echtes Konto, deny = zählt nie als echtes Konto
+    status: str = Field(default="allow")
+    comment: str | None = None
+
+
+@app.get("/api/agent/invalid-user-directory")
+async def agent_invalid_user_directory(db: AsyncSession = Depends(get_db)):
+    """The known-user directory with provenance per name.
+
+    Shows which names were *learned* from successful logins, which an operator
+    added by hand, and which are excluded — so the basis of every automatic
+    block is auditable rather than hidden in a cache."""
+    from app import login_bruteforce
+
+    return await login_bruteforce.directory_view(db)
+
+
+@app.post("/api/agent/invalid-user-directory")
+async def agent_invalid_user_directory_set(body: KnownUserIn,
+                                           request: Request,
+                                           db: AsyncSession = Depends(get_db)):
+    """Add or update an operator override.
+
+    ``allow`` covers the new-hire gap: an account that exists but has never
+    logged in successfully would otherwise look invented. ``deny`` covers the
+    opposite — a shared/generic name that did succeed but must not shield
+    someone guessing it."""
+    from app import login_bruteforce
+
+    name = login_bruteforce.normalise(body.user)
+    status = body.status if body.status in ("allow", "deny") else "allow"
+    if not name:
+        raise HTTPException(status_code=400, detail="Benutzername fehlt")
+
+    existing = await db.get(KnownUserOverride, name)
+    if existing:
+        existing.status = status
+        # Only an explicit comment overwrites the stored one: the directory
+        # table's status buttons POST {user, status, comment: null}, and
+        # treating that as "clear it" silently erased the justification
+        # somebody typed when they created the override.
+        if body.comment is not None:
+            existing.comment = body.comment
+    else:
+        db.add(KnownUserOverride(user_name=name, status=status,
+                                 comment=body.comment,
+                                 # The acting operator, like the sibling
+                                 # endpoint records — "human" tells an audit
+                                 # reader nothing when several analysts share
+                                 # the console.
+                                 created_by=actor_name(request)))
+    await db.commit()
+    return {"ok": True, "user": name, "status": status}
+
+
+@app.delete("/api/agent/invalid-user-directory/{user}")
+async def agent_invalid_user_directory_delete(user: str,
+                                              db: AsyncSession = Depends(get_db)):
+    """Drop an override. The name falls back to whatever the learned directory
+    says — it does not disappear if it was learned from a successful login."""
+    from app import login_bruteforce
+
+    name = login_bruteforce.normalise(user)
+    row = await db.get(KnownUserOverride, name)
+    if not row:
+        raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+    await db.delete(row)
+    await db.commit()
+    return {"ok": True, "user": name}
 
 
 @app.post("/api/agent/failed-login-run-now")

@@ -45,6 +45,8 @@ window.I18N.de.fwAnomalies = {
     dim_packets: "Pakete",
     dim_night: "Tageszeit (Nacht)",
     dim_country: "Land-Seltenheit",
+    dim_services: "Dienste",
+    dim_service_rarity: "Dienst-Seltenheit",
 
     // Treiber-Chip-Tooltip + kontextuelle Fokus-Beschreibung (interpoliert)
     percentile: "Perzentil {p}%",
@@ -186,4 +188,45 @@ window.I18N.de.fwAnomalies = {
     sig_beacon: "Beacon ~{s}s · {n}×",
     sig_beacon_title: "Regularität {r} · über {m} min · {bpf} B/Flow",
     sig_offhours: "nachtaktiv {p}%",
+
+    // --- Dienst-Anomalien (Peer-Group-Isolation-Forest je Dienst) ---
+    svc_hint: "Jede Verbindung wird <strong>nur gegen Verbindungen desselben Dienstes</strong> verglichen — HTTPS gegen HTTPS, DNS gegen DNS. Dadurch fällt auf, was netzweit unauffällig wäre: 400 MB über HTTPS sind normal, dieselben 400 MB über SMTP oder SSH nicht. Pro Dienst läuft ein eigener Isolation Forest; angezeigt wird, <strong>welche Kennzahl</strong> den Ausschlag gab (hoch oder niedrig) und um welchen <strong>Faktor sie vom Median des Dienstes</strong> abweicht. Dienste mit zu wenigen Verbindungen werden nicht bewertet und unten separat ausgewiesen.",
+    svc_title: "Dienst-Anomalien",
+    svc_sub: "— auffällig im Vergleich zum eigenen Dienst",
+    svc_all: "Alle Dienste",
+    svc_filter_title: "Auf einen Dienst einschränken",
+    svc_mingroup_title: "Mindestgröße einer Dienst-Gruppe, damit sie bewertet wird",
+    svc_filter_ph: "Filter (IP, Dienst, Signal…)",
+    svc_col_service: "Dienst",
+    svc_col_drivers: "Abweichung vom Dienst",
+    svc_none: "Keine auffälligen Dienst-Verbindungen im Zeitfenster.",
+    svc_stat_found: "{n} Auffälligkeiten",
+    svc_stat_groups: "{n} bewertete Dienste",
+    svc_meta: "· {c} von {a} Verbindungen bewertet",
+    svc_groups_label: "Bewertete Dienst-Gruppen",
+    svc_group_title: "{n} Verbindungen in dieser Gruppe · {a} auffällig",
+    svc_skipped: "{g} Dienste mit zu wenigen Verbindungen ({c}) nicht bewertet",
+    svc_skipped_title: "Zu kleine Gruppen werden nicht bewertet — bei wenigen Vergleichswerten ist ein „Ausreißer“ nicht aussagekräftig. Mindestgröße oben einstellbar.",
+    svc_ports_n: "{n} Ports",
+    svc_driver_title: "{d}: {v} gegenüber Median {m} des Dienstes · extremer als {p}% der Gruppe",
+
+    // Kennzahlen der Dienst-Analyse
+    svc_dim_out_bytes: "Upload",
+    svc_dim_in_bytes: "Download",
+    svc_dim_upload_ratio: "Upload-Anteil",
+    svc_dim_bytes_per_flow: "Bytes/Flow",
+    svc_dim_flows: "Flows",
+    svc_dim_buckets: "aktive Minuten",
+    svc_dim_night_ratio: "Nachtanteil",
+    svc_dim_dst_spread: "Ziel-Verbreitung",
+
+    // Signale der Dienst-Analyse
+    svc_sig_new_service: "neuer Dienst für Host",
+    svc_sig_uncommon_service: "Dienst selten für Host ({d} Tage)",
+    svc_sig_rare_service: "Dienst im Netz selten",
+    svc_sig_unidentified: "unbekannter Dienst (Port {p})",
+    svc_sig_unidentified_n: "unbekannter Dienst ({n} Ports)",
+    svc_driver_zero: "auf 0",
+    svc_sig_upload_skew: "Upload-lastig {b} ({p}%)",
+    svc_sig_peer_group: "Vergleich: {s} ({n})",
 };

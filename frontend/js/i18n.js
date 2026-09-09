@@ -42,6 +42,16 @@
         return s;
     }
     window.t = t;
+
+    // t() falls back to the key itself, which is a truthy string, so the common
+    // `t('x.' + value) || value` idiom never reached its fallback and printed
+    // the raw key ("hosts.pc_reboot", or a bare "hosts." for an empty value)
+    // whenever a dictionary entry was missing. tOr() is that idiom, done right:
+    // the dictionary text when there is one, the caller's fallback otherwise.
+    window.tOr = function (key, fallback) {
+        const v = t(key);
+        return v === key ? fallback : v;
+    };
     window.currentLang = () => LANG;
 
     // href → nav label key (sidebar is duplicated across all pages).

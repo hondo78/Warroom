@@ -66,6 +66,7 @@
       <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
       <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
       <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
       <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
     </ul>
   </li>
@@ -149,6 +150,16 @@
                             <li class="nav-item" role="presentation">
                                 <button class="nav-link" data-tab="whitelist" role="tab" onclick="switchBlockedTab('whitelist')">
                                     <i class="bi bi-shield-check"></i> <span data-i18n="blocked.tab_whitelist">Whitelist</span> <span class="badge bg-success ms-1" id="tabCountWhitelist">0</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-tab="knownusers" role="tab" onclick="switchBlockedTab('knownusers')">
+                                    <i class="bi bi-person-check"></i> <span data-i18n="blocked.tab_knownusers">Benutzer-Verzeichnis</span> <span class="badge bg-warning text-dark ms-1" id="tabCountKnownUsers">0</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-tab="burned" role="tab" onclick="switchBlockedTab('burned')">
+                                    <i class="bi bi-fire"></i> <span data-i18n="blocked.tab_burned">Angreifer-Benutzernamen</span> <span class="badge bg-danger ms-1" id="tabCountBurned">0</span>
                                 </button>
                             </li>
                         </ul>
@@ -243,6 +254,148 @@
                                 <table class="table table-sm table-hover align-middle">
                                     <thead><tr><th>IP</th><th data-i18n="blocked.col_source">Quelle</th><th data-i18n="blocked.col_comment">Kommentar</th><th data-i18n="blocked.col_added">Hinzugefügt</th><th data-i18n="common.action">Aktion</th></tr></thead>
                                     <tbody id="whitelistTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Known-user directory + audit trail of the invalid-user rule -->
+                        <div class="blocked-pane" data-pane="knownusers">
+                            <p class="admin-hint" data-i18n-html="blocked.hint_knownusers">
+                                Grundlage der Regel <strong>„Ungültige Benutzer (Sofort-Block)"</strong>: Eine öffentliche IP wird
+                                automatisch gesperrt, sobald sie mehrere <strong>nicht existierende</strong> Benutzernamen durchprobiert.
+                                Als existierend gilt jeder Name, der sich hier schon einmal <strong>erfolgreich angemeldet</strong> hat
+                                (Herkunft „gelernt“). Fehlt ein Konto — etwa ein neuer Kollege, der sich noch nie angemeldet hat —
+                                trage es hier als <strong>gültig</strong> nach, sonst gilt sein Name als erfunden.
+                                Umgekehrt kannst du Sammel-Konten als <strong>ausgeschlossen</strong> markieren, damit sie einen
+                                Angreifer nicht decken.
+                            </p>
+                            <div id="knownUsersStatus" class="mb-2"></div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-4"><input type="text" id="knownUserInput" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_knownuser" placeholder="Benutzername (z. B. neuer.kollege)"></div>
+                                <div class="col-md-3">
+                                    <select id="knownUserStatus" class="form-select form-select-sm">
+                                        <option value="allow" data-i18n="blocked.knownuser_allow">gültig (echtes Konto)</option>
+                                        <option value="deny" data-i18n="blocked.knownuser_deny">ausgeschlossen</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3"><input type="text" id="knownUserComment" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_comment" placeholder="Kommentar (optional)"></div>
+                                <div class="col-md-2 d-grid"><button class="btn btn-warning btn-sm" onclick="knownUserAdd()" data-i18n="blocked.btn_knownuser_add">Eintragen</button></div>
+                            </div>
+                            <div class="filter-row">
+                                <input type="text" data-filter-for="knownUsersTable" class="form-control form-control-sm" data-i18n-placeholder="blocked.filter_knownusers" placeholder="Filter (Benutzername, Herkunft…)">
+                            </div>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr>
+                                        <th data-i18n="blocked.col_username">Benutzername</th>
+                                        <th data-i18n="blocked.col_user_origin">Herkunft</th>
+                                        <th data-i18n="blocked.col_counts">Gilt als echtes Konto</th>
+                                        <th data-i18n="common.action">Aktion</th>
+                                    </tr></thead>
+                                    <tbody id="knownUsersTable"></tbody>
+                                </table>
+                            </div>
+
+                            <h5 class="mt-4" data-i18n="blocked.backtest_title">Regel testen, ohne zu sperren</h5>
+                            <p class="admin-hint" data-i18n="blocked.hint_backtest">
+                                Die Regel greift nur während eines Angriffs — an einem ruhigen Tag ist einer funktionierenden Regel
+                                nicht anzusehen, dass sie funktioniert. Hier läuft dieselbe Auswertung über die zwischengespeicherten
+                                Anmeldeversuche der letzten Stunden, ohne irgendetwas zu sperren: Du siehst, was getroffen worden wäre,
+                                und kannst die Schwellen an echtem Verkehr justieren.
+                            </p>
+                            <div class="row g-2 mb-2 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label" style="font-size:.78rem" data-i18n="blocked.backtest_hours">Zeitraum (Stunden, max. 720 = 30 Tage)</label>
+                                    <input type="number" id="backtestHours" class="form-control form-control-sm" value="72" min="1" max="720">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label" style="font-size:.78rem" data-i18n="blocked.backtest_min_unknown">Nicht existierende Namen ab</label>
+                                    <input type="number" id="backtestMinUnknown" class="form-control form-control-sm" min="1" max="100" placeholder="3">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label" style="font-size:.78rem" data-i18n="blocked.backtest_min_attempts">Fehlversuche ab</label>
+                                    <input type="number" id="backtestMinAttempts" class="form-control form-control-sm" min="1" max="1000" placeholder="3">
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button class="btn btn-outline-primary btn-sm" onclick="runBacktest()"><i class="bi bi-play-circle"></i> <span data-i18n="blocked.btn_backtest">Testlauf</span></button>
+                                </div>
+                            </div>
+                            <div id="backtestSummary" class="mb-2"></div>
+                            <div id="backtestBlockBar" class="mb-2" style="display:none">
+                                <button class="btn btn-danger btn-sm" onclick="blockBacktestHits()">
+                                    <i class="bi bi-shield-slash"></i> <span id="backtestBlockLabel"></span>
+                                </button>
+                                <span class="admin-hint ms-2" data-i18n="blocked.backtest_block_hint">
+                                    Sperrt genau die oben als „würde sperren“ markierten Quellen — die scharfe Regel sieht nur ein kurzes Fenster und holt zurückliegende Angriffe nicht mehr nach.
+                                </span>
+                            </div>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr>
+                                        <th>IP</th>
+                                        <th data-i18n="blocked.col_country">Land</th>
+                                        <th data-i18n="blocked.col_attempts">Versuche</th>
+                                        <th data-i18n="blocked.col_unknown_users">Erratene Namen</th>
+                                        <th data-i18n="blocked.col_verdict">Ergebnis</th>
+                                    </tr></thead>
+                                    <tbody id="backtestTable"></tbody>
+                                </table>
+                            </div>
+
+                            <h5 class="mt-4" data-i18n="blocked.knownuser_decisions">Automatische Sperren dieser Regel</h5>
+                            <p class="admin-hint" data-i18n="blocked.hint_knownuser_decisions">
+                                Jede Sperre mit ihrer Begründung — welche nicht existierenden Benutzernamen probiert wurden und wie oft.
+                            </p>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr>
+                                        <th data-i18n="blocked.col_time">Zeitpunkt</th>
+                                        <th>IP</th>
+                                        <th data-i18n="blocked.col_evidence">Begründung</th>
+                                    </tr></thead>
+                                    <tbody id="knownUserDecisionsTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Burned usernames: the instant-block trigger list -->
+                        <div class="blocked-pane" data-pane="burned">
+                            <p class="admin-hint" data-i18n-html="blocked.hint_burned">
+                                Jeder Benutzername, den eine überführte Angreifer-IP durchprobiert hat, landet hier.
+                                <strong>Jede öffentliche IP, die einen dieser Namen probiert, wird beim ersten Versuch gesperrt</strong> —
+                                ohne Schwelle, ohne LLM. Eine einmal gegen uns eingesetzte Namensliste soll dem nächsten
+                                Angreifer keine Schonfrist mehr verschaffen.
+                                Namen kommen nur über eine IP hierher, die schon die Schwellenregel gerissen hat;
+                                ein Vertipper eines echten Benutzers landet damit nie auf der Liste.
+                            </p>
+                            <div id="burnedStatus" class="mb-2"></div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-4"><input type="text" id="burnedInput" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_burned" placeholder="Benutzername (z. B. admin_support)"></div>
+                                <div class="col-md-3"><input type="text" id="burnedComment" class="form-control form-control-sm" data-i18n-placeholder="blocked.ph_comment" placeholder="Kommentar (optional)"></div>
+                                <div class="col-md-2 d-grid"><button class="btn btn-danger btn-sm" onclick="burnedAdd()" data-i18n="blocked.btn_burned_add">Eintragen</button></div>
+                                <div class="col-md-3 d-grid"><button class="btn btn-outline-warning btn-sm" onclick="burnedBackfill()"><i class="bi bi-clock-history"></i> <span data-i18n="blocked.btn_burned_backfill">Aus Historie lernen</span></button></div>
+                            </div>
+                            <div class="filter-row">
+                                <select id="burnedStatusFilter" class="form-select form-select-sm" style="width:auto" onchange="renderBurnedTable()">
+                                    <option value="" data-i18n="blocked.burned_f_all">Alle</option>
+                                    <option value="active" data-i18n="blocked.burned_f_active">Sperrt sofort</option>
+                                    <option value="ignored" data-i18n="blocked.burned_f_ignored">Stillgelegt</option>
+                                    <option value="shadowed" data-i18n="blocked.burned_f_shadowed">Gilt als echtes Konto</option>
+                                    <option value="fired" data-i18n="blocked.burned_f_fired">Hat schon gesperrt</option>
+                                </select>
+                                <input type="text" data-filter-for="burnedTable" class="form-control form-control-sm" data-i18n-placeholder="blocked.filter_burned" placeholder="Filter (Benutzername, Herkunft…)">
+                            </div>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr>
+                                        <th data-i18n="blocked.col_username">Benutzername</th>
+                                        <th data-i18n="blocked.col_burned_by">Verbrannt durch</th>
+                                        <th data-i18n="blocked.col_block_hits">Sperren dadurch</th>
+                                        <th data-i18n="blocked.col_last_seen">Zuletzt gesehen</th>
+                                        <th data-i18n="blocked.col_status">Status</th>
+                                        <th data-i18n="common.action">Aktion</th>
+                                    </tr></thead>
+                                    <tbody id="burnedTable"></tbody>
                                 </table>
                             </div>
                         </div>

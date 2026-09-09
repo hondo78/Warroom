@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""          # numeric chat or group id
     telegram_poll_interval_seconds: int = 5
 
+    # Which alert goes out over which channel, as JSON
+    # {event: {channel: bool}} — see app.notification_matrix. Empty = built-in
+    # defaults, which reproduce the routing that existed before the matrix.
+    notification_matrix: str = ""
+
     # --- Microsoft Teams command channel ---
     # HMAC secret from the Teams "Outgoing Webhook" (Teams → Warroom commands).
     teams_outgoing_secret: str = ""
@@ -79,6 +84,17 @@ class Settings(BaseSettings):
     firewall_api_user: str = ""                   # API user (must be API-enabled + IP-allowed)
     firewall_api_password: str = ""
     firewall_api_verify_tls: bool = False
+    # SFOS v23 added a JSON REST API next to the XML one. Both are supported:
+    # v23 keeps the XML API, and firewalls below v23 have no REST API at all.
+    #   auto — REST when an API key is set and the firewall answers, else XML
+    #   xml / rest — pin one transport (errors surface instead of falling back)
+    firewall_api_mode: str = "auto"
+    # REST uses a Bearer API key created in the firewall UI, NOT the XML API's
+    # username/password — HTTP Basic is rejected by the REST API with 401.
+    firewall_api_key: str = ""
+    # The /api prefix is required on a real v23 box; the published overview page
+    # omits it and that path 404s. Configurable in case a future firmware moves it.
+    firewall_rest_base_path: str = "/api/firewall-config/v1"
     # Auto-create firewall map pins from the Sophos Central firewall inventory.
     # OFF by default: the SFOS XML API (firewall_api_host) is now the source of
     # truth about the device, and the Central sync otherwise re-creates a
@@ -100,6 +116,29 @@ class Settings(BaseSettings):
     host_nmap_default_profile: str = "quick"  # quick | full | scripts
     host_nmap_timeout_seconds: int = 1800     # per-scan hard cap
     host_nmap_max_concurrent: int = 2         # parallel scans
+
+    # --- live online status (nmap ping-sweep presence) ---
+    host_presence_enabled: bool = False        # scheduled ping-sweep + on-demand
+    host_presence_interval_seconds: int = 300  # how often the sweep runs
+    host_presence_online_seconds: int = 600    # a host counts as online if seen within this
+    # Discovery = ICMP echo + TCP-SYN ping to these ports. Deliberately excludes
+    # 80/443, which firewalls/gateways often SYN-ACK for addresses that have no
+    # real host behind them (false "online"). Uses ports real endpoints expose.
+    host_presence_probe_ports: str = "22,445,3389,139"
+
+    # --- Tor-only Kali box (opt-in; reached over MCP by the agents) ---
+    # A curated, guarded command surface — NOT a raw shell. Every command is
+    # validated (binary allow-list, target allow-list, dangerous-pattern block-
+    # list) both here and authoritatively in the box, egresses only via Tor, and
+    # is audited. Off by default; also requires the `kali` compose profile.
+    kali_mcp_enabled: bool = False
+    kali_api_url: str = "http://tor:8081"
+    kali_api_token: str = ""                  # shared bearer (env KALI_API_TOKEN)
+    # Comma-separated CIDRs / IPs / domain suffixes the box may target. Empty
+    # means NOTHING is scannable (fails closed) — set your authorized scope.
+    kali_target_allowlist: str = ""
+    kali_require_approval: bool = True         # human-approve before execution
+    kali_timeout_seconds: int = 120
 
     # --- M365 login watch ---
     # Alerts (with a revoke-sessions option) when a user signs in from a device
@@ -309,6 +348,76 @@ class Settings(BaseSettings):
     agent_failed_login_user_alert_cooldown_minutes: int = 60  # re-notify the same user at most this often
     # Empty ⇒ DEFAULT_USER_LOGIN_PROMPT in app.agent.
     agent_failed_login_user_system_prompt: str = ""
+
+    # Invalid-username brute-force: blocks IMMEDIATELY and WITHOUT the LLM when a
+    # public source guesses usernames that do not exist here (see
+    # app.login_bruteforce). "Exists" = the name ever authenticated successfully.
+    # Distinct invalid names — not attempt volume — is the trigger: a real user
+    # retrying one password stays at one name, a sprayer crosses the threshold at
+    # once. The rule disarms itself whenever the directory of known users is
+    # unavailable or smaller than login_bruteforce.MIN_DIRECTORY.
+    agent_invalid_user_block_enabled: bool = True
+    agent_invalid_user_min_unknown: int = 3       # distinct non-existent names -> block
+    agent_invalid_user_min_attempts: int = 3      # ... and at least this many failures
+    agent_invalid_user_window_minutes: int = 15   # look-back over the cached attempts
+    agent_invalid_user_interval_seconds: int = 60
+    # Hard ceiling per run: a log-format change that made every name look invalid
+    # could otherwise mass-block. Excess offenders are logged, not blocked.
+    agent_invalid_user_max_blocks_per_run: int = 25
+    # Every name a confirmed sprayer tried is remembered, and any later source
+    # using one is blocked on its FIRST attempt — the same word list making the
+    # rounds should not earn each new IP a fresh grace period. Names only ever
+    # come from sources that already met the thresholds above, so a real user's
+    # mistyped own name (one name, one source) can never end up on the list.
+    agent_invalid_user_burn_enabled: bool = True
+
+    # --- Decoy login page -----------------------------------------------------
+    # A fake portal that records what people type into it. Every submission is
+    # hostile by construction: the page is linked from nowhere and serves no
+    # purpose, so nobody legitimate has a reason to be there. That is what makes
+    # it safe to act on a single submission, unlike a failed login on a real
+    # portal where the first suspect is a forgotten password.
+    honeypot_web_enabled: bool = True
+    # Block the source right away. Anyone typing credentials into a decoy has
+    # already answered the only question worth asking about their intent.
+    honeypot_web_block_source: bool = True
+    # Feed the username into the invalid-username list, so the same name being
+    # tried anywhere else is blocked on sight too.
+    honeypot_web_burn_username: bool = True
+    honeypot_web_alert: bool = True
+    # Recognise a password genuinely in use here when it is submitted to a
+    # decoy. Nobody guesses a real password by accident, so a match means it
+    # leaked. On by default: the check costs one keyed hash and the table is
+    # empty until an operator registers something, so it does nothing until
+    # deliberately used.
+    monitored_password_enabled: bool = True
+    # A login that fails instantly looks fake. Pause before rejecting, the way a
+    # real backend checking a directory would.
+    honeypot_web_delay_ms: int = 900
+    # Record bare page/API requests too — reconnaissance, logged but not acted
+    # on: a request has innocent explanations (a crawler, a monitor, your own
+    # browser) that a typed password does not.
+    honeypot_web_log_probes: bool = True
+    honeypot_web_probe_dedup_minutes: int = 10
+    # Whether the MCP tools hand out captured passwords in the clear. Off by
+    # default for the same reason they were taken out of the Telegram alert: at
+    # the other end of MCP sits a language model, possibly someone else's, and a
+    # plaintext credential should not leave this system by accident. Everything
+    # else about a capture is exposed either way — the analysis rarely needs the
+    # password itself, only its shape.
+    mcp_honeypot_reveal_passwords: bool = False
+    # Run a live OSINT lookup on the source of a decoy capture. OFF by default,
+    # and that default is not timidity: the decoy currently takes ~80 hits an
+    # hour from almost as many distinct addresses, so every capture would be a
+    # fresh provider call and the daily quotas would be gone before lunch. Turn
+    # it on deliberately, for a quiet period or a specific investigation.
+    honeypot_web_osint_enabled: bool = False
+
+    # Which OSINT provider may be queried from which part of the system, as
+    # JSON: {"<context>": {"<provider>": true|false}}. Empty means the built-in
+    # defaults in app.osint apply; anything set here is merged on top, so a
+    # partial matrix only overrides what it mentions. See osint.CONTEXTS.
+    osint_provider_matrix: str = ""
 
     # Triage prompt — used by the manual / OSINT-initiated LLM triage path.
     # Empty ⇒ fall back to DEFAULT_TRIAGE_PROMPT in app.agent.

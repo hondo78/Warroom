@@ -6,6 +6,36 @@ services:
     # aggregations once firewall_logs grows large (DiskFullError on the
     # /api/map/attacks query at ~14M rows / 41GB).
     shm_size: 1g
+    # Postgres' out-of-the-box defaults (shared_buffers 128MB, work_mem 4MB)
+    # are sized for a toy database. firewall_logs alone is ~113GB / 55M rows,
+    # so every dashboard aggregate went to disk and spilled its sorts/hashes to
+    # temp files — single queries ran for minutes and exhausted the backend's
+    # connection pool. Values stay modest because this host shares its RAM with
+    # the local LLM stack.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - random_page_cost=1.1              # SSD, not spinning rust
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - max_parallel_workers_per_gather=4
+      - -c
+      - max_connections=150
+      # Nothing may pin a connection indefinitely — see app/database.py. This is
+      # the server-side backstop for clients that set no timeout of their own.
+      - -c
+      - idle_in_transaction_session_timeout=120000
+      - -c
+      - track_activity_query_size=4096
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-warroom}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -91,6 +121,10 @@ services:
       - .env
     ports:
       - "8448:80"
+      # Decoy login on its own port: served at the root, nothing else reachable
+      # through it. Separate from 8448 so the honeypot can be exposed without
+      # exposing the dashboard along with it.
+      - "${HONEYPOT_PORT:-8443}:8081"
     depends_on:
       - backend
 
@@ -165,6 +199,37 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # --- Tor-only Kali box (opt-in: `docker compose --profile kali up -d`) ------
+  # The tor gateway forces all of the Kali container's traffic through Tor; Kali
+  # exposes only a guarded command API (never a shell) reached by the backend at
+  # http://tor:8081. Both are gated behind the `kali` compose profile AND the
+  # kali_mcp_enabled feature flag, so nothing runs unless explicitly enabled.
+  tor:
+    build: ./kali/tor
+    profiles: ["kali"]
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN            # required to install the transparent-proxy iptables
+
+  kali:
+    build: ./kali/box
+    profiles: ["kali"]
+    restart: unless-stopped
+    # Share the tor gateway's network namespace → all egress is Tor-only, and
+    # the command API is reachable via the tor service name on the warroom net.
+    network_mode: "service:tor"
+    environment:
+      KALI_API_TOKEN: ${KALI_API_TOKEN:-}
+      KALI_API_PORT: "8081"
+      # The box's own copy of the target allow-list. The backend already sends
+      # the operator's list with every request, but a list the caller supplies
+      # is a limit the caller can widen; this one it cannot. Leave empty to keep
+      # the caller's list as the only check.
+      KALI_TARGET_ALLOWLIST: ${KALI_TARGET_ALLOWLIST:-}
+    depends_on:
+      tor:
+        condition: service_started
 
 volumes:
   postgres_data:

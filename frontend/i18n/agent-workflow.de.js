@@ -114,4 +114,6 @@ window.I18N.de.agentWorkflow = {
         agent_failed_login_distributed_attempts: "Versuche/​/24 (Richtwert)",
         agent_failed_login_distributed_min_ips: "Distinct-IPs/​/24",
     },
+    noPrompt: "ohne LLM",
+    noPromptHint: "Dieser Prozess fragt kein Sprachmodell: Die Entscheidung ist eine feste Regel (der Benutzername existiert oder existiert nicht). Deshalb gibt es keinen System-Prompt — und deshalb sperrt die Regel sofort, ohne Modell-Antwort und ohne Freigabeschritt.",
 };

@@ -65,6 +65,7 @@
       <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
       <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
       <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
       <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
     </ul>
   </li>
@@ -150,7 +151,95 @@
                     </div>
                 </div>
 
+                <!-- Decoy login page: captured credentials (plaintext, on purpose) -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                        <h3 class="card-title mb-0" data-i18n="honeypot.creds_title">🔑 Köder-Login: erbeutete Zugangsdaten</h3>
+                        <div class="ms-auto d-flex gap-2 flex-wrap align-items-center">
+                            <input type="text" id="credSearch" class="form-control form-control-sm" style="width:190px" data-i18n-placeholder="honeypot.creds_search" placeholder="Suche (Benutzer, Passwort, IP)" onkeydown="if(event.key==='Enter')loadCredentials()">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="loadCredentials()"><i class="bi bi-arrow-clockwise"></i></button>
+                            <div class="form-check form-switch d-inline-flex align-items-center gap-1 mb-0 me-2" style="font-size:.82rem">
+                                <input class="form-check-input mt-0" type="checkbox" id="credOsint" onchange="toggleCredOsint(this)">
+                                <label class="form-check-label" for="credOsint" data-i18n="honeypot.creds_osint">OSINT-Prüfung</label>
+                            </div>
+                            <a class="btn btn-outline-primary btn-sm" href="/api/honeypot/logins/export"><i class="bi bi-download"></i> <span data-i18n="honeypot.creds_export">Export (CSV)</span></a>
+                            <button class="btn btn-outline-danger btn-sm" onclick="purgeCredentials()"><i class="bi bi-trash"></i> <span data-i18n="honeypot.creds_purge">Leeren</span></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-secondary mb-2" style="font-size:.82rem" data-i18n-html="honeypot.creds_hint">
+                            Die Köderseite liegt unter <code>/portal.html</code>, ist von nirgends verlinkt und gewährt keinen Zugang.
+                            Wer dort etwas eintippt, hat damit die einzige Frage nach seiner Absicht bereits beantwortet — deshalb genügt
+                            <strong>eine</strong> Eingabe, um die Quelle zu sperren und den Benutzernamen auf die Angreifer-Liste zu setzen.
+                            <strong>Die Passwörter stehen hier im Klartext</strong>, und genau das ist der Zweck: Du siehst, ob geleakte
+                            Zugangsdaten eurer Domain durchprobiert werden und ob ein Versuch einem echten Passwort gefährlich nahe kommt.
+                        </p>
+                        <div id="credStatus" class="mb-2"></div>
+                        <div class="table-scroll">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr id="credSortRow">
+                                    <th data-sort="created_at" style="cursor:pointer;user-select:none"><span data-i18n="common.time">Zeit</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="kind" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.creds_col_kind">Typ</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="username" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.creds_col_user">Benutzername</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="password" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.creds_col_pass">Passwort</span> <span class="sort-ind"></span></th>
+                                    <th data-sort="source_ip" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.creds_col_src">Quelle</span> <span class="sort-ind"></span></th>
+                                    <th data-i18n="honeypot.creds_col_osint">OSINT</th>
+                                    <th data-sort="action" style="cursor:pointer;user-select:none"><span data-i18n="honeypot.creds_col_action">Reaktion</span> <span class="sort-ind"></span></th>
+                                </tr></thead>
+                                <tbody id="credTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Process whitelist (file honeypots) -->
+                <!-- Registered real passwords: fingerprints only, never plaintext -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                        <h3 class="card-title mb-0" data-i18n="honeypot.mp_title">🚨 Überwachte echte Passwörter</h3>
+                        <span class="ms-auto" id="mpKeyWarn"></span>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-secondary mb-2" style="font-size:.82rem" data-i18n-html="honeypot.mp_hint">
+                            Hinterlegt hier Passwörter, die bei euch <b>wirklich in Gebrauch</b> sind. Warroom speichert
+                            davon nur einen verschlüsselten Fingerabdruck — niemals das Passwort selbst. Taucht eines
+                            davon in einem Köder-Login auf, war es kein Raten, sondern ein Leak: das löst sofort Alarm aus.
+                            Ist der Benutzername zusätzlich ein echtes Konto, wird daraus ein <b>kritischer</b> Alarm.
+                        </p>
+                        <div class="row g-1 mb-2 align-items-center">
+                            <div class="col-md-4"><input type="text" id="mpLabel" class="form-control form-control-sm" data-i18n-placeholder="honeypot.mp_label_ph" placeholder="Bezeichnung (z. B. Domain-Admin 2026)"></div>
+                            <div class="col-md-4"><input type="password" id="mpPassword" class="form-control form-control-sm" autocomplete="new-password" data-i18n-placeholder="honeypot.mp_pw_ph" placeholder="Passwort (wird nicht gespeichert)"></div>
+                            <div class="col-md-4 text-end"><button class="btn btn-primary btn-sm" onclick="addMonitoredPassword()"><i class="bi bi-shield-lock"></i> <span data-i18n="honeypot.mp_add">Hinterlegen</span></button></div>
+                        </div>
+                        <div id="mpStatus" class="mb-2"></div>
+                        <div class="table-scroll">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr>
+                                    <th data-i18n="honeypot.mp_col_label">Bezeichnung</th>
+                                    <th data-i18n="honeypot.mp_col_state">Status</th>
+                                    <th data-i18n="honeypot.mp_col_hits">Treffer</th>
+                                    <th data-i18n="honeypot.mp_col_last">Zuletzt</th>
+                                    <th data-i18n="common.action">Aktion</th>
+                                </tr></thead>
+                                <tbody id="mpTable"></tbody>
+                            </table>
+                        </div>
+                        <h4 class="mt-3" style="font-size:.95rem" data-i18n="honeypot.mp_hits_title">Alarme</h4>
+                        <div class="table-scroll">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr>
+                                    <th data-i18n="honeypot.mp_col_sev">Stufe</th>
+                                    <th data-i18n="honeypot.mp_col_when">Zeit</th>
+                                    <th data-i18n="honeypot.mp_col_user">Benutzer</th>
+                                    <th data-i18n="honeypot.mp_col_src">Quelle</th>
+                                    <th data-i18n="honeypot.mp_col_which">Passwort</th>
+                                </tr></thead>
+                                <tbody id="mpHitsTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card mb-3">
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="honeypot.wl_title">🛡️ Prozess-Whitelist (Datei-Honeypots)</h3></div>
                     <div class="card-body">

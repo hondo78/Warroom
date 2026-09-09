@@ -24,6 +24,7 @@ import httpx
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text
 
+from app import login_bruteforce
 from app import login_cache
 from app import waf_path_cache
 from app.config import settings
@@ -62,6 +63,7 @@ _SOURCE_LABELS: dict[str, str] = {
     "waf":   "WAF",
     "ips":   "IPS",
     "failed_login": "Login",
+    "invalid_user": "Ungültiger Benutzer",
     "triage": "Triage",
     "event": "Event",
     "anomaly": "Anomaly",
@@ -1546,7 +1548,7 @@ async def _maybe_alarm_block_burst() -> None:
                 f"Entscheidung zurücknehmen (der Agent verlernt das Muster dann)."
             )
         from app.notifications import notify
-        await notify(html, title="Warroom · Agent-Burst")
+        await notify(html, title="Warroom · Agent-Burst", event="agent_burst")
         logger.warning(f"agent: block-burst alarm — {count} auto-blocks in {window_min}min "
                        f"(threshold {threshold})")
     except Exception as e:  # never let the alarm break execution
@@ -2086,7 +2088,7 @@ async def _llm_decide_rule(
             # If shodan_auto_every_lookup is on, lookup() already queried Shodan;
             # otherwise spend a credit here only when the cheap providers flag the
             # IP as malicious (and Shodan wasn't already fetched).
-            osint = await osint_lookup(ip, force=False, allow_shodan=False)
+            osint = await osint_lookup(ip, force=False, allow_shodan=False, context="agent")
             if (settings.shodan_auto_on_malicious
                     and not _has_shodan_data(osint.get("shodan"))
                     and looks_malicious(osint, settings.shodan_auto_abuse_threshold)):
@@ -2182,11 +2184,11 @@ async def triage_value(
     try:
         from app import osint as osint_mod
         if value_type == "ip" and _is_public_ip(value):
-            osint = await osint_mod.lookup(value)
+            osint = await osint_mod.lookup(value, context="agent")
         elif value_type == "domain":
-            osint = await osint_mod.lookup_domain(value)
+            osint = await osint_mod.lookup_domain(value, context="agent")
         elif value_type == "url":
-            osint = await osint_mod.lookup_url(value)
+            osint = await osint_mod.lookup_url(value, context="agent")
     except Exception as e:
         logger.warning(f"agent[triage]: OSINT lookup for {value} failed: {e}")
         osint = {"error": str(e)[:200]}
@@ -2657,7 +2659,8 @@ async def agent_connection_anomaly_loop(force: bool = False) -> None:
         fresh.add(dst)   # don't re-alarm the same dst twice in one sweep
         processed += 1
         if sent < cap:
-            await notify(_connanom_alert_html(a, lang), title="Warroom · C2/Exfil")
+            await notify(_connanom_alert_html(a, lang), title="Warroom · C2/Exfil",
+                         event="conn_anomaly")
             sent += 1
     logger.info(f"agent[conn-anomaly]: {len(hits)} hit(s), {processed} new verdict(s), {sent} alarm(s)")
 
@@ -2910,7 +2913,7 @@ async def agent_connection_triage_loop(force: bool = False) -> None:
         if _is_public_ip(dst):
             try:
                 from app.osint import lookup as osint_lookup
-                osint = await osint_lookup(dst, force=False, allow_shodan=False)
+                osint = await osint_lookup(dst, force=False, allow_shodan=False, context="agent")
             except Exception as e:
                 osint = {"error": str(e)[:200]}
         src_host = (host_map.get(a["src"]) or {}).get("hostname")
@@ -2923,7 +2926,8 @@ async def agent_connection_triage_loop(force: bool = False) -> None:
         if (do_alarm and assess["verdict"] in ("malicious", "suspicious")
                 and prior.get(dst) != assess["verdict"]):
             await notify(_conntriage_alert_html(a, assess, lang),
-                         title="Warroom · Verbindungs-Bewertung")
+                         title="Warroom · Verbindungs-Bewertung",
+                         event="conn_triage")
             alarms += 1
     logger.info(f"agent[conn-triage]: assessed {processed} connection(s), {alarms} alarm(s)")
 
@@ -3005,9 +3009,14 @@ async def _topup_login_cache(now: datetime) -> None:
     await login_cache.add_attempts(attempts, now)
 
 
-async def _fallback_window_attempts(now: datetime, dist_minutes: int) -> list[dict]:
-    """Direct Postgres read of the analysis window — used only when the Redis
-    cache is unavailable (so the sweep still works)."""
+async def _fallback_window_attempts(now: datetime, dist_minutes: int,
+                                    limit: int = _DIST_TOPUP_MAX) -> list[dict]:
+    """Direct Postgres read of the analysis window.
+
+    Used when the Redis cache is unavailable (so the sweep still works), and by
+    the backtest for ranges older than the cache keeps. ``limit`` defaults to the
+    per-loop top-up cap; the backtest raises it, since it deliberately looks
+    further back than one loop ever does."""
     since = now - timedelta(minutes=max(1, dist_minutes))
     async with async_session() as db:
         rows = (await db.execute(text(f"""
@@ -3019,7 +3028,7 @@ async def _fallback_window_attempts(now: datetime, dist_minutes: int) -> list[di
               AND {_DIST_EXTERNAL_FILTER}
             ORDER BY created_at DESC
             LIMIT :lim
-        """), {"since": since, "lim": _DIST_TOPUP_MAX})).fetchall()
+        """), {"since": since, "lim": max(1, limit)})).fetchall()
     return [
         {"uid": r[0], "ip": r[1], "user": r[2], "component": r[3],
          "country": r[4], "ts": r[5].isoformat() if r[5] else None}
@@ -3315,7 +3324,12 @@ async def _notify_user_endangered(user: str, classification: str, total: int,
         lines.append(f"<b>Länder:</b> {html.escape(', '.join(countries))}")
     if reasoning:
         lines.append("\n" + html.escape(str(reasoning)[:600]))
-    await telegram_client.send_notification("\n".join(lines))
+    # Through the fan-out, not straight at Telegram: the routing matrix decides
+    # where this goes. Its default keeps it Telegram-only, so today's behaviour
+    # is unchanged until an operator says otherwise.
+    from app.notifications import notify as _notify
+    await _notify("\n".join(lines), title="Warroom · Konto unter Beschuss",
+                  event="user_endangered")
 
 
 async def _user_login_bruteforce_sweep(now: datetime) -> None:
@@ -3505,6 +3519,240 @@ async def agent_failed_login_loop(window_minutes: int | None = None, force: bool
             "subnet_brute_force_indicator": False,
         }
         await _llm_decide_rule(source_type="failed_login", ip=ip, context=context)
+
+
+# --- Invalid-username brute-force: immediate, rule-based block ----------------
+# Deliberately bypasses the LLM. Guessing usernames that do not exist here is not
+# a judgement call, and the whole point of the rule is speed: the sprayer is
+# blocked while the run is still going, not after a model round-trip and an
+# approval prompt. Everything it does is still recorded as an AgentDecision (with
+# status "executed") so the action shows up in the agent history like any other.
+
+
+async def agent_invalid_user_block_loop(force: bool = False) -> None:
+    """Block public sources that tried several **non-existent** usernames.
+
+    Reads its evidence from the Redis login cache (no extra scan of the 40 GB
+    ``firewall_logs``) and refuses to act unless the known-user directory is
+    healthy — see :mod:`login_bruteforce` for the interlocks."""
+    if not settings.agent_invalid_user_block_enabled and not force:
+        return
+
+    now = datetime.now(timezone.utc)
+    # `or` would read a configured 0 as "unset" and substitute the default —
+    # the opposite of what an operator who typed 0 asked for. None is unset;
+    # everything else is theirs, clamped to a value the rule can work with.
+    def _setting(value, default: int) -> int:
+        return max(1, int(default if value is None else value))
+
+    window = _setting(settings.agent_invalid_user_window_minutes, 15)
+    min_unknown = _setting(settings.agent_invalid_user_min_unknown, 3)
+    min_attempts = _setting(settings.agent_invalid_user_min_attempts, 3)
+    max_blocks = _setting(settings.agent_invalid_user_max_blocks_per_run, 25)
+
+    # Keep the attempt cache and the user directory current, then judge. The
+    # directory is read WITH the session so operator overrides (allow/deny) are
+    # applied — a name an operator added counts as real immediately.
+    await _topup_login_cache(now)
+    async with async_session() as db:
+        await login_bruteforce.refresh_directory(db, now)
+        known = await login_bruteforce.known_users(db)
+    if known is None:
+        # Directory unavailable or too small — treating every name as invalid
+        # would block the world, so the rule stays disarmed.
+        return
+
+    attempts = await login_cache.recent(window, now)
+    if attempts is None:
+        logger.warning("agent[invalid_user]: login cache unavailable — skipping run")
+        return
+
+    # Rule 1 — discovery. Conservative on purpose: a source must try several
+    # non-existent names before it counts, which is what keeps a real user's
+    # single mistyped name from ever looking like an attack.
+    offenders = login_bruteforce.evaluate(
+        attempts, known,
+        min_unknown_users=min_unknown, min_attempts=min_attempts,
+    )
+
+    # Everything an offender tried joins the burn list. Feeding it only from
+    # confirmed sprays is the whole safety argument for rule 2 below.
+    if offenders and settings.agent_invalid_user_burn_enabled:
+        async with async_session() as db:
+            # Whitelisting a source has to cover what it teaches the burn list
+            # too. The block loop below skips whitelisted IPs, but the burn ran
+            # before it: names an authorised scanner tried were written to the
+            # global list anyway, and rule 2 then blocked the next innocent
+            # source that used one on its first attempt.
+            burn_wl = set((await db.execute(
+                select(WhitelistedIp.ip).where(
+                    WhitelistedIp.ip.in_([o["ip"] for o in offenders]))
+            )).scalars().all())
+            burnable = [o for o in offenders if o["ip"] not in burn_wl]
+            burned_now = (await login_bruteforce.burn_from_offenders(db, burnable, now)
+                          if burnable else 0)
+        if burned_now:
+            logger.info(f"agent[invalid_user]: burn list +{burned_now} name(s) "
+                        f"from {len(burnable)} spraying source(s)")
+
+    # Rule 2 — propagation. A word list already used against us buys the next
+    # source no grace period: one attempt with a burned name is enough.
+    burned_hits: list[dict] = []
+    if settings.agent_invalid_user_burn_enabled:
+        async with async_session() as db:
+            # `known` is passed so that declaring a name a real account in the
+            # directory disarms it here too — see active_burned().
+            burned = await login_bruteforce.active_burned(db, known)
+        burned_hits = login_bruteforce.match_burned(attempts, burned)
+
+    # Merge on IP. A source can trip both rules; the threshold record carries the
+    # richer evidence, so it wins and the source is reported once.
+    seen_ips = {o["ip"] for o in offenders}
+    candidates = offenders + [h for h in burned_hits if h["ip"] not in seen_ips]
+    if not candidates:
+        return
+
+    if len(candidates) > max_blocks:
+        logger.warning(
+            f"agent[invalid_user]: {len(candidates)} offenders exceed the per-run "
+            f"cap of {max_blocks} — blocking the {max_blocks} worst, skipping "
+            f"{len(candidates) - max_blocks}. Check for a log-format change."
+        )
+        # "The worst" has to mean something: the list is rule 1's output followed
+        # by rule 2's, so cutting it unsorted kept whichever sources evaluate()
+        # happened to emit first and dropped every burned-username hit, however
+        # heavy. Rank by the evidence both rules carry.
+        candidates.sort(key=lambda o: (o.get("unknown_user_count") or 0,
+                                       o.get("attempts") or 0), reverse=True)
+        candidates = candidates[:max_blocks]
+    offenders = candidates
+
+    ips = [o["ip"] for o in offenders]
+    blocked: list[dict] = []
+    async with async_session() as db:
+        wl = set((await db.execute(
+            select(WhitelistedIp.ip).where(WhitelistedIp.ip.in_(ips))
+        )).scalars().all())
+        existing = set((await db.execute(
+            select(BlockedIp.ip).where(BlockedIp.ip.in_(ips))
+        )).scalars().all())
+
+        for o in offenders:
+            ip = o["ip"]
+            if ip in wl:
+                logger.info(f"agent[invalid_user]: {ip} whitelisted — not blocked")
+                continue
+            if ip in existing:
+                continue
+            comment = (login_bruteforce.burned_block_comment(o)
+                       if o.get("trigger") == "burned_username"
+                       else login_bruteforce.block_comment(o))
+            db.add(BlockedIp(
+                ip=ip, comment=comment,
+                blocked_at=now, blocked_by="agent", source="invalid_user",
+            ))
+            blocked.append(o)
+        if blocked:
+            await db.commit()
+
+    if not blocked:
+        return
+
+    # Count which burned names earned their place, so a list entry that never
+    # fires is visible as such instead of sitting there forever unquestioned.
+    burned_blocked = [o for o in blocked if o.get("trigger") == "burned_username"]
+    if burned_blocked:
+        async with async_session() as db:
+            await login_bruteforce.record_burn_hits(db, burned_blocked)
+
+    async with async_session() as db:
+        for o in blocked:
+            db.add(_invalid_user_decision_record(o, window))
+        await db.commit()
+
+    logger.info(f"agent[invalid_user]: blocked {len(blocked)} source(s) guessing "
+                f"non-existent usernames")
+    await _notify_invalid_user_blocks(blocked, window)
+
+
+def _invalid_user_decision_record(offender: dict, window: int) -> AgentDecision:
+    """Build the agent-history row for one block. Written as already-executed:
+    the rule acted, so a pending/approval row would misrepresent what happened."""
+    return AgentDecision(
+        alert_id=None,
+        source_type="invalid_user",
+        source_ip=offender["ip"],
+        action="block_ip",
+        action_args={"ip": offender["ip"], "context": {
+            "rule": "invalid-username-bruteforce",
+            "trigger": offender.get("trigger", "threshold"),
+            "window_minutes": window,
+            "attempts": offender["attempts"],
+            "users_tried": offender["users_tried"],
+            "unknown_user_count": offender["unknown_user_count"],
+            "unknown_users": offender["unknown_users"],
+            "components": offender["components"],
+            "country": offender["country"],
+        }},
+        reasoning=(
+            (f"Loginversuch mit einem Benutzernamen, der bereits aus einem "
+             f"Brute-Force-Spray gegen dieses Netz bekannt ist "
+             f"({', '.join(offender['unknown_users'][:5])}). Ein Versuch genügt: "
+             f"Der Name steht auf der Liste, weil ihn zuvor eine Quelle benutzt "
+             f"hat, die reihenweise erfundene Konten durchprobiert hat.")
+            if offender.get("trigger") == "burned_username" else
+            (f"{offender['unknown_user_count']} nicht existierende Benutzernamen in "
+             f"{offender['attempts']} Fehlversuchen innerhalb von {window} Minuten "
+             f"({', '.join(offender['unknown_users'][:5])}). Kein gültiges Konto "
+             f"betroffen — Regel greift ohne LLM.")
+        ),
+        status="executed",
+        decided_by="agent",
+        model=None,
+        decided_at=datetime.now(timezone.utc),
+    )
+
+
+async def _notify_invalid_user_blocks(blocked: list[dict], window: int) -> None:
+    """One aggregated alert per run — a spraying wave hits many IPs at once and
+    one message per IP would bury the operator.
+
+    The usernames in this message are attacker-chosen, so they are escaped: a
+    name containing "<" or "&" would otherwise make Telegram reject the whole
+    message (HTML parse mode), and the only alert about an ongoing attack would
+    vanish into a log warning — at the exact moment it matters most."""
+    import html
+
+    from app.notifications import notify
+
+    lines = [
+        f"<b>Brute-Force geblockt</b> · {len(blocked)} Quelle(n) mit "
+        f"nicht existierenden Benutzernamen (letzte {window} min)",
+    ]
+    for o in blocked[:10]:
+        names = html.escape(", ".join(o["unknown_users"][:4]))
+        country = f" [{html.escape(str(o['country']))}]" if o.get("country") else ""
+        # The two rules justify a block very differently; a single wording would
+        # make a one-attempt block look like a full spray.
+        if o.get("trigger") == "burned_username":
+            lines.append(
+                f"• <code>{html.escape(str(o['ip']))}</code>{country} — bekannter "
+                f"Angreifer-Benutzername in {o['attempts']} Versuch(en): {names}"
+            )
+        else:
+            lines.append(
+                f"• <code>{html.escape(str(o['ip']))}</code>{country} — {o['unknown_user_count']} "
+                f"ungültige Benutzer in {o['attempts']} Versuchen: {names}"
+            )
+    if len(blocked) > 10:
+        lines.append(f"… und {len(blocked) - 10} weitere")
+    try:
+        # Newlines, not <br>: Telegram's HTML parse mode accepts only a small tag
+        # set and rejects <br> outright. Every other alert here joins with \n.
+        await notify("\n".join(lines), title="Warroom · Brute-Force geblockt",
+                     event="invalid_user_block")
+    except Exception as e:
+        logger.warning(f"agent[invalid_user]: notification failed: {e}")
 
 
 async def test_connection() -> dict[str, Any]:

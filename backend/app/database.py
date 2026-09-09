@@ -7,13 +7,137 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(settings.database_url, echo=False, pool_size=10)
-async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+# --- Connection pools -------------------------------------------------------
+# Two separate pools on purpose. Everything used to share one 10+10 pool, and
+# the heavy background work (cache warmers, agent loops, rollups, collectors)
+# competed for the very same connections the HTTP request path needs. Once the
+# multi-minute firewall_logs aggregates filled it up, *every* endpoint — even
+# trivial ones — died with "QueuePool limit of size 10 overflow 10 reached",
+# which is what made the dashboard show partial or no data at all.
+#
+# statement_timeout is the second half of the fix: without it a query orphaned
+# by a client disconnect (nginx 504 / browser navigation) keeps running server
+# side and pins its connection for many minutes. Postgres now kills it.
+#
+#   request pool  — small, fail-fast, hard 45s statement cap (nginx gives up at
+#                   60s anyway, so a longer query can only ever be wasted work)
+#   background    — heavier queries allowed, but they can never starve requests
+
+def _engine(pool_size: int, max_overflow: int, pool_timeout: int,
+            statement_timeout_ms: int, app_name: str,
+            idle_in_tx_ms: int = 60_000):
+    return create_async_engine(
+        settings.database_url,
+        echo=False,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+        connect_args={
+            "server_settings": {
+                "statement_timeout": str(statement_timeout_ms),
+                "idle_in_transaction_session_timeout": str(idle_in_tx_ms),
+                "application_name": app_name,
+            },
+            "command_timeout": statement_timeout_ms / 1000 + 15,
+        },
+    )
+
+
+# Request path: Depends(get_db). Fail fast (5s) — an immediate error beats a
+# 30s block that ties up the worker and times out in the browser regardless.
+engine = _engine(
+    pool_size=20, max_overflow=10, pool_timeout=5,
+    statement_timeout_ms=45_000, app_name="warroom-api",
+)
+
+# Background path: cache warmers, schedulers, collectors, agent loops. These
+# hold one transaction across a whole batch and do network work inside it —
+# honeypot.ingest_events enriches up to 500 events with GeoIP/OSINT per commit —
+# so the request path's 60s idle-in-transaction cap would abort the batch (and
+# lose all of it) on one cold provider lookup. Still bounded: an abandoned
+# transaction cannot sit open indefinitely.
+bg_engine = _engine(
+    pool_size=10, max_overflow=10, pool_timeout=30,
+    statement_timeout_ms=600_000, app_name="warroom-bg",
+    idle_in_tx_ms=300_000,
+)
+
+# `async_session` is what all background modules import; binding it to the
+# background pool moves them off the request path without touching 100+ call
+# sites.
+async_session = async_sessionmaker(bg_engine, class_=AsyncSession, expire_on_commit=False)
+request_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # Idempotent migrations applied at every backend startup. Each statement must
 # tolerate being re-run; new columns use ADD COLUMN IF NOT EXISTS.
 _MIGRATIONS = [
+    # Operator overrides for the invalid-username brute-force rule: names that
+    # count as real accounts even without a successful login yet ('allow'), and
+    # names that must never count as real ('deny', e.g. shared/generic logins).
+    """
+    CREATE TABLE IF NOT EXISTS known_user_overrides (
+        user_name VARCHAR(255) PRIMARY KEY,
+        status VARCHAR(10) NOT NULL DEFAULT 'allow',
+        comment TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+        created_by VARCHAR(64)
+    )
+    """,
+    # Credentials typed into the decoy login page. Passwords are stored in the
+    # clear on purpose — see models.HoneypotLogin for why a hash would defeat
+    # the entire point of the page.
+    """
+    CREATE TABLE IF NOT EXISTS honeypot_logins (
+        id BIGSERIAL PRIMARY KEY,
+        username VARCHAR(255),
+        password TEXT,
+        source_ip VARCHAR(45),
+        user_agent TEXT,
+        path VARCHAR(255),
+        referer TEXT,
+        attacker_country VARCHAR(100),
+        attacker_city VARCHAR(255),
+        attacker_asn VARCHAR(50),
+        attacker_org VARCHAR(255),
+        action VARCHAR(40),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_honeypot_logins_created ON honeypot_logins(created_at DESC)",
+    # Probes (a bare GET on the decoy) share the table with credential
+    # submissions: same source, same enrichment, same view — only the weight
+    # differs, and that is what this column carries.
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'login'",
+    # The request body verbatim. Field names differ per portal and per tool, so
+    # parsing can always miss something — the raw payload cannot.
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS raw_body TEXT",
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS method VARCHAR(10)",
+    # Filled in afterwards by a background lookup, only when the operator has
+    # switched OSINT on — see honeypot_login.enrich_async for why it cannot run
+    # inline.
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS osint JSONB",
+    "CREATE INDEX IF NOT EXISTS idx_honeypot_logins_ip ON honeypot_logins(source_ip)",
+    # Usernames proven to come from a brute-force spray. Any source using one is
+    # blocked on the first attempt — see models.InvalidUsername for why a name
+    # only lands here via an IP that already tripped the threshold rule.
+    """
+    CREATE TABLE IF NOT EXISTS invalid_usernames (
+        user_name VARCHAR(255) PRIMARY KEY,
+        first_seen TIMESTAMP WITH TIME ZONE DEFAULT now(),
+        last_seen TIMESTAMP WITH TIME ZONE,
+        burned_by_ip VARCHAR(45),
+        block_hits INTEGER NOT NULL DEFAULT 0,
+        origin VARCHAR(10) NOT NULL DEFAULT 'learned',
+        status VARCHAR(10) NOT NULL DEFAULT 'active',
+        comment TEXT,
+        created_by VARCHAR(64)
+    )
+    """,
+    # The block path looks up "is this name burned and active?" on every loop.
+    "CREATE INDEX IF NOT EXISTS idx_invalid_usernames_status ON invalid_usernames(status)",
     "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP WITH TIME ZONE",
     "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged_action VARCHAR(50)",
     """
@@ -681,6 +805,110 @@ _MIGRATIONS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_host_port_events_ip ON host_port_events(ip, detected_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_host_port_events_time ON host_port_events(detected_at DESC)",
+    # --- Tor-only Kali box: command audit + human-in-the-loop -----------------
+    """
+    CREATE TABLE IF NOT EXISTS kali_commands (
+        id BIGSERIAL PRIMARY KEY,
+        command TEXT NOT NULL,
+        targets TEXT,
+        actor VARCHAR(60),
+        status VARCHAR(12) NOT NULL DEFAULT 'pending',
+        reason TEXT,
+        exit_code INTEGER,
+        stdout TEXT,
+        stderr TEXT,
+        tor_exit_ip VARCHAR(45),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        decided_at TIMESTAMP WITH TIME ZONE,
+        decided_by VARCHAR(60)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_kali_commands_created ON kali_commands(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_kali_commands_status ON kali_commands(status, created_at DESC)",
+    # Live online status of internal hosts (nmap ping-sweep presence). Kept
+    # separate from host_inventory so any internal IP (also NetFlow-only, never
+    # port-scanned) can carry a last-online timestamp.
+    """
+    CREATE TABLE IF NOT EXISTS host_presence (
+        ip VARCHAR(45) PRIMARY KEY,
+        last_online TIMESTAMP WITH TIME ZONE,
+        last_checked TIMESTAMP WITH TIME ZONE
+    )
+    """,
+    # Current online state at the last check (drives transition detection).
+    "ALTER TABLE host_presence ADD COLUMN IF NOT EXISTS online BOOLEAN",
+    # Per-host online/offline transition log — compact history for availability
+    # (%) and flapping analysis over time.
+    """
+    CREATE TABLE IF NOT EXISTS host_presence_events (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        online BOOLEAN NOT NULL,
+        at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_presence_events_ip ON host_presence_events(ip, at)",
+    "CREATE INDEX IF NOT EXISTS idx_host_presence_events_at ON host_presence_events(at)",
+    # Fleet snapshot per sweep — the online-count time series for the trend chart.
+    """
+    CREATE TABLE IF NOT EXISTS host_presence_snapshots (
+        id BIGSERIAL PRIMARY KEY,
+        checked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        total INTEGER NOT NULL DEFAULT 0,
+        online INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_host_presence_snapshots_at ON host_presence_snapshots(checked_at DESC)",
+    # --- Partial indexes for the WAF / IPS dashboards -------------------------
+    # These predicates are extremely selective: over a 7-day window only ~13k of
+    # ~29M firewall_logs rows are WAF events (0.045%). Without a matching partial
+    # index every WAF/IPS widget scanned the whole window and de-JSONB'd each row
+    # — minutes per query, and it pinned a pool connection the whole time.
+    #
+    # The predicates must stay CHARACTER-FOR-CHARACTER identical to
+    # _WAF_FILTER_SQL / _IPS_FILTER_SQL in main.py, otherwise Postgres cannot
+    # prove the query implies the index predicate and silently falls back to a
+    # sequential scan.
+    #
+    # On an existing large table build these with CREATE INDEX CONCURRENTLY by
+    # hand — the statements here run inside a transaction (CONCURRENTLY is not
+    # allowed there) and would take an exclusive lock. On a fresh deployment the
+    # table is empty, so this is instant.
+    """
+    CREATE INDEX IF NOT EXISTS idx_fw_logs_waf_created ON firewall_logs (created_at DESC)
+    WHERE log_type = 'WAF'
+       OR (raw_data->>'log_component') ILIKE '%waf%'
+       OR (raw_data->>'log_component') ILIKE '%web app%'
+       OR (raw_data->>'log_component') ILIKE '%web server protection%'
+       OR (raw_data->>'log_subtype') ILIKE '%waf%'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_fw_logs_ips_created ON firewall_logs (created_at DESC)
+    WHERE log_type IN ('IDP', 'IPS')
+       OR (raw_data->>'log_component') ILIKE '%intrusion%'
+       OR (raw_data->>'log_component') ILIKE '%idp%'
+       OR (raw_data->>'log_component') = 'IPS'
+    """,
+    # Passwords genuinely in use here, stored only as a keyed fingerprint, so a
+    # honeypot submission can be recognised as a leaked credential rather than a
+    # lucky guess. The plaintext is never written — see models.MonitoredPassword.
+    """
+    CREATE TABLE IF NOT EXISTS monitored_passwords (
+        id BIGSERIAL PRIMARY KEY,
+        label VARCHAR(200) NOT NULL,
+        fingerprint VARCHAR(64) NOT NULL UNIQUE,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_by VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_hit_at TIMESTAMP WITH TIME ZONE,
+        hit_count INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_monitored_pw_fingerprint ON monitored_passwords (fingerprint)",
+    # Which registered password a honeypot submission matched, and how loud the
+    # alarm was. NULL on the ordinary rows, which are plain guessing.
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS monitored_password_id BIGINT",
+    "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS credential_alarm VARCHAR(20)",
 ]
 
 
@@ -688,14 +916,17 @@ async def ensure_schema() -> None:
     # Each migration runs in its own transaction so a transient failure on one
     # statement (e.g. a lock at startup) can't roll back the others. Failures
     # are logged, not fatal — all statements are idempotent and retried next boot.
+    # Runs on the background engine: index creation on the large tables can
+    # exceed the request pool's 45s statement_timeout.
     for stmt in _MIGRATIONS:
         try:
-            async with engine.begin() as conn:
+            async with bg_engine.begin() as conn:
                 await conn.execute(text(stmt))
         except Exception as e:
             logger.warning(f"migration failed (will retry next start): {str(e)[:160]} | {stmt[:70].strip()}")
 
 
 async def get_db():
-    async with async_session() as session:
+    """HTTP request path — uses the dedicated request pool."""
+    async with request_session() as session:
         yield session

@@ -1,0 +1,13 @@
+# Tor transparent proxy. TransPort/DNSPort are bound to loopback because the
+# iptables REDIRECT target sends packets to 127.0.0.1; the Kali container shares
+# this namespace, so its loopback is the same one.
+SocksPort 127.0.0.1:9050
+DNSPort 127.0.0.1:9053
+TransPort 127.0.0.1:9040
+# NB: no "User" directive — the entrypoint already starts tor as the tor user
+# via su-exec, so re-dropping privileges here would fail (Operation not permitted).
+VirtualAddrNetworkIPv4 10.192.0.0/10
+AutomapHostsOnResolve 1
+DataDirectory /var/lib/tor
+# Keep logs quiet but note bootstrap on stdout.
+Log notice stdout

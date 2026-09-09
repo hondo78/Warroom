@@ -26,6 +26,8 @@
                     <option value="90" data-i18n="dashboard.range_90d">90 Tage</option>
                 </select>
                 <button class="btn btn-outline-primary btn-sm" onclick="resolveHostsNow(this)" title="Hostnamen jetzt neu abgleichen (DNS / NetBIOS / Sophos / DHCP-Leases)" data-i18n-title="hosts.resolve_title"><i class="bi bi-tags"></i> <span data-i18n="hosts.resolve">Namen abgleichen</span></button>
+                <button id="pingBtn" class="btn btn-outline-info btn-sm" style="display:none" onclick="pingHostsNow(this)" title="Online-Status jetzt aktualisieren (Ping-Sweep)" data-i18n-title="hosts.ping_title"><i class="bi bi-broadcast-pin"></i> <span data-i18n="hosts.ping">Online-Status</span></button>
+                <button id="netScanBtn" class="btn btn-outline-warning btn-sm" style="display:none" onclick="openNetScan()" title="Ganzes Netz mit nmap scannen" data-i18n-title="hosts.netscan_title"><i class="bi bi-diagram-3"></i> <span data-i18n="hosts.netscan">Netz scannen</span></button>
                 <button class="btn btn-outline-success btn-sm" onclick="exportHostsCsv()" title="Gescannte Hosts als CSV exportieren" data-i18n-title="hosts.export_title"><i class="bi bi-filetype-csv"></i> <span data-i18n="hosts.export">CSV-Export</span></button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="refreshHosts()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
             </div>
@@ -72,6 +74,7 @@
       <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
       <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
       <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
       <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
     </ul>
   </li>
@@ -102,52 +105,14 @@
                     Auflösung, kannst du den Hostnamen <strong>manuell eintragen</strong> — manuelle Namen werden nie überschrieben.
                 </p>
 
-                <div class="row g-3 mb-3">
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="small-box bg-info"><div class="inner"><h3 id="hTotal">-</h3><p data-i18n="hosts.stat_total">Interne Hosts</p></div><span class="icon"><i class="bi bi-hdd-network"></i></span></div>
+                <div class="card mb-3"><div class="card-body py-2">
+                    <div class="d-flex flex-wrap align-items-center" style="gap:.5rem 1.75rem">
+                        <div class="d-flex align-items-baseline gap-2"><i class="bi bi-hdd-network text-info"></i><span class="fs-5 fw-bold" id="hTotal">-</span><span class="text-secondary small" data-i18n="hosts.stat_total">Interne Hosts</span></div>
+                        <div class="d-flex align-items-baseline gap-2"><i class="bi bi-tag text-success"></i><span class="fs-5 fw-bold" id="hNamed">-</span><span class="text-secondary small" data-i18n="hosts.stat_named">Mit Hostname</span></div>
+                        <div class="d-flex align-items-baseline gap-2"><i class="bi bi-question-circle text-warning"></i><span class="fs-5 fw-bold" id="hUnnamed">-</span><span class="text-secondary small" data-i18n="hosts.stat_unnamed">Ohne Hostname</span></div>
+                        <div class="d-flex align-items-baseline gap-2"><i class="bi bi-hourglass-split text-secondary"></i><span class="fw-bold" id="hResolving">-</span><span class="text-secondary small" data-i18n="hosts.stat_resolving">Wird aufgelöst…</span></div>
                     </div>
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="small-box bg-success"><div class="inner"><h3 id="hNamed">-</h3><p data-i18n="hosts.stat_named">Mit Hostname</p></div><span class="icon"><i class="bi bi-tag"></i></span></div>
-                    </div>
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="small-box bg-warning"><div class="inner"><h3 id="hUnnamed">-</h3><p data-i18n="hosts.stat_unnamed">Ohne Hostname</p></div><span class="icon"><i class="bi bi-question-circle"></i></span></div>
-                    </div>
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="small-box bg-secondary"><div class="inner"><h3 id="hResolving" style="font-size:1.4rem">-</h3><p data-i18n="hosts.stat_resolving">Wird aufgelöst…</p></div><span class="icon"><i class="bi bi-hourglass-split"></i></span></div>
-                    </div>
-                </div>
-
-                <div class="card mb-3 border-warning" id="hIdentityCard" style="display:none">
-                    <div class="card-header"><h3 class="card-title mb-0"><i class="bi bi-shield-exclamation text-warning"></i> <span data-i18n="hosts.identity_title">Identitäts-Änderungen</span></h3></div>
-                    <div class="card-body">
-                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="hosts.identity_hint">IP↔MAC↔Hostname-Kombinationen werden langfristig gespeichert. Ändert sich eine Bindung (z. B. IP mit neuer MAC), wird das bewertet und bei Sicherheitsrelevanz per Telegram alarmiert.</p>
-                        <div class="table-scroll"><table class="table table-sm table-hover align-middle">
-                            <thead><tr>
-                                <th data-i18n="common.time">Zeit</th>
-                                <th data-i18n="hosts.identity_col_sev">Schwere</th>
-                                <th data-i18n="hosts.identity_col_type">Typ</th>
-                                <th data-i18n="hosts.identity_col_detail">Bewertung</th>
-                            </tr></thead>
-                            <tbody id="hIdentityTable"></tbody>
-                        </table></div>
-                    </div>
-                </div>
-
-                <div class="card mb-3" id="hPortChangesCard" style="display:none">
-                    <div class="card-header"><h3 class="card-title mb-0"><i class="bi bi-diagram-2 text-info"></i> <span data-i18n="hosts.portchanges_title">Port-Änderungen</span></h3></div>
-                    <div class="card-body">
-                        <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="hosts.portchanges_hint">Offene Ports werden je Host langfristig gespeichert. Erscheint oder verschwindet ein Dienst (z. B. SMTP nicht mehr erreichbar), wird das als Änderung protokolliert.</p>
-                        <div class="table-scroll"><table class="table table-sm table-hover align-middle">
-                            <thead><tr>
-                                <th data-i18n="common.time">Zeit</th>
-                                <th data-i18n="hosts.col_ip">IP</th>
-                                <th data-i18n="hosts.pc_col_change">Änderung</th>
-                                <th data-i18n="hosts.pc_col_detail">Detail</th>
-                            </tr></thead>
-                            <tbody id="hPortChangesTable"></tbody>
-                        </table></div>
-                    </div>
-                </div>
+                </div></div>
 
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -158,6 +123,7 @@
                         <div class="table-scroll">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr id="hostsSortRow">
+                                    <th data-sort="online" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_online">Online</span> <span class="sort-ind"></span></th>
                                     <th data-sort="ip" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_ip">IP</span> <span class="sort-ind"></span></th>
                                     <th data-sort="hostname" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_hostname">Hostname</span> <span class="sort-ind"></span></th>
                                     <th data-sort="source" style="cursor:pointer;user-select:none"><span data-i18n="hosts.col_source">Quelle</span> <span class="sort-ind"></span></th>
@@ -171,6 +137,78 @@
                                 <tbody id="hostsTable"></tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Analysis (tabbed): online-status / identity / port-changes.
+                     Whole card stays hidden until at least one tab has data; each
+                     tab shows/hides independently via setAnalysisTab() in hosts.js. -->
+                <div class="card mb-3" id="hAnalysisCard" style="display:none">
+                    <div class="card-header p-0 border-bottom-0">
+                        <ul class="nav nav-tabs card-header-tabs m-0" id="hAnalysisTabs">
+                            <li class="nav-item" data-tab="presence" style="display:none"><a class="nav-link" href="#" onclick="showAnalysisTab('presence');return false"><i class="bi bi-broadcast-pin text-info"></i> <span data-i18n="hosts.presence_title">Online-Status — Auswertung</span></a></li>
+                            <li class="nav-item" data-tab="identity" style="display:none"><a class="nav-link" href="#" onclick="showAnalysisTab('identity');return false"><i class="bi bi-shield-exclamation text-warning"></i> <span data-i18n="hosts.identity_title">Identitäts-Änderungen</span></a></li>
+                            <li class="nav-item" data-tab="portchanges" style="display:none"><a class="nav-link" href="#" onclick="showAnalysisTab('portchanges');return false"><i class="bi bi-diagram-2 text-info"></i> <span data-i18n="hosts.portchanges_title">Port-Änderungen</span></a></li>
+                        </ul>
+                    </div>
+                    <div class="card-body tab-content">
+
+                        <div class="tab-pane fade" id="pane-presence">
+                            <div class="d-flex justify-content-end mb-2">
+                                <select id="presenceRange" class="form-select form-select-sm" style="width:auto" onchange="loadPresenceAnalytics()">
+                                    <option value="1">24 h</option>
+                                    <option value="7" selected>7 d</option>
+                                    <option value="30">30 d</option>
+                                </select>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="pOnline" class="text-success">–</h3><p data-i18n="hosts.p_online_now">Jetzt online</p></div><span class="icon"><i class="bi bi-wifi"></i></span></div></div>
+                                <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="pOffline">–</h3><p data-i18n="hosts.p_offline_now">Jetzt offline</p></div><span class="icon"><i class="bi bi-wifi-off"></i></span></div></div>
+                                <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="pAvail">–</h3><p data-i18n="hosts.p_avail">Ø Verfügbarkeit</p></div><span class="icon"><i class="bi bi-graph-up"></i></span></div></div>
+                                <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="pNever">–</h3><p data-i18n="hosts.p_never">Nie online</p></div><span class="icon"><i class="bi bi-dash-circle"></i></span></div></div>
+                            </div>
+                            <div style="position:relative;height:200px" class="mb-2"><canvas id="pTrendChart"></canvas></div>
+                            <p class="text-secondary" style="font-size:.75rem" id="pLastSweep"></p>
+                            <h6 class="mb-1" data-i18n="hosts.p_reliability">Verfügbarkeit je Host</h6>
+                            <div class="table-scroll" style="max-height:320px"><table class="table table-sm align-middle mb-0">
+                                <thead><tr>
+                                    <th data-i18n="hosts.col_online">Online</th>
+                                    <th data-i18n="hosts.col_ip">IP</th>
+                                    <th data-i18n="hosts.col_hostname">Hostname</th>
+                                    <th class="text-end" data-i18n="hosts.p_avail">Ø Verfügbarkeit</th>
+                                    <th class="text-end" data-i18n="hosts.p_changes">Wechsel</th>
+                                    <th data-i18n="hosts.last_online">zuletzt online</th>
+                                </tr></thead>
+                                <tbody id="pHostsTable"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="tab-pane fade" id="pane-identity">
+                            <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="hosts.identity_hint">IP↔MAC↔Hostname-Kombinationen werden langfristig gespeichert. Ändert sich eine Bindung (z. B. IP mit neuer MAC), wird das bewertet und bei Sicherheitsrelevanz per Telegram alarmiert.</p>
+                            <div class="table-scroll"><table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.time">Zeit</th>
+                                    <th data-i18n="hosts.identity_col_sev">Schwere</th>
+                                    <th data-i18n="hosts.identity_col_type">Typ</th>
+                                    <th data-i18n="hosts.identity_col_detail">Bewertung</th>
+                                </tr></thead>
+                                <tbody id="hIdentityTable"></tbody>
+                            </table></div>
+                        </div>
+
+                        <div class="tab-pane fade" id="pane-portchanges">
+                            <p class="admin-hint" style="margin:0 0 .5rem" data-i18n="hosts.portchanges_hint">Offene Ports werden je Host langfristig gespeichert. Erscheint oder verschwindet ein Dienst (z. B. SMTP nicht mehr erreichbar), wird das als Änderung protokolliert.</p>
+                            <div class="table-scroll"><table class="table table-sm table-hover align-middle">
+                                <thead><tr>
+                                    <th data-i18n="common.time">Zeit</th>
+                                    <th data-i18n="hosts.col_ip">IP</th>
+                                    <th data-i18n="hosts.pc_col_change">Änderung</th>
+                                    <th data-i18n="hosts.pc_col_detail">Detail</th>
+                                </tr></thead>
+                                <tbody id="hPortChangesTable"></tbody>
+                            </table></div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -198,6 +236,32 @@
             <button id="hdScanBtn" onclick="scanFromDetail()"><i class="bi bi-radar"></i> <span data-i18n="hosts.scan">Scan</span></button>
             <button onclick="editFromDetail()" data-i18n="hosts.btn_edit">Bearbeiten</button>
             <button onclick="closeHostDetail()" data-i18n="common.close">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<!-- Network scan modal -->
+<div class="modal-overlay" id="netScanModal">
+    <div class="modal alert-detail-modal" style="max-width:520px">
+        <div class="alert-detail-header">
+            <h3><i class="bi bi-diagram-3"></i> <span data-i18n="hosts.netscan_title">Netz scannen</span></h3>
+            <button class="modal-close" onclick="closeNetScan()" title="Schliessen" data-i18n-title="common.close">×</button>
+        </div>
+        <div class="alert-detail-body">
+            <p class="admin-hint" data-i18n="hosts.netscan_hint">Ein ganzes internes Netz (CIDR) mit nmap scannen. Alle erreichbaren Hosts werden ins Inventar übernommen — bestehende aktualisiert, neue hinzugefügt. Nur private Netze, max. /20.</p>
+            <label class="form-label" style="font-size:.8rem" data-i18n="hosts.netscan_cidr">Netz (CIDR)</label>
+            <input type="text" id="netCidr" class="form-control form-control-sm mb-2" placeholder="192.168.1.0/24" autocomplete="off">
+            <label class="form-label" style="font-size:.8rem" data-i18n="hosts.netscan_profile">Profil</label>
+            <select id="netProfile" class="form-select form-select-sm mb-2">
+                <option value="quick">quick (Top-1000, -sV)</option>
+                <option value="full">full (alle 65535, -sV)</option>
+                <option value="scripts">scripts (Top-1000, -sV -sC)</option>
+            </select>
+            <div id="netScanStatus" class="text-secondary" style="font-size:.82rem"></div>
+        </div>
+        <div class="modal-actions">
+            <button onclick="closeNetScan()" data-i18n="common.cancel">Abbrechen</button>
+            <button class="primary" id="netScanStart" onclick="startNetScan()"><i class="bi bi-play-fill"></i> <span data-i18n="hosts.netscan_start">Scan starten</span></button>
         </div>
     </div>
 </div>
@@ -231,6 +295,7 @@
     <script src="/js/i18n.js"></script>
 <script src="/js/auth.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="/js/common.js"></script>
 <script src="/js/hosts.js"></script>
 <script src="/js/hostnames.js"></script>

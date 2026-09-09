@@ -136,7 +136,7 @@ async def build_dossier(ip: str, days: int = 30) -> dict:
 
     if out["is_public"]:
         try:
-            out["osint"] = _osint_slim(await osint.lookup(ip))
+            out["osint"] = _osint_slim(await osint.lookup(ip, context="dossier"))
         except Exception as e:
             out["osint"] = {"error": str(e)[:120]}
     else:

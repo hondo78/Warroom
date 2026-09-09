@@ -15,6 +15,8 @@ just re-enter them in the admin UI).
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 from pathlib import Path
@@ -26,16 +28,31 @@ logger = logging.getLogger(__name__)
 _PREFIX = "enc:v1:"
 _KEY_FILE = os.environ.get("WARROOM_SECRET_KEY_FILE", "/app/data/secret.key")
 _fernet: Fernet | None | bool = None  # None = uninitialised, False = disabled
+_master_key: bytes = b""             # cached master secret (see _load_or_create_key)
 
 
 def _load_or_create_key() -> bytes:
+    # The env var is read on every call and never cached — but only because
+    # there is nothing to gain either way: a process cannot see its own
+    # environment change, so it holds the same value for the whole lifetime.
+    #
+    # The *file* read is cached, and that one matters. Two callers reach this
+    # now (_get_fernet and derive_subkey); on a first boot with no key file each
+    # would otherwise generate *and write* its own key — last write wins,
+    # leaving whatever the other already keyed in memory unreproducible after a
+    # restart. Caching also keeps a blocking file read off the honeypot
+    # submission path, which calls derive_subkey twice per request.
+    global _master_key
     env = (os.environ.get("WARROOM_SECRET_KEY") or "").strip()
     if env:
         return env.encode()
+    if _master_key:
+        return _master_key
     p = Path(_KEY_FILE)
     try:
         if p.exists():
-            return p.read_text().strip().encode()
+            _master_key = p.read_text().strip().encode()
+            return _master_key
         p.parent.mkdir(parents=True, exist_ok=True)
         key = Fernet.generate_key()
         p.write_bytes(key)
@@ -47,6 +64,7 @@ def _load_or_create_key() -> bytes:
             f"Generated a new secret-encryption key at {p}. BACK THIS UP — "
             "losing it makes stored secrets unrecoverable."
         )
+        _master_key = key
         return key
     except Exception as e:
         logger.error(f"secret-key load/create failed ({e}); secrets stay UNENCRYPTED at rest")
@@ -67,6 +85,22 @@ def _get_fernet() -> Fernet | None:
 
 def encryption_available() -> bool:
     return _get_fernet() is not None
+
+
+def derive_subkey(info: bytes) -> bytes:
+    """A purpose-separated key derived from the master secret.
+
+    Callers that need to key something other than Fernet (e.g. an HMAC
+    fingerprint) must not reuse the encryption key directly: a single key used
+    for two purposes lets a weakness in one erode the other. ``info`` names the
+    purpose, so each caller gets a distinct, stable subkey.
+
+    Returns ``b""`` when no master key is available, which callers must treat as
+    "this feature cannot run" rather than silently keying with nothing."""
+    master = _load_or_create_key()
+    if not master:
+        return b""
+    return hmac.new(master, info, hashlib.sha256).digest()
 
 
 def is_encrypted(value) -> bool:

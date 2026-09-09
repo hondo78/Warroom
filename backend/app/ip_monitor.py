@@ -224,12 +224,19 @@ async def monitor_scan() -> dict:
                 break
             body = html + (f"\n<i>… und {len(pending_notifs) - cap} weitere</i>"
                            if len(pending_notifs) > cap and sent == cap - 1 else "")
-            res = await notify(body, title="Warroom · IP-Überwachung")
+            res = await notify(body, title="Warroom · IP-Überwachung",
+                               event="ip_monitor")
             async with async_session() as db2:
                 ev = await db2.get(MonitoredEvent, ev_id)
                 if ev:
                     ev.notified = bool(res["channels"])
-                    ev.notify_error = "; ".join(f"{k}:{v}" for k, v in res["errors"].items()) or None
+                    # A channel the routing matrix muted is a decision, not a
+                    # failure. Both leave `channels` empty, so without this the
+                    # dashboard shows "delivery failed" on every event the
+                    # operator deliberately silenced.
+                    errs = "; ".join(f"{k}:{v}" for k, v in res["errors"].items())
+                    muted = ", ".join(res.get("skipped") or [])
+                    ev.notify_error = errs or (f"muted: {muted}" if muted else None)
                     await db2.commit()
             sent += 1
 

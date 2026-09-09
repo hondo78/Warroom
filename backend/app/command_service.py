@@ -403,9 +403,9 @@ async def _h_osint(args, actor) -> str:
         if vtype == "ip":
             if not _is_public_ip(value):
                 return f"WARN {value} ist keine oeffentliche IP."
-            d = await osint.lookup(value)  # cheap providers; Shodan stays opt-in
+            d = await osint.lookup(value, context="command")  # cheap providers; Shodan stays opt-in
         else:
-            d = await osint.lookup_domain(value)
+            d = await osint.lookup_domain(value, context="command")
     except Exception as e:
         return f"WARN OSINT-Abfrage fehlgeschlagen: {str(e)[:160]}"
     ab = (d.get("abuseipdb") or {})

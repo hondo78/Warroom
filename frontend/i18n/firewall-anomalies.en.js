@@ -45,6 +45,8 @@ window.I18N.en.fwAnomalies = {
     dim_packets: "Packets",
     dim_night: "Time of day (night)",
     dim_country: "Country rarity",
+    dim_services: "Services",
+    dim_service_rarity: "Service rarity",
 
     // driver chip tooltip + contextual focus description (interpolated)
     percentile: "Percentile {p}%",
@@ -186,4 +188,45 @@ window.I18N.en.fwAnomalies = {
     sig_beacon: "beacon ~{s}s · {n}×",
     sig_beacon_title: "regularity {r} · over {m} min · {bpf} B/flow",
     sig_offhours: "off-hours {p}%",
+
+    // --- Per-service anomalies (peer-group isolation forest per service) ---
+    svc_hint: "Every connection is compared <strong>only against connections of the same service</strong> — HTTPS against HTTPS, DNS against DNS. That surfaces what would be invisible network-wide: 400 MB over HTTPS is normal, the same 400 MB over SMTP or SSH is not. Each service gets its own isolation forest; the table shows <strong>which metric</strong> drove the finding (high or low) and by what <strong>factor it deviates from that service's median</strong>. Services with too few connections are not scored and are listed separately below.",
+    svc_title: "Service anomalies",
+    svc_sub: "— unusual compared to its own service",
+    svc_all: "All services",
+    svc_filter_title: "Restrict to a single service",
+    svc_mingroup_title: "Minimum size of a service group to be scored",
+    svc_filter_ph: "Filter (IP, service, signal…)",
+    svc_col_service: "Service",
+    svc_col_drivers: "Deviation from service",
+    svc_none: "No unusual service connections in this window.",
+    svc_stat_found: "{n} findings",
+    svc_stat_groups: "{n} scored services",
+    svc_meta: "· {c} of {a} connections scored",
+    svc_groups_label: "Scored service groups",
+    svc_group_title: "{n} connections in this group · {a} flagged",
+    svc_skipped: "{g} services with too few connections ({c}) not scored",
+    svc_skipped_title: "Groups that are too small are not scored — with few peers, an \"outlier\" means nothing. Adjust the minimum above.",
+    svc_ports_n: "{n} ports",
+    svc_driver_title: "{d}: {v} vs. the service median of {m} · more extreme than {p}% of the group",
+
+    // Metrics of the service analysis
+    svc_dim_out_bytes: "Upload",
+    svc_dim_in_bytes: "Download",
+    svc_dim_upload_ratio: "Upload share",
+    svc_dim_bytes_per_flow: "Bytes/flow",
+    svc_dim_flows: "Flows",
+    svc_dim_buckets: "Active minutes",
+    svc_dim_night_ratio: "Off-hours share",
+    svc_dim_dst_spread: "Destination spread",
+
+    // Signals of the service analysis
+    svc_sig_new_service: "new service for host",
+    svc_sig_uncommon_service: "service rare for host ({d} days)",
+    svc_sig_rare_service: "service rare on network",
+    svc_sig_unidentified: "unidentified service (port {p})",
+    svc_sig_unidentified_n: "unidentified service ({n} ports)",
+    svc_driver_zero: "down to 0",
+    svc_sig_upload_skew: "upload-skewed {b} ({p}%)",
+    svc_sig_peer_group: "compared to: {s} ({n})",
 };

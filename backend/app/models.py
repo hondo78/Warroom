@@ -306,6 +306,57 @@ class WhitelistedIp(Base):
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class KnownUserOverride(Base):
+    """Operator correction to the self-learned known-user directory.
+
+    The directory behind the invalid-username brute-force rule learns from
+    successful logins, which leaves two gaps an operator must be able to close:
+    a brand-new account that has never logged in yet would look invalid, and a
+    generic/shared login that did succeed should not shield an attacker who
+    guesses it. ``status`` is ``allow`` (treat as a real account) or ``deny``
+    (never treat as real)."""
+
+    __tablename__ = "known_user_overrides"
+
+    user_name = Column(String(255), primary_key=True)   # stored lowercased
+    status = Column(String(10), nullable=False, default="allow")   # allow | deny
+    comment = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(64))
+
+
+class InvalidUsername(Base):
+    """A username proven to be used in brute-force attempts against this network.
+
+    The threshold rule needs an IP to try several non-existent names before it
+    acts, which is deliberately conservative — but it means the *second* attacker
+    reusing the very same word list gets the same grace period. Once a name is
+    known to come from a spray, that grace is unwarranted: any source touching it
+    is blocked on the first attempt.
+
+    Names land here only via an IP that already met the threshold rule, never
+    from a lone failed login. That is what keeps a real user's typo out of the
+    list — a typo comes from a source that tried exactly one name, which never
+    becomes an offender. ``status`` is ``active`` (blocks on sight) or
+    ``ignored`` (kept for the record, never triggers)."""
+
+    __tablename__ = "invalid_usernames"
+
+    user_name = Column(String(255), primary_key=True)   # stored lowercased
+    first_seen = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen = Column(DateTime(timezone=True))
+    # The sprayer that put this name on the list — provenance for the operator
+    # deciding whether a name belongs here.
+    burned_by_ip = Column(String(45))
+    # How often this name alone caused a block. Tells a productive entry from a
+    # one-off that has never fired since.
+    block_hits = Column(Integer, nullable=False, default=0)
+    origin = Column(String(10), nullable=False, default="learned")   # learned | manual
+    status = Column(String(10), nullable=False, default="active")    # active | ignored
+    comment = Column(Text)
+    created_by = Column(String(64))
+
+
 class AnomalyVerdict(Base):
     """Analyst verdict on an anomalous IP surfaced by the firewall-anomaly
     analysis. Anomalies are recomputed on the fly (no stable id), so a verdict
@@ -380,6 +431,65 @@ class HoneypotEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class HoneypotLogin(Base):
+    """A credential pair somebody typed into the decoy login page.
+
+    Stored in the clear, deliberately. The point of the page is to learn *what*
+    is being tried: whether an attacker is replaying credentials leaked from
+    elsewhere, whether a guessed password is uncomfortably close to a real one,
+    and which username lists are in circulation. A hash would answer none of
+    that.
+
+    Nobody legitimate has any reason to reach this page, so every row here is
+    hostile by construction — which is what makes it safe to act on immediately.
+
+    One exception, and it is the whole point of :class:`MonitoredPassword`: when
+    the submitted password matches a password genuinely in use here, it is
+    **redacted** rather than stored. At that moment it stops being an attacker's
+    guess and becomes a live credential of ours, and writing it to this table
+    would put a real password in the clear in the database — the precise outcome
+    the feature exists to prevent. ``credential_alarm`` records that it happened
+    without keeping what happened."""
+
+    __tablename__ = "honeypot_logins"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    username = Column(String(255))
+    password = Column(Text)                             # plaintext, on purpose
+    source_ip = Column(String(45))
+    user_agent = Column(Text)
+    # Which decoy path was used — several can point at the same page, and the
+    # one an attacker found says something about how they found it.
+    path = Column(String(255))
+    referer = Column(Text)
+    attacker_country = Column(String(100))
+    attacker_city = Column(String(255))
+    attacker_asn = Column(String(50))
+    attacker_org = Column(String(255))
+    # What Warroom did in response: "blocked", "burned", "blocked+burned", "none".
+    action = Column(String(40))
+    # "login" = credentials were submitted; "probe" = the page or the API path
+    # was merely requested. A probe is reconnaissance, not yet an attempt, and
+    # is deliberately not acted on by default.
+    kind = Column(String(10), nullable=False, default="login")
+    # The body exactly as it arrived, and the method it arrived with. Parsing
+    # credentials out of arbitrary shapes will always have gaps; keeping the
+    # original means a miss costs nothing but a second look.
+    raw_body = Column(Text)
+    method = Column(String(10))
+    # Risk summary from the OSINT providers (abuse score, VirusTotal, GreyNoise,
+    # Tor exit). Null unless honeypot_web_osint_enabled was on at capture time.
+    osint = Column(JSONB)
+    # Set when the submitted password matched a registered real password
+    # (:class:`MonitoredPassword`). The id names which one, so a rotation can be
+    # scoped to the credential that actually leaked.
+    monitored_password_id = Column(BigInteger, nullable=True)
+    # "high" = a real password was used; "critical" = with a real username too.
+    # NULL for the overwhelming majority of rows, which are ordinary guessing.
+    credential_alarm = Column(String(20), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class HoneypotProcessWhitelist(Base):
     """A legitimate process (e.g. a virus scanner) allowed to touch decoy files.
     A matching file-honeypot access is still logged (as a muted event) but never
@@ -394,6 +504,43 @@ class HoneypotProcessWhitelist(Base):
     comment = Column(String(500))
     created_by = Column(String(100))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MonitoredPassword(Base):
+    """A password that is genuinely in use here, registered so Warroom can tell
+    when an attacker types it into a decoy.
+
+    An attacker guessing at random never lands on a real password. If one turns
+    up in a honeypot submission, it did not come from guessing — it leaked, and
+    the only open questions are where from and how long ago. That makes this the
+    highest-value signal the decoy can produce.
+
+    Never stores the password. ``fingerprint`` is an HMAC-SHA256 keyed with a
+    subkey derived from the master secret (which lives outside the database), so
+    the table on its own reveals nothing and cannot be reversed. Registration
+    takes the plaintext, fingerprints it, and drops it.
+
+    The trade-off, stated plainly: an HMAC is fast, so an attacker holding *both*
+    the database and the master key could test a dictionary against these
+    fingerprints offline. A slow KDF would close that, but it would also mean one
+    KDF per stored password per submission — during exactly the brute-force flood
+    this feature exists to detect. Keeping the key out of the database is the
+    defence that matters here."""
+
+    __tablename__ = "monitored_passwords"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # What this password is for, e.g. "Domain admin 2026". Operator-facing text;
+    # deliberately never the password itself or a hint at it.
+    label = Column(String(200), nullable=False)
+    fingerprint = Column(String(64), nullable=False, unique=True, index=True)
+    active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(String(100))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Set when a submission matched. Kept so a rotated-but-still-leaked password
+    # keeps its history instead of looking newly compromised each time.
+    last_hit_at = Column(DateTime(timezone=True), nullable=True)
+    hit_count = Column(Integer, default=0, nullable=False)
 
 
 class CveScore(Base):
@@ -517,6 +664,58 @@ class HostPortEvent(Base):
     detail = Column(Text)
     detected_at = Column(DateTime(timezone=True), server_default=func.now())
     notified = Column(Boolean, nullable=False, default=False)
+
+
+class HostPresence(Base):
+    """Live reachability of an internal IP from an nmap ping-sweep, so the hosts
+    list can show a current online/offline status."""
+    __tablename__ = "host_presence"
+
+    ip = Column(String(45), primary_key=True)
+    last_online = Column(DateTime(timezone=True))
+    last_checked = Column(DateTime(timezone=True))
+    online = Column(Boolean)             # state at the last check (for transitions)
+
+
+class HostPresenceEvent(Base):
+    """An online↔offline transition for one host — the compact availability history."""
+    __tablename__ = "host_presence_events"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False)
+    online = Column(Boolean, nullable=False)
+    at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class HostPresenceSnapshot(Base):
+    """Fleet online-count per sweep — the trend time series."""
+    __tablename__ = "host_presence_snapshots"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    checked_at = Column(DateTime(timezone=True), server_default=func.now())
+    total = Column(Integer, nullable=False, default=0)
+    online = Column(Integer, nullable=False, default=0)
+
+
+class KaliCommand(Base):
+    """Audit + human-in-the-loop record for a command run on the Tor-only Kali
+    box. Every MCP `tor_run` lands here first; status tracks its lifecycle."""
+    __tablename__ = "kali_commands"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    command = Column(Text, nullable=False)
+    targets = Column(Text)                               # extracted host targets (CSV)
+    actor = Column(String(60))                           # who/what requested it
+    # pending | approved | done | rejected | blocked | error
+    status = Column(String(12), nullable=False, default="pending")
+    reason = Column(Text)                                # block/reject reason
+    exit_code = Column(Integer)
+    stdout = Column(Text)
+    stderr = Column(Text)
+    tor_exit_ip = Column(String(45))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    decided_at = Column(DateTime(timezone=True))
+    decided_by = Column(String(60))
 
 
 class GeoIPCache(Base):

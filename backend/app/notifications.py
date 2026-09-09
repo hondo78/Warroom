@@ -5,6 +5,12 @@ bot and, if an incoming webhook is set, Microsoft Teams. Each channel is
 best-effort: a failure in one never blocks the other, and the function reports
 which channels actually delivered so callers can record it.
 
+Callers pass ``event`` to say *what kind* of alarm this is. The routing matrix
+(:mod:`app.notification_matrix`) then decides which channels that kind may use,
+so "honeypot noise to Teams only, credential alarms to both" is a setting rather
+than a code change. An omitted or unknown event goes everywhere — a new alarm
+must be too loud, never silently muted.
+
 Telegram already has a fire-and-forget sender (telegram_client.send_notification,
 HTML parse mode). Teams had a webhook *setting* but no sender until now — this
 module posts a simple MessageCard to the incoming webhook.
@@ -14,6 +20,7 @@ import logging
 import httpx
 
 from app.config import settings
+from app.notification_matrix import channel_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +55,19 @@ async def send_teams(text_html: str, title: str | None = None) -> None:
         resp.raise_for_status()
 
 
-async def notify(text_html: str, title: str | None = None) -> dict:
-    """Fan out to all configured channels. Never raises; returns
-    {"channels": [...delivered...], "errors": {channel: msg}}."""
+async def notify(text_html: str, title: str | None = None,
+                 event: str | None = None) -> dict:
+    """Fan out to the channels this ``event`` is routed to. Never raises; returns
+    {"channels": [...delivered...], "errors": {channel: msg},
+     "skipped": [...muted by the matrix...]}."""
     delivered: list[str] = []
     errors: dict[str, str] = {}
+    skipped: list[str] = []
 
     # Telegram (send_notification is a no-op when telegram is disabled).
-    if settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id:
+    if not channel_enabled(event, "telegram"):
+        skipped.append("telegram")
+    elif settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id:
         try:
             from app.telegram_client import send_notification
             await send_notification(text_html)
@@ -65,7 +77,9 @@ async def notify(text_html: str, title: str | None = None) -> dict:
             logger.warning(f"telegram notify failed: {e}")
 
     # Teams (only when a webhook is configured).
-    if settings.teams_incoming_webhook:
+    if not channel_enabled(event, "teams"):
+        skipped.append("teams")
+    elif settings.teams_incoming_webhook:
         try:
             await send_teams(text_html, title=title)
             delivered.append("teams")
@@ -73,4 +87,4 @@ async def notify(text_html: str, title: str | None = None) -> dict:
             errors["teams"] = str(e)[:200]
             logger.warning(f"teams notify failed: {e}")
 
-    return {"channels": delivered, "errors": errors}
+    return {"channels": delivered, "errors": errors, "skipped": skipped}

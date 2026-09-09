@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warroom - Kali / Tor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/css/adminlte.min.css">
+    <link rel="stylesheet" href="/css/adminlte-theme.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .k-out { font-family:monospace; font-size:.76rem; white-space:pre-wrap; word-break:break-all; max-height:320px; overflow:auto; background:rgba(0,0,0,.25); padding:.5rem; border-radius:.35rem; }
+        .k-cmd { font-family:monospace; font-size:.82rem; }
+    </style>
+</head>
+<body class="layout-fixed sidebar-expand-lg bg-body-tertiary app-loaded" data-page="kali">
+<div class="app-wrapper">
+    <nav class="app-header navbar navbar-expand bg-body">
+        <div class="container-fluid">
+            <ul class="navbar-nav">
+                <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
+            </ul>
+            <div class="d-flex align-items-center gap-2 ms-auto">
+                <button class="btn btn-outline-secondary btn-sm" onclick="refreshKali()"><i class="bi bi-arrow-clockwise"></i> <span data-i18n="common.refresh">Aktualisieren</span></button>
+            </div>
+        </div>
+    </nav>
+
+    <aside class="app-sidebar bg-body-secondary shadow" data-bs-theme="dark">
+        <div class="sidebar-brand">
+            <a href="/" class="brand-link">
+                <span class="brand-text fs-5"><span class="brand-accent">WAR</span>ROOM</span>
+                <span class="brand-sub">Tools</span>
+            </a>
+        </div>
+        <div class="sidebar-wrapper">
+            <nav class="mt-2">
+                <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu">
+  <li class="nav-item"><a href="/" class="nav-link"><i class="nav-icon bi bi-speedometer2"></i><p>Dashboard</p></a></li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-graph-up-arrow"></i><p><span data-i18n="nav.grp_monitoring">Monitoring</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/netflow.html" class="nav-link"><i class="nav-icon bi bi-graph-up"></i><p>NetFlow</p></a></li>
+      <li class="nav-item"><a href="/monitored.html" class="nav-link"><i class="nav-icon bi bi-binoculars"></i><p>Connection-Monitoring</p></a></li>
+      <li class="nav-item"><a href="/firewall-anomalies.html" class="nav-link"><i class="nav-icon bi bi-activity"></i><p>FW-Anomalien</p></a></li>
+      <li class="nav-item"><a href="/hosts.html" class="nav-link"><i class="nav-icon bi bi-hdd-network"></i><p>Interne Hosts</p></a></li>
+      <li class="nav-item"><a href="/honeypot.html" class="nav-link"><i class="nav-icon bi bi-bug"></i><p>Honeypot</p></a></li>
+      <li class="nav-item"><a href="/o365.html" class="nav-link"><i class="nav-icon bi bi-microsoft"></i><p>Microsoft 365</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-fire"></i><p><span data-i18n="nav.grp_firewall">Firewall</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/blocked.html" class="nav-link"><i class="nav-icon bi bi-shield-slash"></i><p>Blocklist</p></a></li>
+      <li class="nav-item"><a href="/firewalls.html" class="nav-link"><i class="nav-icon bi bi-hdd-stack"></i><p>Firewalls</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-shield-check"></i><p><span data-i18n="nav.grp_sophos">Sophos Central</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/endpoints.html" class="nav-link"><i class="nav-icon bi bi-pc-display"></i><p>Endpoints</p></a></li>
+      <li class="nav-item"><a href="/email.html" class="nav-link"><i class="nav-icon bi bi-envelope-exclamation"></i><p>Email</p></a></li>
+      <li class="nav-item"><a href="/xdr.html" class="nav-link"><i class="nav-icon bi bi-search-heart"></i><p>XDR</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item menu-open"><a href="#" class="nav-link active"><i class="nav-icon bi bi-tools"></i><p><span data-i18n="nav.grp_tools">Tools</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/chat.html" class="nav-link"><i class="nav-icon bi bi-chat-dots"></i><p>KI-Chat</p></a></li>
+      <li class="nav-item"><a href="/agent.html" class="nav-link"><i class="nav-icon bi bi-cpu"></i><p>Agent</p></a></li>
+      <li class="nav-item"><a href="/osint.html" class="nav-link"><i class="nav-icon bi bi-search"></i><p>OSINT</p></a></li>
+      <li class="nav-item"><a href="/dossier.html" class="nav-link"><i class="nav-icon bi bi-person-vcard"></i><p>IP-Dossier</p></a></li>
+      <li class="nav-item"><a href="/kali.html" class="nav-link active"><i class="nav-icon bi bi-incognito"></i><p>Kali / Tor</p></a></li>
+      <li class="nav-item"><a href="/stats.html" class="nav-link"><i class="nav-icon bi bi-bar-chart"></i><p>Statistik</p></a></li>
+    </ul>
+  </li>
+  <li class="nav-item"><a href="#" class="nav-link"><i class="nav-icon bi bi-gear"></i><p><span data-i18n="nav.grp_admin">Admin</span><i class="nav-arrow bi bi-chevron-right"></i></p></a>
+    <ul class="nav nav-treeview">
+      <li class="nav-item"><a href="/admin.html" class="nav-link"><i class="nav-icon bi bi-sliders"></i><p>Admin</p></a></li>
+      <li class="nav-item"><a href="/agent-workflow.html" class="nav-link"><i class="nav-icon bi bi-diagram-3"></i><p>Agent-Workflow</p></a></li>
+    </ul>
+  </li>
+</ul>
+            </nav>
+        </div>
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content-header">
+            <div class="container-fluid"><h3 class="mb-0"><i class="bi bi-incognito"></i> <span data-i18n="kali.title">Kali über Tor</span></h3></div>
+        </div>
+        <div class="app-content">
+            <div class="container-fluid">
+                <p class="admin-hint" data-i18n-html="kali.intro">Ein Kali-Container, der <strong>ausschließlich über Tor</strong> ins Internet geht, wird von den Agenten per MCP angesprochen. Keine Shell: nur erlaubte Recon-Tools gegen die Ziel-Allowlist, gefährliche/Massen-Muster werden geblockt, jede Ausführung wird protokolliert und kann eine Freigabe erfordern.</p>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="kEnabled" style="font-size:1.2rem">–</h3><p data-i18n="kali.stat_enabled">MCP-Status</p></div><span class="icon"><i class="bi bi-toggles"></i></span></div></div>
+                    <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="kExit" style="font-size:1rem">–</h3><p data-i18n="kali.stat_exit">Tor-Exit-IP</p></div><span class="icon"><i class="bi bi-incognito"></i></span></div></div>
+                    <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="kApproval" style="font-size:1.2rem">–</h3><p data-i18n="kali.stat_approval">Freigabe nötig</p></div><span class="icon"><i class="bi bi-person-check"></i></span></div></div>
+                    <div class="col-6 col-md-3"><div class="small-box bg-body-secondary"><div class="inner"><h3 id="kPending" style="font-size:1.2rem">–</h3><p data-i18n="kali.stat_pending">Wartet auf Freigabe</p></div><span class="icon"><i class="bi bi-hourglass-split"></i></span></div></div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="kali.allowlist_title">Ziel-Allowlist</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint mb-1" data-i18n="kali.allowlist_hint">Nur diese Ziele (CIDRs / IPs / Domain-Suffixe) dürfen gescannt werden — leer = nichts. Bearbeitung im Admin.</p>
+                        <div id="kAllowlist"></div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="kali.console_title">Konsole</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint mb-2" data-i18n-html="kali.console_hint">
+                            Ein Befehl pro Zeile, <strong>keine Shell</strong>: genau ein Programm aus der Liste unten, keine Pipes,
+                            keine Verkettung, und jedes Ziel muss in der Allowlist stehen. Was du hier abschickst,
+                            <strong>läuft sofort</strong> — dein Absenden ist die Freigabe. Die Freigabepflicht oben gilt für die Agenten,
+                            die über MCP Befehle einreichen.
+                        </p>
+                        <div class="input-group input-group-sm mb-1">
+                            <span class="input-group-text k-cmd">tor$</span>
+                            <input type="text" id="kInput" class="form-control k-cmd" autocomplete="off" spellcheck="false"
+                                   data-i18n-placeholder="kali.console_ph" placeholder="nmap -sV 34.22.184.52">
+                            <button class="btn btn-primary" id="kRunBtn" onclick="runKaliCommand()">
+                                <i class="bi bi-play-fill"></i> <span data-i18n="kali.console_run">Ausführen</span>
+                            </button>
+                        </div>
+                        <div id="kCheck" style="font-size:.76rem;min-height:1.1rem"></div>
+                        <div id="kResult" class="mt-2"></div>
+                        <p class="admin-hint mt-2 mb-0">
+                            <span data-i18n="kali.console_binaries">Erlaubte Programme:</span>
+                            <code id="kBinaries" style="font-size:.72rem">nmap, whois, dig, host, nslookup, curl, wget, whatweb, nikto, sslscan, wafw00f, dnsrecon, ncat</code>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="card-title mb-0" data-i18n="kali.audit_title">Kommando-Audit</h3>
+                        <select id="kFilter" class="form-select form-select-sm" style="width:auto" onchange="loadKaliCommands()">
+                            <option value="" data-i18n="kali.filter_all">Alle</option>
+                            <option value="pending" data-i18n="kali.filter_pending">Pending</option>
+                            <option value="done">Done</option>
+                            <option value="blocked">Blocked</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-scroll"><table class="table table-sm table-hover align-middle">
+                            <thead><tr>
+                                <th data-i18n="common.time">Zeit</th>
+                                <th data-i18n="kali.col_status">Status</th>
+                                <th data-i18n="kali.col_command">Kommando</th>
+                                <th data-i18n="kali.col_targets">Ziele</th>
+                                <th data-i18n="kali.col_actor">Quelle</th>
+                                <th data-i18n="common.action">Aktion</th>
+                            </tr></thead>
+                            <tbody id="kTable"></tbody>
+                        </table></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/i18n/de.js"></script>
+    <script src="/i18n/en.js"></script>
+    <script src="/i18n/kali.de.js"></script>
+    <script src="/i18n/kali.en.js"></script>
+    <script src="/js/i18n.js"></script>
+<script src="/js/auth.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
+<script src="/js/common.js"></script>
+<script src="/js/kali.js"></script>
+<script src="/js/hostnames.js"></script>
+</body>
+</html>

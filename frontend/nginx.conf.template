@@ -1,9 +1,134 @@
+# Recording a probe is a database write, and it happens on the one port that is
+# meant to be found by strangers. A directory scanner sweeping 50k paths would
+# otherwise become 50k backend writes against the same pools the dashboard
+# needs. The limit is applied to the mirror subrequest only (see /_probe), so an
+# excess visitor still gets the page — only the recording of it is shed.
+limit_req_zone $binary_remote_addr zone=decoy_probe:10m rate=5r/s;
+
+# --- Decoy login, on a port of its own ---------------------------------------
+# Separate server block rather than a path on the main one, because everything
+# about this port is different: it is the only part of Warroom meant to be found
+# by strangers, and nothing else may be reachable through it. No dashboard, no
+# /api/ in general, no IOC feeds — one page and the one endpoint that records
+# what is typed into it.
+#
+# Every path serves the login form. An attacker probing /admin, /owa, /login or
+# /remote should find the same thing, because guessing which path they will try
+# is the one part of this we cannot control.
+#
+# portal.html carries no comments and loads nothing external, on purpose: it is
+# shipped verbatim to the people it is meant to fool, and a source comment
+# explaining that it is a decoy defeats the whole thing. The reasoning lives
+# here and in app/honeypot_login.py, neither of which is ever served.
+server {
+    listen 8081;
+    server_name _;
+
+    root /usr/share/nginx/html;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    set $warroom_backend "backend";
+
+    # Deliberately terse: no CSP referencing Warroom's CDNs, no headers that
+    # hint at what is really behind this. The page loads no external assets.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # Submit handlers, under names that give nothing away: the form action is
+    # visible in the page source, and "/api/honeypot/decoy-login" there would
+    # announce the trap as loudly as a comment would. nginx rewrites both to the
+    # backend's real, descriptive route.
+    #
+    # The vpnportal path is the one scanners already ask for by name. Answering
+    # it means a bot that never loads the page — it just POSTs JSON at the API it
+    # expects to find — is recorded exactly like someone using the form.
+    location = /api/v1/vpnportal/login {
+        proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # The attacker's address, preserved through this hop so the backend can
+        # record and block the right source.
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # The path the client actually asked for. Without it a bot that
+        # POSTs straight at the API is recorded under the backend's own
+        # route, losing the one detail worth having: which endpoint it
+        # went looking for.
+        proxy_set_header X-Original-Path $request_uri;
+    }
+
+    location = /auth/signin {
+        proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # The path the client actually asked for. Without it a bot that
+        # POSTs straight at the API is recorded under the backend's own
+        # route, losing the one detail worth having: which endpoint it
+        # went looking for.
+        proxy_set_header X-Original-Path $request_uri;
+    }
+
+    # Any other path — including / — is the login page. The mirror sends a copy
+    # of the request to the backend so the visit is recorded; the page itself
+    # still comes straight from disk, so nobody waits on the database and a
+    # backend outage cannot make the decoy look broken.
+    location / {
+        mirror /_probe;
+        # A bot posts credentials at whatever path its word list names —
+        # /login, /owa/auth.owa, /remote/logincheck — not only at the two the
+        # form uses. Served from disk, anything but GET/HEAD gets a 405 out of
+        # the static module: the submission is lost, and a bare 405 announces a
+        # plain file server, which is the tell this block exists to avoid. Every
+        # write method goes to the decoy endpoint instead, which records it and
+        # answers like a portal would.
+        # Set outside the `if` so they apply to the proxied write above: without
+        # them the backend sees no forwarded address and records this nginx
+        # container as the source of every credential posted to an unnamed path.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Original-Path $request_uri;
+        if ($request_method !~ ^(GET|HEAD)$) {
+            proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-login;
+        }
+        try_files /portal.html =404;
+    }
+
+    location = /_probe {
+        internal;
+        limit_req zone=decoy_probe burst=20 nodelay;
+        proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-probe;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Original-Path $request_uri;
+    }
+}
+
 server {
     listen 80;
     server_name _;
 
     root /usr/share/nginx/html;
     index index.html;
+
+    # --- Upstream resolution --------------------------------------------------
+    # A literal hostname in proxy_pass (http://backend:8000) is resolved ONCE at
+    # config load and then cached forever. When the backend container restarts
+    # and Docker hands it a new IP, nginx keeps hammering the dead address and
+    # every /api/ call returns 502 ("connect() failed (111: Connection refused)")
+    # while the backend is perfectly healthy — the whole dashboard shows no data.
+    # This happens routinely: the backend crash-loops at boot until postgres has
+    # finished initialising, and each restart can move its IP.
+    #
+    # Using a variable in proxy_pass forces nginx to resolve per request via
+    # Docker's embedded DNS (127.0.0.11), honouring the TTL below, so a backend
+    # restart heals itself instead of needing a frontend restart.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    set $warroom_backend "backend";
 
     # --- Security headers -----------------------------------------------------
     # NOTE on CSP: script-src keeps 'unsafe-inline' because the dashboard still
@@ -25,7 +150,7 @@ server {
     # SQL loop), easily exceeding nginx's default 60s proxy_read_timeout, which
     # would return an HTML 504 the frontend can't parse as JSON. Give it room.
     location /api/chat/ {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-API-Key "${WARROOM_API_KEY}";
@@ -34,32 +159,63 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         # Empty value => nginx omits the header. Backend runs in open mode then.
         proxy_set_header X-API-Key "${WARROOM_API_KEY}";
+        # Deliberately longer than the backend's 45s DB statement_timeout, so a
+        # slow aggregate comes back as a real JSON error instead of nginx's HTML
+        # 504 (which the frontend cannot parse and renders as an empty page).
+        proxy_read_timeout 75s;
+        proxy_send_timeout 75s;
+    }
+
+    # The decoy's submit path, mirrored here so /portal.html still records when
+    # opened on the dashboard port (its own port is the intended way in).
+    location = /api/v1/vpnportal/login {
+        proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # The path the client actually asked for. Without it a bot that
+        # POSTs straight at the API is recorded under the backend's own
+        # route, losing the one detail worth having: which endpoint it
+        # went looking for.
+        proxy_set_header X-Original-Path $request_uri;
+    }
+
+    location = /auth/signin {
+        proxy_pass http://$warroom_backend:8000/api/honeypot/decoy-login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # The path the client actually asked for. Without it a bot that
+        # POSTs straight at the API is recorded under the backend's own
+        # route, losing the one detail worth having: which endpoint it
+        # went looking for.
+        proxy_set_header X-Original-Path $request_uri;
     }
 
     # IOC blocklist feeds for firewalls. The X-API-Key header must be set by
     # the firewall itself (not injected by nginx) — the feeds are pulled
     # externally, not from the browser.
     location = /ioc_IP {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_pass_request_headers on;
     }
 
     location = /ioc_domain {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_pass_request_headers on;
     }
 
     location = /ioc_url {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_pass_request_headers on;
@@ -70,7 +226,7 @@ server {
     # verified by the backend; nginx must NOT inject the X-API-Key here. Proxy
     # buffering is off so the SSE responses stream.
     location /mcp {
-        proxy_pass http://backend:8000;
+        proxy_pass http://$warroom_backend:8000$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_pass_request_headers on;

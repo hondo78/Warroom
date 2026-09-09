@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Sign in</title>
+<style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; background: #eef1f5;
+        font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: #1f2933;
+    }
+    .card {
+        width: 100%; max-width: 380px; background: #fff; border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.08);
+        padding: 2rem 2rem 1.75rem;
+    }
+    .mark {
+        width: 44px; height: 44px; border-radius: 6px; margin: 0 auto 1.25rem;
+        background: #3f6ad8; display: flex; align-items: center;
+        justify-content: center; color: #fff; font-size: 1.3rem;
+    }
+    h1 { font-size: 1.15rem; font-weight: 600; text-align: center; margin: 0 0 1.5rem; }
+    label { display: block; font-size: .8rem; font-weight: 600; margin-bottom: .35rem; }
+    input {
+        width: 100%; padding: .6rem .7rem; font-size: .95rem; margin-bottom: 1rem;
+        border: 1px solid #cbd2d9; border-radius: 4px; background: #fff; color: #1f2933;
+    }
+    input:focus { outline: 2px solid #3f6ad8; outline-offset: -1px; border-color: #3f6ad8; }
+    button {
+        width: 100%; padding: .65rem; font-size: .95rem; font-weight: 600;
+        color: #fff; background: #3f6ad8; border: 0; border-radius: 4px; cursor: pointer;
+    }
+    button:hover { background: #3358bd; }
+    button[disabled] { background: #8fa4d8; cursor: default; }
+    .err {
+        display: none; background: #fdecea; border: 1px solid #f5c2bd; color: #8b1d13;
+        padding: .55rem .7rem; border-radius: 4px; font-size: .85rem; margin-bottom: 1rem;
+    }
+    .foot { margin-top: 1.25rem; text-align: center; font-size: .78rem; color: #7b8794; }
+    .foot a { color: #7b8794; }
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="mark">&#9679;</div>
+    <h1>Sign in to continue</h1>
+    <div class="err" id="err" role="alert"></div>
+    <form id="f" method="post" action="/api/v1/vpnportal/login" autocomplete="on">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="submit" id="b">Sign in</button>
+    </form>
+    <div class="foot"><a href="#" onclick="return false">Forgot your password?</a></div>
+</div>
+<script>
+(function () {
+    var f = document.getElementById('f'), b = document.getElementById('b'),
+        err = document.getElementById('err');
+    f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        err.style.display = 'none';
+        b.disabled = true; b.textContent = 'Signing in…';
+        fetch(f.action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                path: location.pathname
+            })
+        }).catch(function () {}).then(function () {
+            b.disabled = false; b.textContent = 'Sign in';
+            err.textContent = 'Your username or password is incorrect.';
+            err.style.display = 'block';
+            document.getElementById('password').value = '';
+            document.getElementById('password').focus();
+        });
+    });
+})();
+</script>
+</body>
+</html>

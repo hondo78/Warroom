@@ -166,10 +166,17 @@ function renderStages(stages) {
         const enableToggle = st.enabled_key
             ? `<div class="form-check form-switch d-inline-block ms-2 align-middle"><input class="form-check-input" type="checkbox" id="st_${st.key}_enabled" ${st.enabled ? 'checked' : ''}></div>`
             : `<span class="badge text-bg-info ms-2">${t('agentWorkflow.onDemand')}</span>`;
+        // Not every stage asks a model. A deterministic rule has no prompt at
+        // all, and showing an empty prompt box with a "load default" button that
+        // can never load anything reads as a bug — so the whole block is
+        // dropped and the badge says why.
+        const hasPrompt = !!st.prompt_key;
         const promptVal = (SETTINGS && SETTINGS[st.prompt_key]) || '';
-        const promptBadge = st.prompt_overridden
-            ? `<span class="badge text-bg-warning">${t('agentWorkflow.promptCustom')}</span>`
-            : `<span class="badge text-bg-secondary">${t('agentWorkflow.promptDefault')}</span>`;
+        const promptBadge = !hasPrompt
+            ? `<span class="badge text-bg-info">${t('agentWorkflow.noPrompt')}</span>`
+            : st.prompt_overridden
+                ? `<span class="badge text-bg-warning">${t('agentWorkflow.promptCustom')}</span>`
+                : `<span class="badge text-bg-secondary">${t('agentWorkflow.promptDefault')}</span>`;
         const runBtn = st.run_now
             ? `<button class="btn btn-outline-secondary btn-sm" onclick="runNow('${st.run_now}')"><i class="bi bi-play"></i> ${t('agentWorkflow.runNow')}</button>`
             : '';
@@ -182,13 +189,17 @@ function renderStages(stages) {
             <div class="card-body">
                 <p class="admin-hint mb-2"><strong>${t('agentWorkflow.triggerLabel')}</strong> ${escapeHtml(wfT(`agentWorkflow.stages.${st.key}.trigger`, st.trigger))} · ${promptBadge}</p>
                 ${numFields ? `<div class="row g-2 align-items-end mb-1">${numFields}</div>` : ''}
+                ${hasPrompt ? `
                 <label class="form-label mt-2">${t('agentWorkflow.systemPrompt')} <span class="text-secondary">${t('agentWorkflow.systemPromptHint')}</span></label>
                 <textarea class="form-control form-control-sm wf-prompt" id="st_${st.key}_prompt" rows="10" placeholder="${escapeHtml(t('agentWorkflow.promptPlaceholder', { stage: stageLabel(st) }))}">${escapeHtml(promptVal)}</textarea>
+                ` : `<p class="admin-hint mb-0 mt-2">${t('agentWorkflow.noPromptHint')}</p>`}
                 <div class="d-flex justify-content-between gap-2 mt-2 flex-wrap">
                     <div>${runBtn}</div>
                     <div class="d-flex gap-2 flex-wrap">
+                        ${hasPrompt ? `
                         <button class="btn btn-outline-secondary btn-sm" onclick="loadDefaultPrompt('${st.prompt_source}','st_${st.key}_prompt')"><i class="bi bi-arrow-counterclockwise"></i> ${t('agentWorkflow.loadDefault')}</button>
                         <button class="btn btn-outline-secondary btn-sm" onclick="clearPromptField('st_${st.key}_prompt')"><i class="bi bi-eraser"></i> ${t('agentWorkflow.clear')}</button>
+                        ` : ''}
                         <button class="btn btn-primary btn-sm" onclick="saveStage('${st.key}')">${t('agentWorkflow.saveStage')}</button>
                     </div>
                 </div>
@@ -209,8 +220,10 @@ function saveStage(key) {
         const el = document.getElementById(`st_${key}_${s.key}`);
         if (el) { const n = parseInt(el.value, 10); if (!Number.isNaN(n)) payload[s.key] = n; }
     }
+    // Guard on prompt_key too: a prompt-less stage has none, and writing
+    // payload["null"] would create a bogus setting.
     const pt = document.getElementById(`st_${key}_prompt`);
-    if (pt) payload[st.prompt_key] = pt.value;
+    if (pt && st.prompt_key) payload[st.prompt_key] = pt.value;
     putSettings(payload, t('agentWorkflow.stageSaved', { stage: stageLabel(st) }));
 }
 
