@@ -107,9 +107,24 @@ async def fetch_dhcp_records() -> dict[str, dict]:
     return await sfos_xml.fetch_dhcp_records()
 
 
+async def fetch_host_records() -> dict[str, dict]:
+    """Everything the firewall knows about internal hosts: ``{ip: {hostname, mac}}``.
+
+    On the v23 REST API this consults the DNS host entries, the static neighbour
+    table and the MAC-address objects in addition to DHCP reservations — the XML
+    API exposes none of those, so a statically-addressed host with a DNS entry
+    was invisible to hostname resolution. On XML the answer is the DHCP
+    reservations, exactly as before: callers get the best the active transport
+    can give without having to know which one is in use."""
+    if await active_transport() == "rest":
+        return await _try_rest("fetch_host_records")
+    return await sfos_xml.fetch_dhcp_records()
+
+
 async def fetch_dhcp_map() -> dict[str, str]:
-    """The firewall's DHCP IP→hostname mapping (hostname-only)."""
-    return {ip: r["hostname"] for ip, r in (await fetch_dhcp_records()).items()}
+    """The firewall's IP→hostname mapping (hostname-only)."""
+    return {ip: r["hostname"] for ip, r in (await fetch_host_records()).items()
+            if r.get("hostname")}
 
 
 async def fetch_device_info() -> dict:

@@ -35,7 +35,8 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.sfos_common import IP_RE, MAC_RE, NAME_KEYS, host_record, is_host_ip
+from app.sfos_common import (IP_RE, MAC_RE, NAME_KEYS, extract_host,
+                             host_record, is_host_ip)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,22 @@ EP_SYSTEM_SETTINGS = "/administration/system-settings"
 # endpoint in the v23 API surface — only servers, relays and settings — so
 # static reservations are the reliable source, exactly as with the XML API.
 DHCP_ENDPOINTS = (EP_DHCP_SERVERS, EP_DHCP_RELAYS, EP_DHCP_SETTINGS)
+
+# Three more places the firewall already knows an internal host by name or MAC.
+# The XML API exposed none of them, which is why hostname resolution has only
+# ever seen DHCP reservations: a host with a static address and a DNS entry was
+# invisible to it. All read-only.
+EP_DNS_HOST_ENTRIES = "/network/dns/host-entries"
+EP_STATIC_NEIGHBORS = "/network/neighbors/static/ipv4"
+EP_MAC_ADDRESSES = "/network/addresses/mac"
+
+# Scanned in order, first answer per IP wins. DHCP reservations lead because an
+# operator maintains them deliberately; DNS entries follow; the neighbour and
+# MAC tables come last, since they usually carry an address without a name and
+# are there to fill in the MAC rather than to name anything.
+HOST_RECORD_ENDPOINTS = DHCP_ENDPOINTS + (
+    EP_DNS_HOST_ENTRIES, EP_STATIC_NEIGHBORS, EP_MAC_ADDRESSES,
+)
 
 
 class SfosRestError(RuntimeError):
@@ -152,13 +169,45 @@ def parse_dhcp_records(payload: Any) -> dict[str, dict]:
         flat = _scalars(obj)
         if not flat:
             continue
-        ip = next((v for v in flat.values() if IP_RE.match(v) and is_host_ip(v)), "")
-        name = next((flat[k] for k in NAME_KEYS if flat.get(k)), "")
-        mac = next((v for v in flat.values() if MAC_RE.match(v)), "")
+        ip, name, mac = extract_host(flat)
         rec = host_record(ip, name, mac)
         if rec:
             out.setdefault(ip, rec)
     return out
+
+
+def parse_host_records(payload: Any) -> dict[str, dict]:
+    """Like :func:`parse_dhcp_records`, but also keeps rows that carry an IP and
+    a MAC without a name.
+
+    That is the shape of a neighbour/ARP entry and of the MAC-address object
+    table. Neither names a host, but both know its MAC — and the MAC is what
+    host-identity monitoring watches for changes, so a nameless row is still
+    worth having."""
+    out: dict[str, dict] = {}
+    for obj in _walk(payload):
+        flat = _scalars(obj)
+        if not flat:
+            continue
+        ip, name, mac = extract_host(flat)
+        rec = host_record(ip, name, mac, require_name=False)
+        if rec:
+            out.setdefault(ip, rec)
+    return out
+
+
+def _merge_records(into: dict[str, dict], new: dict[str, dict]) -> None:
+    """Fold ``new`` into ``into``, first non-empty value winning *per field*.
+
+    Not first-record-wins: a DHCP reservation names a host but may carry no MAC,
+    while the neighbour table has the MAC and no name. Merging whole records
+    would throw one of the two away — which is the entire reason for consulting
+    more than one endpoint."""
+    for ip, rec in new.items():
+        cur = into.setdefault(ip, {"hostname": None, "mac": None})
+        for field in ("hostname", "mac"):
+            if not cur.get(field) and rec.get(field):
+                cur[field] = rec[field]
 
 
 def _first(flat: dict[str, str], *keys: str) -> str:
@@ -168,38 +217,82 @@ def _first(flat: dict[str, str], *keys: str) -> str:
     return ""
 
 
+def _cidr_to_netmask(cidr) -> str | None:
+    """24 -> "255.255.255.0". The REST API reports a prefix length where the XML
+    API reported a dotted mask, and callers were written against the latter."""
+    try:
+        n = int(cidr)
+    except (TypeError, ValueError):
+        return None
+    if not 0 < n <= 32:
+        return None
+    bits = (0xFFFFFFFF << (32 - n)) & 0xFFFFFFFF
+    return ".".join(str((bits >> sh) & 0xFF) for sh in (24, 16, 8, 0))
+
+
 def parse_interfaces(payload: Any) -> list[dict]:
     """Parse the interface list into the facade's interface shape.
 
-    An object counts as an interface when it has a name and at least one of the
-    interface-ish fields (hardware / zone / IP). VLANs arrive in the same list
-    on the REST API rather than as a separate entity, so ``kind`` is derived
-    from whatever the record says about itself."""
+    Verified against a live v23 firewall, whose records nest what the XML API
+    kept flat::
+
+        {"name": "Port3", "hardwareName": "Port3", "type": "physical",
+         "enabled": true, "zone": {"name": "MGMT"},
+         "ipv4": {"ipv4Address": "172.16.3.1", "cidr": 24,
+                  "gatewayIpAddress": "", "assignmentType": "static"}}
+
+    Two details matter. ``type`` already says physical/vlan/xfrm, so the kind is
+    read rather than guessed from the name. And the address must be taken from
+    ``ipv4Address`` specifically: a DHCP-assigned WAN port carries a populated
+    ``gatewayIpAddress`` beside an empty address, so anything scanning the
+    record for "an IP" adopts the gateway as the interface's own.
+
+    Falls back to the older flat shape when a record does not look like this, so
+    a firmware that reports differently still yields something."""
     out: list[dict] = []
     seen: set[str] = set()
     for obj in _walk(payload):
-        flat = _scalars(obj)
-        name = _first(flat, "name", "interfacename", "interface_name", "hardware")
+        if not isinstance(obj, dict):
+            continue
+        name = str(obj.get("name") or obj.get("hardwareName") or "").strip()
         if not name or name in seen:
             continue
-        hardware = _first(flat, "hardware", "device", "port")
-        zone = _first(flat, "zone", "networkzone", "network_zone")
-        ip = _first(flat, "ipaddress", "ip_address", "ipv4address", "ipv4_address", "ip")
-        netmask = _first(flat, "netmask", "subnetmask", "subnet_mask", "prefix")
-        if not (hardware or zone or ip):
-            continue
-        vlan_id = _first(flat, "vlanid", "vlan_id", "vlan")
-        kind = "vlan" if (vlan_id or "vlan" in name.lower()) else "physical"
+        ipv4 = obj.get("ipv4") if isinstance(obj.get("ipv4"), dict) else None
+        zone_obj = obj.get("zone") if isinstance(obj.get("zone"), dict) else None
+        itype = str(obj.get("type") or "").strip().lower()
+
+        if ipv4 is not None or zone_obj is not None or itype:
+            ip = str((ipv4 or {}).get("ipv4Address") or "").strip()
+            rec = {
+                "name": name,
+                "hardware": str(obj.get("hardwareName") or "").strip() or None,
+                "zone": str((zone_obj or {}).get("name") or "").strip(),
+                "ip": ip if IP_RE.match(ip) else None,
+                "netmask": _cidr_to_netmask((ipv4 or {}).get("cidr")),
+                "status": ("enabled" if obj.get("enabled") else "disabled")
+                          if "enabled" in obj else None,
+                "kind": itype or "physical",
+            }
+        else:
+            flat = _scalars(obj)
+            hardware = _first(flat, "hardware", "device", "port")
+            zone = _first(flat, "zone", "networkzone", "network_zone")
+            ip = _first(flat, "ipaddress", "ip_address", "ipv4address",
+                        "ipv4_address", "ip")
+            if not (hardware or zone or ip):
+                continue
+            vlan_id = _first(flat, "vlanid", "vlan_id", "vlan")
+            rec = {
+                "name": name,
+                "hardware": hardware or None,
+                "zone": zone,
+                "ip": ip if IP_RE.match(ip) else None,
+                "netmask": _first(flat, "netmask", "subnetmask", "subnet_mask") or None,
+                "status": _first(flat, "status", "state") or None,
+                "kind": "vlan" if (vlan_id or "vlan" in name.lower()) else "physical",
+            }
         seen.add(name)
-        out.append({
-            "name": name,
-            "hardware": hardware or None,
-            "zone": zone,
-            "ip": ip if IP_RE.match(ip) else None,
-            "netmask": netmask or None,
-            "status": _first(flat, "status", "state") or None,
-            "kind": kind,
-        })
+        out.append(rec)
     return out
 
 
@@ -236,8 +329,34 @@ async def fetch_dhcp_records() -> dict[str, dict]:
     return out
 
 
+async def fetch_host_records() -> dict[str, dict]:
+    """Everything the firewall knows about internal hosts, from every endpoint
+    that knows something: DHCP reservations, DNS host entries, the static
+    neighbour table and the MAC-address objects.
+
+    The XML API exposed only DHCP reservations, so a host with a static address
+    and a DNS entry was invisible to hostname resolution. Fields are merged
+    rather than records, so a name from one endpoint and a MAC from another end
+    up on the same host."""
+    out: dict[str, dict] = {}
+    errors: list[str] = []
+    for ep in HOST_RECORD_ENDPOINTS:
+        try:
+            _merge_records(out, parse_host_records(await _get(ep)))
+        except SfosRestAuthError:
+            raise
+        except SfosRestError as e:
+            errors.append(f"{ep}: {e}")
+    if not out and errors:
+        raise SfosRestError("; ".join(errors)[:400])
+    # A row with neither a name nor a MAC helps nobody; parse_host_records
+    # cannot produce one, but a merge of two empty halves could.
+    return {ip: r for ip, r in out.items() if r.get("hostname") or r.get("mac")}
+
+
 async def fetch_dhcp_map() -> dict[str, str]:
-    return {ip: r["hostname"] for ip, r in (await fetch_dhcp_records()).items()}
+    return {ip: r["hostname"] for ip, r in (await fetch_dhcp_records()).items()
+            if r.get("hostname")}
 
 
 async def fetch_device_info() -> dict:

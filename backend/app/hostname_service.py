@@ -140,9 +140,14 @@ _dhcp_cache: dict = {"records": {}, "at": 0.0}
 
 
 async def get_dhcp_records(force: bool = False) -> dict[str, dict]:
-    """Cached {ip: {hostname, mac}} from the Sophos Firewall DHCP config (XML
-    API). Returns {} when the firewall API is disabled; keeps the last good set
-    on a transient fetch error."""
+    """Cached {ip: {hostname, mac}} of what the firewall knows about internal
+    hosts. Returns {} when the firewall API is disabled; keeps the last good set
+    on a transient fetch error.
+
+    Named for DHCP because that was its only source for a long time. On the v23
+    REST API it also covers DNS host entries, the static neighbour table and the
+    MAC-address objects — so a host with a fixed address and a DNS entry, which
+    has no DHCP reservation to be found in, now resolves too."""
     if not settings.firewall_api_enabled:
         return {}
     now = _time.monotonic()
@@ -150,15 +155,16 @@ async def get_dhcp_records(force: bool = False) -> dict[str, dict]:
     if not force and _dhcp_cache["records"] and (now - _dhcp_cache["at"]) < ttl:
         return _dhcp_cache["records"]
     try:
-        from app.sfos_client import fetch_dhcp_records
-        recs = await fetch_dhcp_records()
+        from app.sfos_client import fetch_host_records
+        recs = await fetch_host_records()
         _dhcp_cache["records"] = recs
         _dhcp_cache["at"] = now
-        logger.info(f"DHCP from firewall: {len(recs)} record(s) "
-                    f"({sum(1 for r in recs.values() if r.get('mac'))} with MAC)")
+        logger.info(f"firewall host records: {len(recs)} "
+                    f"({sum(1 for r in recs.values() if r.get('hostname'))} named, "
+                    f"{sum(1 for r in recs.values() if r.get('mac'))} with MAC)")
         return recs
     except Exception as e:
-        logger.warning(f"DHCP fetch failed: {e}")
+        logger.warning(f"firewall host-record fetch failed: {e}")
         return _dhcp_cache["records"]
 
 

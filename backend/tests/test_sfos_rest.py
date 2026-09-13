@@ -251,3 +251,171 @@ def test_a_pinned_rest_mode_still_surfaces_the_error(monkeypatch):
 
     with pytest.raises(TimeoutError):
         asyncio.run(sfos_client._try_rest("fetch_dhcp_records"))
+
+
+# --- the XML login rejection has to be actionable -----------------------------
+
+def test_an_xml_auth_failure_names_what_to_check():
+    """SFOS answers "Authentication Failure" for a wrong password, a source IP
+    that is not allow-listed, and a profile without API rights alike. The bare
+    status sends operators to re-check the password, which is the least likely
+    of the three — the per-IP allow-list is what silently goes stale."""
+    from app import sfos_xml
+
+    recs, err = sfos_xml.parse_dhcp_records(
+        '<Response><Login><status>Authentication Failure</status></Login></Response>')
+    assert recs == {}
+    assert "API access" in err
+    assert "HOST" in err          # the firewall sees the Docker host, not the container
+    assert "Authentication Failure" in err   # the original status is not thrown away
+
+
+def test_a_successful_login_is_not_decorated_with_a_hint():
+    from app import sfos_xml
+
+    recs, err = sfos_xml.parse_dhcp_records(
+        '<Response><Login><status>Authentication Successful</status></Login>'
+        '<DHCPStaticEntry><HostName>ws-1</HostName><IPAddress>10.0.0.5</IPAddress>'
+        '</DHCPStaticEntry></Response>')
+    assert err is None
+    assert recs["10.0.0.5"]["hostname"] == "ws-1"
+
+
+# --- host records from more than DHCP ----------------------------------------
+
+def test_a_neighbour_entry_without_a_name_is_kept_for_its_mac():
+    """ARP/neighbour rows name nothing but know the MAC — which is what
+    host-identity monitoring watches. parse_dhcp_records drops them; the host
+    record parser must not."""
+    payload = [{"ipAddress": "10.0.0.30", "macAddress": "aa:bb:cc:dd:ee:30"}]
+    assert sfos_rest.parse_dhcp_records(payload) == {}
+    recs = sfos_rest.parse_host_records(payload)
+    assert recs["10.0.0.30"] == {"hostname": None, "mac": "aa:bb:cc:dd:ee:30"}
+
+
+def test_a_row_with_neither_name_nor_mac_is_still_rejected():
+    """Relaxing the name requirement must not start accepting gateways, DHCP
+    range bounds or netmasks as if they were hosts. The MAC is the discriminator
+    — infrastructure addresses never carry one."""
+    payload = [{"name": "lan-dhcp", "gateway": "192.168.10.1",
+                "startIp": "192.168.10.100", "subnetMask": "255.255.255.0"}]
+    assert sfos_rest.parse_host_records(payload) == {}
+
+
+def test_a_name_from_one_endpoint_merges_with_a_mac_from_another():
+    """The whole reason for consulting four endpoints: a DHCP reservation names
+    a host, the neighbour table has its MAC. Merging whole records would throw
+    one of the two away."""
+    out = {}
+    sfos_rest._merge_records(out, sfos_rest.parse_host_records(
+        [{"hostname": "ws-01", "ipAddress": "10.0.0.40"}]))
+    sfos_rest._merge_records(out, sfos_rest.parse_host_records(
+        [{"ipAddress": "10.0.0.40", "macAddress": "aa:bb:cc:dd:ee:40"}]))
+    assert out["10.0.0.40"] == {"hostname": "ws-01", "mac": "aa:bb:cc:dd:ee:40"}
+
+
+def test_the_earlier_endpoint_wins_per_field():
+    """Endpoints are scanned in priority order, so a later, less deliberate
+    source must not overwrite a name an operator maintains by hand."""
+    out = {}
+    sfos_rest._merge_records(out, {"10.0.0.41": {"hostname": "reserved", "mac": None}})
+    sfos_rest._merge_records(out, {"10.0.0.41": {"hostname": "guessed", "mac": "aa:bb:cc:dd:ee:41"}})
+    assert out["10.0.0.41"]["hostname"] == "reserved"
+    assert out["10.0.0.41"]["mac"] == "aa:bb:cc:dd:ee:41"
+
+
+def test_dhcp_parsing_is_unchanged_by_the_relaxed_rule():
+    """parse_dhcp_records still requires a name, so nothing that depended on it
+    starts seeing nameless rows."""
+    payload = [{"hostname": "printer", "ipAddress": "192.168.10.20",
+                "macAddress": "AA:BB:CC:DD:EE:01"},
+               {"ipAddress": "192.168.10.21", "macAddress": "AA:BB:CC:DD:EE:02"}]
+    recs = sfos_rest.parse_dhcp_records(payload)
+    assert set(recs) == {"192.168.10.20"}
+
+
+def test_the_xml_transport_answers_the_host_record_question_too():
+    """The facade asks both transports the same thing; XML must not 404 on the
+    richer question just because its answer is narrower."""
+    from app import sfos_xml
+    assert callable(sfos_xml.fetch_host_records)
+
+
+def test_a_dhcp_scope_does_not_become_a_host_at_its_own_gateway():
+    """Both transports used to scan a record for the first value shaped like a
+    host IP. On a DHCP scope row that is the *gateway* — so the firewall itself
+    appeared in the inventory renamed after the scope. is_host_ip() cannot catch
+    it: a gateway is a perfectly valid host address."""
+    from app.sfos_common import extract_host
+
+    scope = {"name": "lan-dhcp", "gateway": "192.168.10.1",
+             "startip": "192.168.10.100", "subnetmask": "255.255.255.0"}
+    assert extract_host(scope) == ("", "", "")
+
+    # A reservation *inside* a scope document still has a MAC, and must survive.
+    reservation = {"hostname": "ws-01", "ipaddress": "192.168.10.50",
+                   "macaddress": "aa:bb:cc:dd:ee:50", "gateway": "192.168.10.1"}
+    ip, name, mac = extract_host(reservation)
+    assert (ip, name) == ("192.168.10.50", "ws-01")
+
+
+def test_the_named_address_field_wins_over_any_other_ip_in_the_row():
+    """A host row can mention more than one address. The one in an address field
+    is the host's; whatever else is there is context."""
+    from app.sfos_common import extract_host
+
+    ip, name, _ = extract_host({"hostname": "ws-02", "dnsserver": "10.0.0.1",
+                                "ipaddress": "10.0.0.77"})
+    assert ip == "10.0.0.77"
+
+
+# --- the real v23 interface schema, captured from a live firewall -------------
+
+_V23_IFACE = {"items": [
+    {"name": "Port3", "hardwareName": "Port3", "type": "physical", "enabled": True,
+     "zone": {"name": "MGMT"},
+     "ipv4": {"ipv4Address": "172.16.3.1", "cidr": 24,
+              "gatewayIpAddress": "", "assignmentType": "static"}},
+    # A DHCP WAN port: no address of its own, but a populated gateway.
+    {"name": "Port4", "hardwareName": "Port4", "type": "physical", "enabled": False,
+     "zone": {"name": "WAN"},
+     "ipv4": {"ipv4Address": "", "cidr": 0,
+              "gatewayIpAddress": "128.0.0.1", "assignmentType": "dhcp"}},
+    {"name": "VLAN-LAN", "hardwareName": "Port1", "type": "vlan", "enabled": True,
+     "zone": {"name": "LAN"},
+     "ipv4": {"ipv4Address": "172.16.16.1", "cidr": 23, "gatewayIpAddress": ""}},
+]}
+
+
+def test_the_nested_v23_interface_shape_is_parsed():
+    ifaces = {i["name"]: i for i in sfos_rest.parse_interfaces(_V23_IFACE)}
+    assert ifaces["Port3"]["ip"] == "172.16.3.1"
+    assert ifaces["Port3"]["netmask"] == "255.255.255.0"   # cidr 24 -> dotted
+    assert ifaces["Port3"]["zone"] == "MGMT"
+    assert ifaces["Port3"]["status"] == "enabled"
+
+
+def test_an_interface_does_not_adopt_its_gateway_as_its_own_address():
+    """A DHCP WAN port has an empty address beside a populated gateway. Anything
+    scanning the record for "an IP" reports the gateway as the interface's own —
+    and that address then looks like one of the firewall's own IPs."""
+    ifaces = {i["name"]: i for i in sfos_rest.parse_interfaces(_V23_IFACE)}
+    assert ifaces["Port4"]["ip"] is None
+    assert "128.0.0.1" not in {i["ip"] for i in sfos_rest.parse_interfaces(_V23_IFACE)}
+
+
+def test_the_kind_is_read_from_the_record_not_guessed_from_the_name():
+    """`type` already says physical/vlan/xfrm. Guessing from the name got
+    'VLAN-LAN' right by luck and 'BACKUP' wrong."""
+    ifaces = {i["name"]: i for i in sfos_rest.parse_interfaces(_V23_IFACE)}
+    assert ifaces["VLAN-LAN"]["kind"] == "vlan"
+    assert ifaces["Port3"]["kind"] == "physical"
+    assert ifaces["VLAN-LAN"]["netmask"] == "255.255.254.0"   # /23
+
+
+def test_a_flat_interface_record_still_works():
+    """Older/other firmware reports the fields flat; the fallback must remain."""
+    ifaces = sfos_rest.parse_interfaces(
+        [{"name": "Port1", "hardware": "Port1", "zone": "LAN",
+          "ipAddress": "10.0.0.1", "netmask": "255.255.255.0", "status": "up"}])
+    assert ifaces[0]["ip"] == "10.0.0.1" and ifaces[0]["zone"] == "LAN"

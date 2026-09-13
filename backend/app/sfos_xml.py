@@ -27,7 +27,8 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from app.config import settings
-from app.sfos_common import IP_RE, MAC_RE, NAME_KEYS, host_record, is_host_ip
+from app.sfos_common import (IP_RE, MAC_RE, NAME_KEYS, extract_host,
+                             host_record, is_host_ip)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,31 @@ def _build_reqxml(entity: str) -> str:
             f"<Password>{pw}</Password></Login><Get>{gets}</Get></Request>")
 
 
+def _login_failure_hint(status: str) -> str:
+    """Turn SFOS's one-line login rejection into something actionable.
+
+    SFOS answers ``Authentication Failure`` for three unrelated causes, and the
+    response says nothing about which: a wrong password, a source IP that is not
+    on the API allow-list, and an account whose profile lacks API rights. An
+    operator reading the bare status has no way to tell them apart and will
+    almost always re-check the password — which is the least likely of the
+    three, because the allow-list is per-IP and quietly invalidated whenever the
+    address Warroom is seen from changes.
+
+    Note the address the firewall sees is the *Docker host's* outbound IP, not
+    this container's: outbound container traffic is SNATed. Allow-listing the
+    container subnet therefore has no effect.
+    """
+    if "success" in status.lower():
+        return status
+    return (f"{status} — SFOS reports this for a wrong password, a source IP "
+            f"that is not allow-listed, and a profile without API rights alike. "
+            f"Check, in this order: Administration › API access (the firewall "
+            f"must list the Docker HOST's IP, not the container's), "
+            f"Profiles › Device access (API permission on the profile), then "
+            f"the password.")
+
+
 def parse_dhcp_records(xml_text: str) -> tuple[dict[str, dict], str | None]:
     """Parse an SFOS API response into {ip: {"hostname", "mac"}}. Returns
     (records, error).
@@ -58,16 +84,14 @@ def parse_dhcp_records(xml_text: str) -> tuple[dict[str, dict], str | None]:
 
     st = root.find(".//Login/status")
     if st is not None and "success" not in (st.text or "").lower():
-        return {}, (st.text or "authentication failed").strip()
+        return {}, _login_failure_hint((st.text or "authentication failed").strip())
 
     out: dict[str, dict] = {}
     for rec in root.iter():
         kids = {c.tag.lower(): (c.text or "").strip() for c in list(rec)}
         if not kids:
             continue
-        ip = next((v for v in kids.values() if IP_RE.match(v) and is_host_ip(v)), "")
-        name = next((kids[k] for k in NAME_KEYS if kids.get(k)), "")
-        mac = next((v for v in kids.values() if MAC_RE.match(v)), "")
+        ip, name, mac = extract_host(kids)
         rec_out = host_record(ip, name, mac)
         if rec_out:
             out.setdefault(ip, rec_out)
@@ -151,6 +175,17 @@ async def fetch_dhcp_records() -> dict[str, dict]:
     if err:
         raise RuntimeError(f"SFOS API: {err}")
     return recs
+
+
+async def fetch_host_records() -> dict[str, dict]:
+    """The same records as :func:`fetch_dhcp_records`.
+
+    Present so the facade can ask either transport the same question. The REST
+    transport answers it from four endpoints; the XML API exposes only DHCP
+    reservations, so here the richer question has the narrower answer rather
+    than no answer — and the facade does not need to know which transport it is
+    talking to."""
+    return await fetch_dhcp_records()
 
 
 async def fetch_dhcp_map() -> dict[str, str]:
