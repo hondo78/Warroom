@@ -171,3 +171,28 @@ def test_the_equals_spelling_of_a_flood_rate_is_blocked_too():
     # only knew the spaced form blocked one and passed the other.
     assert _guard("nmap -Pn -p 80 --min-rate=90000 example.com")[0] is None
     assert _guard("nmap -Pn -p 80 --min-rate 90000 example.com")[0] is None
+
+
+# --- approving a command is a one-time claim ---------------------------------
+
+def test_the_approval_carries_its_precondition_in_the_update():
+    """Read-then-write let two concurrent approvals both see 'pending' and both
+    execute — the intrusive command ran twice and the second result overwrote
+    the first. The precondition has to travel with the UPDATE so the database
+    settles it, not the application."""
+    import inspect
+    from app import kali_client
+
+    src = inspect.getsource(kali_client._claim)
+    assert "update(KaliCommand)" in src
+    assert 'KaliCommand.status == "pending"' in src
+    # and the decision must not be re-derived from a prior read
+    assert "db.get(KaliCommand, cmd_id)" in src   # only for the error message
+
+
+def test_approve_and_reject_both_go_through_the_claim():
+    import inspect
+    from app import kali_client
+
+    for fn in (kali_client.approve_command, kali_client.reject_command):
+        assert "_claim(" in inspect.getsource(fn), fn.__name__

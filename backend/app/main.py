@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache import cached
 from app.collector import collect_all, collect_o365
 from app.config import settings
+from app.log_filters import IPS_FILTER_SQL, WAF_FILTER_SQL
 from app.database import async_session, ensure_schema, get_db, request_session
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
@@ -407,6 +408,23 @@ class UserIn(BaseModel):
 class UserUpdateIn(BaseModel):
     password: str | None = Field(default=None, min_length=6, max_length=256)
     role: str | None = None
+
+
+# Settings that grant capability rather than configure it. Changing any of these
+# requires `admin`, not merely `analyst` — see update_admin_settings.
+PRIVILEGED_SETTINGS = {
+    "kali_mcp_enabled",          # may Warroom run commands on the Kali box at all
+    "kali_require_approval",     # must a human approve them first
+    "kali_target_allowlist",     # what those commands may be pointed at
+    # NB: kali_api_token is deliberately absent — it is env-only and cannot
+    # be submitted here at all, so listing it would be a guard that never
+    # fires and a reader would assume it was covered.
+    "mcp_enabled",               # the read-only MCP surface
+    "mcp_api_key",
+    "mcp_honeypot_reveal_passwords",
+    "auth_enabled",              # turning authentication off entirely
+    "agent_auto_execute",        # let the agent act without a human
+}
 
 
 def _require_admin(request: Request) -> dict:
@@ -5563,13 +5581,7 @@ async def get_failed_logins(
 # A row qualifies as a WAF event if its log_type is "WAF" or its
 # log_component string indicates Web Application Firewall / Web Server
 # Protection (Sophos firmware naming varies between versions).
-_WAF_FILTER_SQL = """(
-    log_type = 'WAF'
-    OR (raw_data->>'log_component') ILIKE '%waf%'
-    OR (raw_data->>'log_component') ILIKE '%web app%'
-    OR (raw_data->>'log_component') ILIKE '%web server protection%'
-    OR (raw_data->>'log_subtype')   ILIKE '%waf%'
-)"""
+_WAF_FILTER_SQL = WAF_FILTER_SQL
 
 # Of those WAF rows, only the ones that actually represent a detected
 # attack — Sophos also logs allowed/clean requests via the same log_type,
@@ -5827,12 +5839,7 @@ async def get_waf_recent(
 # Sophos firmware names this subsystem inconsistently — log_type is usually
 # "IDP" (the Sophos term for IPS), but log_component may say "Intrusion
 # Prevention" or similar. Cast a wide enough net.
-_IPS_FILTER_SQL = """(
-    log_type IN ('IDP', 'IPS')
-    OR (raw_data->>'log_component') ILIKE '%intrusion%'
-    OR (raw_data->>'log_component') ILIKE '%idp%'
-    OR (raw_data->>'log_component') = 'IPS'
-)"""
+_IPS_FILTER_SQL = IPS_FILTER_SQL
 
 
 @app.get("/api/firewall-logs/ips/stats")
@@ -7176,8 +7183,20 @@ class AdminSettingsIn(BaseModel):
 
 
 @app.put("/api/admin/settings")
-async def update_admin_settings(body: AdminSettingsIn):
+async def update_admin_settings(body: AdminSettingsIn, request: Request):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+
+    # A handful of settings are not ordinary configuration: they decide whether
+    # Warroom may run commands on a remote box, whether a human has to approve
+    # them first, and who may reach the read-only SQL and log-search surfaces.
+    # The endpoint as a whole requires only `analyst`, which is right for the
+    # day-to-day settings — but it meant an analyst could switch on remote
+    # execution and switch off the approval gate in the same request. These few
+    # need the higher bar; raising it for everything would change who can do
+    # routine work.
+    privileged = PRIVILEGED_SETTINGS & set(updates)
+    if privileged:
+        _require_admin(request)
     if "log_level" in updates:
         lvl = updates["log_level"].upper()
         if lvl not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

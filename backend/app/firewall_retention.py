@@ -78,12 +78,38 @@ async def purge_firewall_logs() -> dict:
     if rollup_deleted:
         logger.info(f"firewall_retention[map_rollup]: deleted {rollup_deleted} day-row(s) older than {sec_cut.date()}")
 
+    # Phase 4: the presence tables. The ping sweep writes a snapshot row per run
+    # and an event row per state change, and nothing ever removed them — 12k
+    # snapshot rows accumulated in six weeks with no upper bound. The presence
+    # UI never looks back further than the security window, so anything beyond
+    # it is storage nobody reads. Bounded by the same setting rather than a new
+    # one: an operator who shortens log retention means it for this too.
+    presence_deleted = 0
+    async with async_session() as db:
+        for table, column in (("host_presence_snapshots", "checked_at"),
+                              ("host_presence_events", "at")):
+            try:
+                presence_deleted += (await db.execute(
+                    text(f"DELETE FROM {table} WHERE {column} < :cut"),
+                    {"cut": sec_cut},
+                )).rowcount or 0
+            except Exception as e:
+                # Best-effort, like the rollup above: a presence table that does
+                # not exist yet must not abort the log purge, which is the part
+                # that actually matters for disk.
+                logger.warning(f"firewall_retention[presence]: {table}: {str(e)[:120]}")
+        await db.commit()
+    if presence_deleted:
+        logger.info(f"firewall_retention[presence]: deleted {presence_deleted} "
+                    f"row(s) older than {sec_cut.date()}")
+
     if not (conn_deleted or sec_deleted):
         logger.debug("firewall_retention: nothing to purge")
     return {
         "connection_deleted": conn_deleted,
         "security_deleted": sec_deleted,
         "rollup_deleted": rollup_deleted,
+        "presence_deleted": presence_deleted,
         "connection_cutoff": conn_cut.isoformat(),
         "security_cutoff": sec_cut.isoformat(),
     }

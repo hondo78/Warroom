@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.config import settings
+from app.log_filters import IPS_FILTER_SQL, WAF_FILTER_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -874,20 +875,15 @@ _MIGRATIONS = [
     # hand — the statements here run inside a transaction (CONCURRENTLY is not
     # allowed there) and would take an exclusive lock. On a fresh deployment the
     # table is empty, so this is instant.
-    """
+    # Generated from the same constants the widget queries use, so the index
+    # predicate and the query predicate cannot drift apart — see app.log_filters.
+    f"""
     CREATE INDEX IF NOT EXISTS idx_fw_logs_waf_created ON firewall_logs (created_at DESC)
-    WHERE log_type = 'WAF'
-       OR (raw_data->>'log_component') ILIKE '%waf%'
-       OR (raw_data->>'log_component') ILIKE '%web app%'
-       OR (raw_data->>'log_component') ILIKE '%web server protection%'
-       OR (raw_data->>'log_subtype') ILIKE '%waf%'
+    WHERE {WAF_FILTER_SQL}
     """,
-    """
+    f"""
     CREATE INDEX IF NOT EXISTS idx_fw_logs_ips_created ON firewall_logs (created_at DESC)
-    WHERE log_type IN ('IDP', 'IPS')
-       OR (raw_data->>'log_component') ILIKE '%intrusion%'
-       OR (raw_data->>'log_component') ILIKE '%idp%'
-       OR (raw_data->>'log_component') = 'IPS'
+    WHERE {IPS_FILTER_SQL}
     """,
     # Passwords genuinely in use here, stored only as a keyed fingerprint, so a
     # honeypot submission can be recognised as a leaked credential rather than a
@@ -921,6 +917,13 @@ async def ensure_schema() -> None:
     for stmt in _MIGRATIONS:
         try:
             async with bg_engine.begin() as conn:
+                # Fail fast rather than hang the boot. These run inside lifespan,
+                # so anything waiting here keeps the app from serving at all —
+                # nginx answers 502 and a container healthcheck with a short
+                # timeout restarts into the same wait. A blocked ALTER or index
+                # build gives up after 15s and is retried next start, which is
+                # already how every failure here is handled.
+                await conn.execute(text("SET LOCAL lock_timeout = '15s'"))
                 await conn.execute(text(stmt))
         except Exception as e:
             logger.warning(f"migration failed (will retry next start): {str(e)[:160]} | {stmt[:70].strip()}")

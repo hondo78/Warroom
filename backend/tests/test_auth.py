@@ -126,3 +126,38 @@ def test_actor_name_always_returns_a_string_that_fits_the_column():
 
     out = actor_name(_R())
     assert isinstance(out, str) and len(out) <= 100
+
+
+# --- settings that grant capability need the higher bar ----------------------
+
+def test_capability_granting_settings_are_listed_as_privileged():
+    """PUT /api/admin/settings requires only `analyst`, which is right for the
+    day-to-day settings. These few are different: they decide whether Warroom
+    may run commands on a remote box, whether a human has to approve them, and
+    whether authentication applies at all."""
+    from app.main import PRIVILEGED_SETTINGS
+
+    for key in ("kali_mcp_enabled", "kali_require_approval",
+                "kali_target_allowlist", "mcp_enabled", "mcp_api_key",
+                "auth_enabled", "agent_auto_execute",
+                "mcp_honeypot_reveal_passwords"):
+        assert key in PRIVILEGED_SETTINGS, key
+
+
+def test_every_privileged_key_is_actually_a_setting():
+    """A typo here fails open — the guard would simply never match. This caught
+    kali_api_token on the first run: env-only, so it can never be submitted to
+    this endpoint and listing it only made the set look more complete than it
+    was."""
+    from app.main import PRIVILEGED_SETTINGS
+    from app.settings_store import MANAGED_KEYS
+
+    assert not (PRIVILEGED_SETTINGS - set(MANAGED_KEYS))
+
+
+def test_the_settings_endpoint_checks_them():
+    import inspect
+    from app.main import update_admin_settings
+
+    src = inspect.getsource(update_admin_settings)
+    assert "PRIVILEGED_SETTINGS" in src and "_require_admin(request)" in src

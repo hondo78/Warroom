@@ -20,7 +20,7 @@ import urllib.parse
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import async_session
@@ -373,30 +373,46 @@ async def submit_command(command: str, actor: str = "agent", *,
     return await _run_and_store(rec_id, command)
 
 
-async def approve_command(cmd_id: int, decided_by: str = "human") -> dict:
+async def _claim(cmd_id: int, new_status: str, decided_by: str) -> dict | None:
+    """Move a pending command to ``new_status``, once.
+
+    Read-then-write was a race with real consequences here: two approvals
+    arriving together (two tabs, two operators, a retried request) both saw
+    ``pending`` before either committed, and the intrusive command ran twice
+    while the second run's output overwrote the first. The UPDATE carries the
+    precondition, so exactly one of them can match a row — the loser is told
+    the command is no longer pending, which is true.
+
+    Returns the command string on success, or an error dict."""
     async with async_session() as db:
+        result = await db.execute(
+            update(KaliCommand)
+            .where(KaliCommand.id == cmd_id, KaliCommand.status == "pending")
+            .values(status=new_status, decided_by=decided_by,
+                    decided_at=datetime.now(timezone.utc))
+            .returning(KaliCommand.command)
+        )
+        row = result.first()
+        await db.commit()
+        if row is not None:
+            return {"command": row[0]}
+
+        # Nothing matched: either no such command, or somebody got there first.
         rec = await db.get(KaliCommand, cmd_id)
         if rec is None:
             return {"error": "not found"}
-        if rec.status != "pending":
-            return {"error": f"command is '{rec.status}', not pending"}
-        rec.status = "approved"
-        rec.decided_by = decided_by
-        rec.decided_at = datetime.now(timezone.utc)
-        command = rec.command
-        await db.commit()
-    return await _run_and_store(cmd_id, command)
+        return {"error": f"command is '{rec.status}', not pending"}
+
+
+async def approve_command(cmd_id: int, decided_by: str = "human") -> dict:
+    claimed = await _claim(cmd_id, "approved", decided_by)
+    if "error" in claimed:
+        return claimed
+    return await _run_and_store(cmd_id, claimed["command"])
 
 
 async def reject_command(cmd_id: int, decided_by: str = "human") -> dict:
-    async with async_session() as db:
-        rec = await db.get(KaliCommand, cmd_id)
-        if rec is None:
-            return {"error": "not found"}
-        if rec.status != "pending":
-            return {"error": f"command is '{rec.status}', not pending"}
-        rec.status = "rejected"
-        rec.decided_by = decided_by
-        rec.decided_at = datetime.now(timezone.utc)
-        await db.commit()
+    claimed = await _claim(cmd_id, "rejected", decided_by)
+    if "error" in claimed:
+        return claimed
     return {"id": cmd_id, "status": "rejected"}

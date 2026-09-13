@@ -43,3 +43,26 @@ def test_both_modules_agree_on_the_bound():
     them was fixed and the other only looked fixed."""
     assert (connection_anomaly._BASELINE_CACHE_MAX
             == service_anomaly._BASELINE_CACHE_MAX)
+
+
+# --- the partial indexes must match the queries they serve -------------------
+
+def test_the_index_predicate_is_the_query_predicate():
+    """A partial index only serves a query whose predicate the planner can prove
+    is implied by the index's own. These were two hand-maintained copies: change
+    one and nothing breaks loudly, the widget just starts sequentially scanning
+    ~29M rows and the dashboard is inexplicably slow."""
+    from app import database
+    from app.log_filters import IPS_FILTER_SQL, WAF_FILTER_SQL
+
+    ddl = "\n".join(database._MIGRATIONS)
+    assert WAF_FILTER_SQL in ddl
+    assert IPS_FILTER_SQL in ddl
+
+
+def test_the_widget_queries_use_the_shared_constants():
+    from app import main
+    from app.log_filters import IPS_FILTER_SQL, WAF_FILTER_SQL
+
+    assert main._WAF_FILTER_SQL is WAF_FILTER_SQL
+    assert main._IPS_FILTER_SQL is IPS_FILTER_SQL
