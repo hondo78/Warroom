@@ -8,7 +8,9 @@ through :func:`run_select`:
   * run inside a ``READ ONLY`` transaction with a ``statement_timeout`` so a
     runaway scan (e.g. the 40GB ``firewall_logs`` table) can't hang the chat;
   * wrapped in an outer ``LIMIT`` so result size is bounded in memory;
-  * the ``app_settings`` table (API keys / secrets) is denied outright.
+  * only tables on an explicit allow-list may be read, and the model is
+    shown only those — secrets, credentials and audit trails are neither
+    readable nor mentioned.
 
 The schema the LLM is shown is generated from the ORM metadata, so it never
 drifts from the actual tables.
@@ -32,8 +34,52 @@ MAX_ROWS = 200
 STATEMENT_TIMEOUT_MS = 8000
 _CELL_MAX = 300
 
-# Tables the chat must never read (secrets live here).
-DENIED_TABLES = {"app_settings"}
+# Tables the chat may read — an allow-list, not a deny-list.
+#
+# A deny-list has to be right about every table that exists now *and* every one
+# added later, and the cost of forgetting one is silent: the first time anybody
+# notices is when a model quotes a password hash back at an operator. This list
+# fails the other way. A new table is unreadable until somebody decides it
+# should be, which is a missing answer rather than a leak.
+#
+# Chat answers are shown to the operator and, unless the local model is in use,
+# travel to an external LLM provider. What is in here is what is acceptable to
+# send there.
+#
+# Kept out, deliberately, and why:
+#   app_settings        API keys and tokens (Fernet-encrypted, but still)
+#   users               password hashes
+#   honeypot_logins     attacker passwords, in the clear on purpose
+#   monitored_passwords canary fingerprints — the one field the API withholds
+#                       precisely because it enables offline guessing
+#   kali_commands       the pentest audit trail
+#   audit_log           who did what, including operator names
+#   chat_sessions/_messages   previous conversations
+ALLOWED_TABLES = {
+    # firewall / network telemetry — the analyst's main subject
+    "firewall_logs", "firewall_locations", "netflow_buckets",
+    "netflow_iface_buckets", "events", "alerts", "detections",
+    # endpoints and hosts
+    "endpoints", "host_inventory", "host_ports", "host_port_events",
+    "host_scans", "host_presence", "host_presence_events",
+    "host_presence_snapshots", "host_identities", "host_identity_events",
+    "ip_hostnames",
+    # blocking decisions and their context
+    "blocked_ips", "blocked_domains", "blocked_urls", "whitelisted_ips",
+    "watchlist_ips", "invalid_usernames", "known_user_overrides",
+    # enrichment
+    "osint_results", "shodan_hosts", "cve_scores", "geoip_cache",
+    # agent activity — decisions, not credentials
+    "agent_decisions", "agent_approval_patterns", "anomaly_verdicts",
+    # honeypot *events* (a decoy file being touched); the credential table is
+    # excluded above
+    "honeypot_events", "honeypots", "honeypot_process_whitelist",
+    # identity / mail telemetry
+    "o365_audit_logs", "m365_login_profiles", "email_metrics",
+    "monitored_connections", "monitored_events",
+    # usage accounting
+    "llm_usage", "osint_usage",
+}
 
 # Defence-in-depth on top of the READ ONLY transaction: reject write/DDL verbs
 # and server-side functions that touch the filesystem or block.
@@ -47,8 +93,39 @@ _FORBIDDEN_RE = re.compile(
     r"dblink|set_config|pg_terminate_backend)\b",
     re.I,
 )
-_DENIED_TABLE_RE = re.compile(r"\b(" + "|".join(DENIED_TABLES) + r")\b", re.I)
 _COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)
+
+# Every table the query reads from. A bare identifier after FROM/JOIN, optionally
+# schema-qualified; an identifier followed by "(" is a set-returning function
+# (generate_series, unnest) and not a table, so it is left alone. Subqueries open
+# with "(" and match nothing here — their own FROM clauses are matched instead.
+_TABLE_REF_RE = re.compile(
+    r"\b(?:from|join)\s+(?:([a-zA-Z_]\w*)\s*\.\s*)?([a-zA-Z_]\w*)\b(?!\s*\()", re.I)
+
+# Names introduced by the query itself, which are not tables and must not be
+# checked against the allow-list: WITH x AS (...), WITH RECURSIVE x AS (...),
+# and further CTEs after a comma.
+_CTE_RE = re.compile(r"(?:\bwith\b(?:\s+recursive\b)?|,)\s*([a-zA-Z_]\w*)\s+as\s*\(", re.I)
+
+
+def _referenced_tables(sql: str) -> set[str]:
+    """Tables the statement reads, with CTE names removed.
+
+    Used to enforce the allow-list. Being wrong in the permissive direction here
+    would defeat the whole control, so anything that parses as a table reference
+    is checked — an over-strict rejection costs an answer, an over-lax one leaks
+    a table."""
+    ctes = {m.group(1).lower() for m in _CTE_RE.finditer(sql)}
+    refs = set()
+    for schema, name in _TABLE_REF_RE.findall(sql):
+        if schema and schema.lower() not in ("public",):
+            # pg_catalog.x, information_schema.x — never allow-listed
+            refs.add(f"{schema.lower()}.{name.lower()}")
+            continue
+        low = name.lower()
+        if low not in ctes:
+            refs.add(low)
+    return refs
 
 
 class SqlError(Exception):
@@ -69,8 +146,13 @@ def _validate(sql: str) -> str:
         raise SqlError("nur SELECT- oder WITH-Abfragen erlaubt")
     if _FORBIDDEN_RE.search(s):
         raise SqlError("unzulaessiges Schluesselwort in der Abfrage")
-    if _DENIED_TABLE_RE.search(s):
-        raise SqlError("Zugriff auf diese Tabelle ist gesperrt")
+    refused = sorted(_referenced_tables(s) - ALLOWED_TABLES)
+    if refused:
+        # Named explicitly: the model is shown only the allow-listed schema, so
+        # a refusal here means it guessed at a table. Telling it which one lets
+        # it correct itself instead of retrying blind.
+        raise SqlError("Zugriff auf diese Tabelle ist gesperrt: "
+                       + ", ".join(refused))
     return s
 
 
@@ -129,7 +211,7 @@ def _schema_text() -> str:
     if _SCHEMA_CACHE is None:
         lines = []
         for tbl in Base.metadata.sorted_tables:
-            if tbl.name in DENIED_TABLES:
+            if tbl.name not in ALLOWED_TABLES:
                 continue
             cols = ", ".join(f"{c.name}:{_simple_type(c)}" for c in tbl.columns)
             lines.append(f"{tbl.name}({cols})")

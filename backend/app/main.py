@@ -3496,7 +3496,17 @@ async def unblock_ip(body: BlockIpIn, db: AsyncSession = Depends(get_db)):
 async def ioc_ip_list(db: AsyncSession = Depends(get_db)):
     """Plain-text IOC feed for firewalls: one IP per line, sorted.
 
-    The firewall must send the X-API-Key header (same auth as /api/*).
+    **Served without authentication**, unlike /api/*: verify_api_key() exempts
+    every /ioc_ path. A firewall polling a third-party threat feed cannot send a
+    header, and a feed the firewall cannot fetch protects nothing — so the trade
+    is a blocklist that anyone reaching this port can read. The list is of
+    addresses already known to be hostile, which is why it was judged
+    acceptable; it does disclose what Warroom has seen and blocked.
+
+    If that trade is not wanted, constrain it at the edge (a source ACL for the
+    firewall's address in nginx) rather than here — the exemption exists because
+    the client cannot authenticate.
+
     Updates are immediate — the list is read live from the DB on every request.
     """
     # When the pull-based threat feed is disabled, serve an empty body so a
@@ -3722,7 +3732,8 @@ async def unblock_domain(body: BlockDomainIn, db: AsyncSession = Depends(get_db)
 async def ioc_domain_list(db: AsyncSession = Depends(get_db)):
     """Plain-text IOC feed for firewalls: one domain per line, sorted.
 
-    Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
+    Served without authentication, exactly like /ioc_IP — see there for why.
+    Read live from the DB on every
     request, so block/unblock takes effect immediately.
     """
     rows = (
@@ -3849,7 +3860,8 @@ async def unblock_url(body: BlockUrlIn, db: AsyncSession = Depends(get_db)):
 async def ioc_url_list(db: AsyncSession = Depends(get_db)):
     """Plain-text IOC feed for firewalls: one URL per line, sorted.
 
-    Same auth as /ioc_IP — X-API-Key required. Read live from the DB on every
+    Served without authentication, exactly like /ioc_IP — see there for why.
+    Read live from the DB on every
     request, so block/unblock takes effect immediately.
     """
     rows = (

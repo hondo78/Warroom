@@ -98,7 +98,16 @@ BENIGN_BEACON_PORTS: frozenset[int] = frozenset({
 
 # In-process baseline cache: the baseline aggregation is heavy (~4 s over 30 d),
 # but changes slowly. Key by window signature; TTL keeps it fresh enough.
+#
+# The key includes the window bounds, so a new entry appears every hour and the
+# previous one is never looked at again. The TTL only decides whether a hit is
+# *served* — it frees nothing — so without a cap the worker's memory grows by
+# one full 30-day map per hour for as long as the process lives, and presents
+# as an unexplained restart rather than as a leak. Only the newest few can still
+# be hit; the rest are dropped on write. Same bound as service_anomaly, which
+# has the identical pattern.
 _BASELINE_TTL = 1800  # 30 min
+_BASELINE_CACHE_MAX = 4
 _baseline_cache: dict[str, tuple[float, dict]] = {}
 
 
@@ -150,6 +159,8 @@ async def _load_baseline(db: AsyncSession, baseline_start: datetime,
 
     out = {"pairs": pairs, "dst_hosts": dst_hosts, "src_up": src_up}
     _baseline_cache[key] = (time.monotonic(), out)
+    for stale in list(_baseline_cache)[:-_BASELINE_CACHE_MAX]:
+        _baseline_cache.pop(stale, None)
     return out
 
 
