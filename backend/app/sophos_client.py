@@ -2,6 +2,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
+
+from app import sophos_graphql as sgql
 from tenacity import (
     AsyncRetrying,
     retry_if_exception,
@@ -719,6 +721,212 @@ class SophosClient:
 
     async def ld_get_run_endpoints(self, run_id: str) -> dict:
         return await self._xdr_get(f"/live-discover/v1/queries/runs/{run_id}/endpoints", {"pageSize": 200})
+
+
+    # ------------------------------------------------------------------
+    # Fusion XDR GraphQL (announced 2026-09-18)
+    #
+    # The successor to everything above this line under "-- Data Lake --" and
+    # "-- Live Discover --": those REST routes are deprecated and marked "don't
+    # use for new integrations". Both transports stay for now — deprecated is
+    # not removed, and a tenant that has not been migrated still answers on the
+    # old routes, exactly the reasoning that kept the SFOS XML transport alive.
+    #
+    # One difference worth repeating at the call site: GraphQL does NOT use the
+    # tenant's data region. _base_url() must not appear anywhere below.
+    # ------------------------------------------------------------------
+
+    async def _gql(self, query: str, variables: dict | None = None,
+                   operation: str | None = None, timeout: float = 60.0) -> dict:
+        await self._ensure_auth()
+        return await sgql.execute(self._get_client(), self._auth_headers(),
+                                  query, variables, operation=operation,
+                                  timeout=timeout)
+
+    # -- Detections v2 --
+
+    async def gql_detections(self, *, min_severity: float = 0.4,
+                             status: str = "OPEN", earliest: str = "-24h",
+                             limit: int = 100, offset: int = 0,
+                             extra_predicate: str = "") -> dict:
+        """Search detections. Severity is the GraphQL 0-1 scale on the way in;
+        every detection comes back carrying both scales."""
+        ql = sgql.detection_query(min_severity=min_severity, status=status,
+                                  earliest=earliest, extra=extra_predicate)
+        data = await self._gql(sgql.DETECTION_SEARCH,
+                               {"in": {"cql_query": ql, "limit": limit,
+                                       "offset": offset}},
+                               operation="SearchDetections")
+        block = (data.get("detectionSearch") or {}).get("alerts") or {}
+        return {
+            "query": ql,
+            "total": block.get("total_results"),
+            "detections": [sgql.flatten_detection(n)
+                           for n in (block.get("list") or [])],
+        }
+
+    async def gql_detections_by_id(self, ids: list[str]) -> list[dict]:
+        data = await self._gql(sgql.DETECTION_BY_ID, {"in": {"iDs": ids}},
+                               operation="DetectionsById")
+        block = (data.get("detectionRetrieveById") or {}).get("alerts") or {}
+        return [sgql.flatten_detection(n) for n in (block.get("list") or [])]
+
+    async def gql_detections_by_host(self, host_ids: list[str]) -> list[dict]:
+        data = await self._gql(sgql.DETECTION_BY_HOST, {"in": {"iDs": host_ids}},
+                               operation="DetectionsByHost")
+        block = (data.get("detectionRetrieveByHost") or {}).get("alerts") or {}
+        return [sgql.flatten_detection(n) for n in (block.get("list") or [])]
+
+    async def gql_detection_severity_counts(self, days: int = 7,
+                                            group_by: str = "HOSTNAME") -> dict:
+        """Severity buckets over a window.
+
+        Takes structured time bounds, not the QL predicate the search query
+        uses — the same API speaks two time formats depending on the field.
+
+        **Sophos-side 500 as of 2026-09-22.** The document validates against the
+        live schema and every legal `group_by` (DOMAIN, WATCHLIST, HOSTNAME,
+        DETECTOR, USER) comes back "internal service error". Kept rather than
+        removed: the query is right, the server is not, and the caller gets a
+        502 saying so instead of an empty chart that looks like zero
+        detections."""
+        data = await self._gql(
+            sgql.DETECTION_AGGREGATES,
+            {"in": {"group_by": group_by,
+                    "earliest": sgql.epoch_input(days * 86400), "limit": 100}},
+            operation="DetectionSeverity")
+        # One aggregation node with named buckets, not a list of {severity,
+        # count} — the shape the migration guide implies. Returned as-is rather
+        # than reshaped into the guide's shape, because the server is the
+        # authority on what it sends.
+        return (data.get("detectionAggregatesBySeverity") or {}).get("aggregation") or {}
+
+    # -- Cases v2 --
+
+    async def gql_cases(self, query: str = "", page: int = 1,
+                        per_page: int = 50) -> dict:
+        """List cases. perPage is capped at 100 by the API."""
+        data = await self._gql(sgql.CASES_SEARCH,
+                               {"query": query, "page": page,
+                                "perPage": min(per_page, 100)},
+                               operation="SearchCases")
+        block = data.get("cases") or {}
+        return {"total": block.get("totalCount"), "cases": block.get("cases") or []}
+
+    async def gql_case(self, case_id: str) -> dict:
+        data = await self._gql(sgql.CASE_BY_ID, {"id": case_id}, operation="GetCase")
+        return data.get("case") or {}
+
+    async def gql_case_comments(self, case_id: str) -> list[dict]:
+        data = await self._gql(sgql.CASE_COMMENTS, {"caseId": case_id},
+                               operation="CaseComments")
+        return (data.get("caseComments") or {}).get("comments") or []
+
+    async def gql_case_evidence(self, case_id: str) -> dict:
+        """IDs only — the evidence query returns references, not payloads.
+
+        Resolving them means a second call per kind (detections, events,
+        assets), which is why this returns the raw reference block rather than
+        pretending to be a single fetch."""
+        data = await self._gql(sgql.CASE_EVIDENCE, {"caseId": case_id},
+                               operation="CaseEvidence")
+        return data.get("caseEvidence") or {}
+
+    async def gql_case_reference(self) -> dict:
+        """Case types, statuses and verdicts, as UUIDs.
+
+        These were fixed enums in REST and are per-tenant lookup values now.
+        Hard-coding one works until it meets a tenant provisioned differently."""
+        return await self._gql(sgql.CASE_REFERENCE, operation="CaseReference")
+
+    async def gql_create_case(self, body: dict) -> dict:
+        data = await self._gql(sgql.CREATE_CASE, {"input": body},
+                               operation="CreateCase")
+        return data.get("createCase") or {}
+
+    async def gql_update_case(self, body: dict) -> dict:
+        data = await self._gql(sgql.UPDATE_CASE, {"input": body},
+                               operation="UpdateCase")
+        return data.get("updateCase") or {}
+
+    async def gql_add_case_comment(self, case_id: str, content: str) -> dict:
+        data = await self._gql(
+            sgql.ADD_CASE_COMMENT,
+            {"input": {"caseId": case_id, "content": content}},
+            operation="AddCaseComment")
+        return data.get("addCaseComment") or {}
+
+    # -- Events --
+
+    async def gql_events(self, rns: list[str]) -> list[dict]:
+        """Full event records for the resource names a case or detection cites."""
+        data = await self._gql(sgql.EVENTS_BY_RN, {"input": {"rns": rns}},
+                               operation="EventDetails")
+        return data.get("events") or []
+
+    # -- Threat Timeline --
+
+    async def gql_lineage(self, lineage_id: str,
+                          process_correlation_ids: list[str],
+                          search_term: str = "") -> list[dict]:
+        """Process lineage. Up to 100 correlation ids per call."""
+        payload = {"lineageId": lineage_id,
+                   "processCorrelationIds": process_correlation_ids[:100]}
+        if search_term:
+            payload["searchTerm"] = search_term
+        data = await self._gql(sgql.SEARCH_LINEAGE, {"input": payload},
+                               operation="SearchLineage")
+        return data.get("searchLineage") or []
+
+    # -- Live Endpoint Search --
+    #
+    # The session model is the real change from the REST Live Discover API:
+    # endpoints are no longer named on the run request. You create a session,
+    # put endpoints in it, then run against the session.
+
+    async def gql_ld_categories(self) -> list[dict]:
+        data = await self._gql(sgql.LD_CATEGORIES)
+        return data.get("liveDiscoverCategories") or []
+
+    async def gql_ld_queries(self, page_size: int = 100) -> list[dict]:
+        data = await self._gql(sgql.LD_QUERIES, {"pageSize": page_size},
+                               operation="LiveDiscoverQueries")
+        return (data.get("liveDiscoverQueries") or {}).get("items") or []
+
+    async def gql_ld_run_on(self, query_id: str, endpoint_ids: list[str]) -> dict:
+        """Session, endpoints, run — the three steps, as one call.
+
+        Kept together because a session with no endpoints runs against nothing
+        and reports success, which is the most misleading possible outcome for
+        a live query."""
+        session = await self._gql(sgql.LD_CREATE_SESSION, operation="CreateSession")
+        name = (((session.get("createLiveDiscoverSession") or {})
+                 .get("session") or {}).get("name"))
+        if not name:
+            raise RuntimeError("Live Discover: no session name returned")
+        if not endpoint_ids:
+            raise ValueError("Live Discover: refusing to run against zero endpoints")
+        await self._gql(sgql.LD_ASSIGN_ENDPOINTS,
+                        {"sessions": [name], "ids": endpoint_ids},
+                        operation="AssignEndpoints")
+        run = await self._gql(sgql.LD_RUN_SAVED,
+                              {"queryId": query_id, "sessionId": name},
+                              operation="RunQuery")
+        summary = (run.get("runLiveDiscoverQuery") or {}).get("executionSummary") or {}
+        return {"session": name, "run": summary}
+
+    async def gql_ld_run_status(self, run_id: str) -> dict:
+        data = await self._gql(sgql.LD_RUN_STATUS, {"runId": run_id},
+                               operation="RunStatus")
+        return data.get("liveDiscoverQueryRun") or {}
+
+    async def gql_ld_results(self, run_id: str, page_size: int = 50,
+                             from_key: str | None = None) -> dict:
+        data = await self._gql(sgql.LD_RESULTS,
+                               {"runId": run_id, "pageSize": page_size,
+                                "fromKey": from_key},
+                               operation="GetResults")
+        return data.get("liveDiscoverQueryRunResults") or {}
 
 
 sophos_client = SophosClient()

@@ -729,6 +729,228 @@ async def xdr_endpoints():
         raise _xdr_err(e)
 
 
+# ---------------------------------------------------------------------------
+# Fusion XDR GraphQL (Sophos announced these on 2026-09-18)
+#
+# The successor to the /api/xdr/datalake and /api/xdr/livediscover routes
+# above, which sit on REST APIs Sophos has deprecated and marked "don't use for
+# new integrations". Both are served: deprecated is not removed, and a tenant
+# that has not been migrated still answers on the old ones.
+#
+# Data Lake search is deliberately absent. Its GraphQL replacement is announced
+# for October 2026 and its request format is not public yet, so the SQL-based
+# /api/xdr/datalake/* routes remain the only way to query the lake. Adding a
+# guessed endpoint would fail at the server, months from now, in whatever code
+# happened to call it.
+# ---------------------------------------------------------------------------
+
+
+def _gql_err(e: Exception) -> HTTPException:
+    """GraphQL failures carry a reason; surface it instead of a bare 502.
+
+    A permissions problem, a malformed query and a backend outage all arrive as
+    the same HTTP status from Sophos and need three different reactions."""
+    from app.sophos_graphql import SophosGraphQLError
+    if isinstance(e, SophosGraphQLError):
+        codes = ", ".join(e.codes)
+        suffix = f" [{codes}]" if codes else ""
+        return HTTPException(status_code=502,
+                             detail=f"Sophos GraphQL: {str(e)[:250]}{suffix}")
+    return HTTPException(status_code=502, detail=f"Sophos GraphQL: {str(e)[:200]}")
+
+
+@app.get("/api/xdr/detections")
+@cached(ttl=60)
+async def xdr_detections(hours: int = Query(24, ge=1, le=720),
+                         min_severity: float = Query(0.4, ge=0.0, le=1.0),
+                         status: str = Query("OPEN", max_length=32),
+                         limit: int = Query(100, ge=1, le=500)):
+    """Detections from the Data Lake, newest first.
+
+    ``min_severity`` is the GraphQL 0-1 scale. Every detection comes back with
+    both that value and the 0-10 one the rest of Warroom is written against."""
+    try:
+        return await sophos_client.gql_detections(
+            min_severity=min_severity, status=status,
+            earliest=f"-{hours}h", limit=limit)
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/detections/severity")
+@cached(ttl=300)
+async def xdr_detection_severity(days: int = Query(7, ge=1, le=90)):
+    try:
+        return {"counts": await sophos_client.gql_detection_severity_counts(days=days)}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/detections/by-host")
+async def xdr_detections_by_host(ids: str = Query(..., max_length=2000)):
+    host_ids = [i.strip() for i in ids.split(",") if i.strip()][:100]
+    if not host_ids:
+        raise HTTPException(status_code=400, detail="no host ids given")
+    try:
+        return {"detections": await sophos_client.gql_detections_by_host(host_ids)}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/cases")
+@cached(ttl=60)
+async def xdr_cases(query: str = Query("", max_length=500),
+                    page: int = Query(1, ge=1),
+                    per_page: int = Query(50, ge=1, le=100)):
+    try:
+        return await sophos_client.gql_cases(query=query, page=page,
+                                             per_page=per_page)
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/cases/reference")
+@cached(ttl=3600)
+async def xdr_case_reference():
+    """Case types, statuses and verdicts as UUIDs.
+
+    Fixed enums in the old REST API, per-tenant lookup values now. The UI needs
+    them to render a status, and a hard-coded UUID works right up until it meets
+    a tenant provisioned differently."""
+    try:
+        return await sophos_client.gql_case_reference()
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/cases/{case_id}")
+async def xdr_case(case_id: str):
+    try:
+        return await sophos_client.gql_case(case_id)
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/cases/{case_id}/comments")
+async def xdr_case_comments(case_id: str):
+    try:
+        return {"comments": await sophos_client.gql_case_comments(case_id)}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/cases/{case_id}/evidence")
+async def xdr_case_evidence(case_id: str, resolve: bool = False):
+    """The evidence attached to a case.
+
+    Sophos returns identifiers, not payloads. ``resolve=1`` follows the
+    detection references — one extra call, bounded to 100 — so a caller that
+    wants the actual records does not have to know the two-step dance. Events
+    and assets stay as references: resolving those is a further call each and
+    the caller should decide whether it wants them."""
+    try:
+        evidence = await sophos_client.gql_case_evidence(case_id)
+        if resolve:
+            ids = [d.get("detectionId")
+                   for d in (evidence.get("detectionsEvidence") or [])
+                   if isinstance(d, dict) and d.get("detectionId")][:100]
+            if ids:
+                evidence["detections"] = await sophos_client.gql_detections_by_id(ids)
+        return evidence
+    except Exception as e:
+        raise _gql_err(e)
+
+
+class CaseCommentIn(BaseModel):
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+@app.post("/api/xdr/cases/{case_id}/comments")
+async def xdr_add_case_comment(case_id: str, body: CaseCommentIn,
+                               request: Request):
+    """Write a comment onto a Sophos case.
+
+    One of the few write paths into Central. The actor is recorded in the
+    comment itself because Sophos attributes it to the API credential, which is
+    the same principal for every Warroom user — without the prefix, a case
+    history says only that "Warroom" said something."""
+    actor = actor_name(request)
+    try:
+        return await sophos_client.gql_add_case_comment(
+            case_id, f"[Warroom · {actor}] {body.content}")
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/events")
+async def xdr_events(rns: str = Query(..., max_length=4000)):
+    """Full event records for the resource names a case or detection cites."""
+    names = [r.strip() for r in rns.split(",") if r.strip()][:100]
+    if not names:
+        raise HTTPException(status_code=400, detail="no event ids given")
+    try:
+        return {"events": await sophos_client.gql_events(names)}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/livesearch/queries")
+@cached(ttl=300)
+async def xdr_livesearch_queries():
+    try:
+        return {"items": await sophos_client.gql_ld_queries()}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/livesearch/categories")
+@cached(ttl=300)
+async def xdr_livesearch_categories():
+    try:
+        return {"items": await sophos_client.gql_ld_categories()}
+    except Exception as e:
+        raise _gql_err(e)
+
+
+class LiveSearchRunIn(BaseModel):
+    query_id: str = Field(..., min_length=1, max_length=200)
+    endpoint_ids: list[str] = Field(..., min_length=1, max_length=200)
+
+
+@app.post("/api/xdr/livesearch/run")
+async def xdr_livesearch_run(body: LiveSearchRunIn):
+    """Run a saved query against named endpoints.
+
+    The session model is the real change from Live Discover: endpoints are no
+    longer named on the run request. The client creates a session, fills it and
+    runs against it — and refuses an empty endpoint list, because a session with
+    nothing in it runs against nothing and reports success."""
+    try:
+        return await sophos_client.gql_ld_run_on(body.query_id, body.endpoint_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/livesearch/runs/{run_id}")
+async def xdr_livesearch_run_status(run_id: str):
+    try:
+        return await sophos_client.gql_ld_run_status(run_id)
+    except Exception as e:
+        raise _gql_err(e)
+
+
+@app.get("/api/xdr/livesearch/runs/{run_id}/results")
+async def xdr_livesearch_results(run_id: str,
+                                 page_size: int = Query(50, ge=1, le=200),
+                                 from_key: str | None = None):
+    try:
+        return await sophos_client.gql_ld_results(run_id, page_size, from_key)
+    except Exception as e:
+        raise _gql_err(e)
+
+
 class FirewallLocationIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     ip: str | None = Field(None, max_length=45)
