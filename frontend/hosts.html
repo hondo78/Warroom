@@ -19,7 +19,7 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <select id="hostsDays" class="form-select form-select-sm" style="width:auto" onchange="refreshHosts()">
+                <select id="hostsDays" data-url-state="days" class="form-select form-select-sm" style="width:auto" onchange="refreshHosts()">
                     <option value="1" data-i18n="dashboard.range_24h">24 Stunden</option>
                     <option value="7" selected data-i18n="dashboard.range_7d">7 Tage</option>
                     <option value="30" data-i18n="dashboard.range_30d">30 Tage</option>
@@ -155,7 +155,7 @@
 
                         <div class="tab-pane fade" id="pane-presence">
                             <div class="d-flex justify-content-end mb-2">
-                                <select id="presenceRange" class="form-select form-select-sm" style="width:auto" onchange="loadPresenceAnalytics()">
+                                <select id="presenceRange" data-url-state="presence" class="form-select form-select-sm" style="width:auto" onchange="loadPresenceAnalytics()">
                                     <option value="1">24 h</option>
                                     <option value="7" selected>7 d</option>
                                     <option value="30">30 d</option>

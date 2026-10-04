@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cs) { let tm = null; cs.addEventListener('input', () => {
         clearTimeout(tm); tm = setTimeout(loadCredentials, 350); }); }
     refreshHoneypot();
-    setInterval(refreshHoneypot, 30000);
+    poll(refreshHoneypot, 30000);
     ['createPodModal', 'deployModal', 'editPodModal'].forEach(id => {
         document.getElementById(id).addEventListener('click', e => {
             if (e.target.id === id) e.target.classList.remove('active');

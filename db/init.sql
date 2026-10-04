@@ -103,6 +103,18 @@ CREATE TABLE IF NOT EXISTS firewall_logs (
     attacker_org VARCHAR(255)
 );
 
+-- The default autovacuum trigger (20% of the table changed) is ~26M rows at
+-- this table's size. Postgres restarts reset the counters long before that,
+-- so the table had never been vacuumed once in three months: retention
+-- deletes piled up as dead tuples and the XID age crept towards a forced
+-- anti-wraparound vacuum. Trigger at 1% instead, and let each run go faster.
+ALTER TABLE firewall_logs SET (
+    autovacuum_vacuum_scale_factor = 0.01,
+    autovacuum_vacuum_insert_scale_factor = 0.01,
+    autovacuum_analyze_scale_factor = 0.005,
+    autovacuum_vacuum_cost_limit = 2000
+);
+
 CREATE TABLE IF NOT EXISTS endpoints (
     id VARCHAR(255) PRIMARY KEY,
     hostname VARCHAR(255),

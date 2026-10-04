@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshAll();
 
     // Auto-refresh every 60s
-    setInterval(refreshAll, 60000);
+    poll(refreshAll, 60000);
 
     document.getElementById('timeRange').addEventListener('change', refreshAll);
 });

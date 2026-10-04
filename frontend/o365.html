@@ -19,13 +19,13 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <select id="o365Days" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
+                <select id="o365Days" data-url-state="days" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
                     <option value="1" data-i18n="o365.range_24h">24 Stunden</option>
                     <option value="7" selected data-i18n="o365.range_7d">7 Tage</option>
                     <option value="30" data-i18n="o365.range_30d">30 Tage</option>
                     <option value="90" data-i18n="o365.range_90d">90 Tage</option>
                 </select>
-                <select id="o365Status" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
+                <select id="o365Status" data-url-state="status" class="form-select form-select-sm" style="width:auto" onchange="refreshO365()">
                     <option value="all" selected data-i18n="o365.status_all">Alle Logins</option>
                     <option value="failed" data-i18n="o365.status_failed">Nur fehlgeschlagen</option>
                     <option value="success" data-i18n="o365.status_success">Nur erfolgreich</option>
@@ -159,7 +159,7 @@
                             <div class="card-header"><h3 class="card-title mb-0" data-i18n="o365.login_events">Login-Ereignisse</h3></div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="o365GlobalFilter" class="form-control form-control-sm" data-i18n-placeholder="o365.quick_filter" placeholder="Schnellfilter über alle Spalten…">
+                                    <input type="text" id="o365GlobalFilter" data-url-state="o365GlobalFilter" class="form-control form-control-sm" data-i18n-placeholder="o365.quick_filter" placeholder="Schnellfilter über alle Spalten…">
                                 </div>
                                 <div class="table-scroll">
                                     <table class="table table-sm table-hover align-middle">

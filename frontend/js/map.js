@@ -1,10 +1,7 @@
 // Language-aware number/date formatting (en-US unless UI is German).
 const MAP_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ? 'de-DE' : 'en-US';
-let attackMap = null;
-let attackerMarkers = null;
-let firewallMarkers = null;
-let connectionLines = null;
-let shodanMarkers = null;
+let attackMap = null;          // WarMap instance (globe + 2D), see warmap.js
+let _shodanPoints = [];
 let _shodanVisible = false;   // optional layer, off by default
 
 const ATTACK_CATEGORIES = [
@@ -29,43 +26,19 @@ let _lastAttackData = null;
 let _legendEl = null;
 
 function initMap() {
-    attackMap = L.map('attack-map', {
-        center: [30, 10],
-        zoom: 2,
-        minZoom: 2,
-        maxZoom: 12,
-        zoomControl: true,
-        attributionControl: false,
-    });
-
-    // Dark tile layer
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        subdomains: 'abcd',
-        maxZoom: 19,
-    }).addTo(attackMap);
-
-    attackerMarkers = L.layerGroup().addTo(attackMap);
-    firewallMarkers = L.layerGroup().addTo(attackMap);
-    connectionLines = L.layerGroup().addTo(attackMap);
-    shodanMarkers = L.layerGroup().addTo(attackMap);
-
+    attackMap = createWarMap(document.getElementById('attack-map'), { storageKey: 'dashboard' });
     addAttackLegend();
 }
 
 function addAttackLegend() {
-    const legend = L.control({position: 'bottomright'});
-    legend.onAdd = () => {
-        const div = L.DomUtil.create('div', 'attack-legend');
-        _legendEl = div;
-        renderLegend();
-        L.DomEvent.disableClickPropagation(div);
-        L.DomEvent.disableScrollPropagation(div);
-        div.addEventListener('click', onLegendClick);
-        return div;
-    };
-    legend.addTo(attackMap);
+    // A plain overlay rather than a Leaflet control, so it shows on the globe too.
+    const div = document.createElement('div');
+    div.className = 'attack-legend warmap-legend';
+    _legendEl = div;
+    renderLegend();
+    div.addEventListener('click', onLegendClick);
+    attackMap.overlayEl.appendChild(div);
 }
-
 function renderLegend() {
     if (!_legendEl) return;
     const catItems = ATTACK_CATEGORIES.map(c => {
@@ -208,26 +181,16 @@ async function updateMap(days) {
         data.attackers.forEach(a => { a._category = categorizeAttack(a); });
         _lastAttackData = data;
 
-        firewallMarkers.clearLayers();
-        const fwPositions = [];
-        data.firewalls.forEach(fw => {
-            const marker = L.circleMarker([fw.lat, fw.lon], {
-                radius: 6,
-                fillColor: '#3b82f6',
-                color: '#60a5fa',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8,
-            });
-            marker.bindPopup(`
-                <strong>${fw.name}</strong><br>
-                IP: ${fw.ip || 'n/a'}<br>
-                ${fw.city || ''} ${fw.country || ''}
-            `);
-            firewallMarkers.addLayer(marker);
-            fwPositions.push([fw.lat, fw.lon]);
-        });
-        _lastAttackData._fwPositions = fwPositions;
+        const hubs = data.firewalls
+            .filter(fw => fw.lat != null && fw.lon != null)
+            .map(fw => ({
+                lat: fw.lat, lon: fw.lon,
+                label: fw.name,
+                popup: `<strong>${_popEsc(fw.name)}</strong><br>IP: ${_popEsc(fw.ip || 'n/a')}<br>`
+                     + `${_popEsc(fw.city || '')} ${_popEsc(fw.country || '')}`,
+            }));
+        _lastAttackData._hubs = hubs;
+        attackMap.setHubs(hubs);
 
         renderAttackerLayer();
     } catch (err) {
@@ -237,52 +200,43 @@ async function updateMap(days) {
 
 function renderAttackerLayer() {
     if (!_lastAttackData) return;
-    attackerMarkers.clearLayers();
-    connectionLines.clearLayers();
-    const fwPositions = _lastAttackData._fwPositions || [];
+    const hubs = _lastAttackData._hubs || [];
+    const points = [], arcs = [];
 
     _lastAttackData.attackers.forEach(atk => {
         if (!isAttackVisible(atk)) return;
 
-        const radius = Math.min(2 + Math.log2(atk.count + 1) * 2, 12);
+        const size = Math.min(2 + Math.log2(atk.count + 1) * 2, 12);
         const color = ATTACK_COLOR_BY_KEY[atk._category];
         const direction = atk.direction || 'unknown';
         const dirStyle = getDirectionStyle(direction);
+        const where = [atk.city, atk.country].filter(Boolean).join(', ');
 
-        const marker = L.circleMarker([atk.lat, atk.lon], {
-            radius: radius,
-            fillColor: color,
-            color: direction === 'mixed' ? '#fef9c3' : color,
-            weight: dirStyle.weight,
+        points.push({
+            lat: atk.lat, lon: atk.lon, color, size,
+            stroke: direction === 'mixed' ? '#fef9c3' : color,
+            strokeWeight: dirStyle.weight,
             dashArray: dirStyle.dashArray,
-            opacity: 0.95,
-            fillOpacity: 0.65,
+            label: `${atk.ip} · ${where || '?'} · ${(atk.count || 0).toLocaleString(MAP_LOCALE)}`,
+            popup: buildAttackPopup(atk),
         });
-        marker.bindPopup(buildAttackPopup(atk), {maxWidth: 360, minWidth: 240});
-        attackerMarkers.addLayer(marker);
 
-        if (fwPositions.length > 0) {
-            let nearest = fwPositions[0];
-            let minDist = Infinity;
-            fwPositions.forEach(pos => {
-                const d = Math.pow(pos[0] - atk.lat, 2) + Math.pow(pos[1] - atk.lon, 2);
-                if (d < minDist) {
-                    minDist = d;
-                    nearest = pos;
-                }
+        const hub = nearestHub(hubs, atk.lat, atk.lon);
+        if (hub) {
+            const remote = [atk.lat, atk.lon], ours = [hub.lat, hub.lon];
+            // Arcs flow attacker → firewall, or firewall → remote for outbound
+            // (internal host calling out to C2).
+            const outbound = direction === 'outbound';
+            arcs.push({
+                from: outbound ? ours : remote,
+                to: outbound ? remote : ours,
+                color,
+                weight: Math.min(1 + Math.log10((atk.count || 0) + 1), 4),
             });
-            const line = L.polyline(
-                [[atk.lat, atk.lon], nearest],
-                {
-                    color: color,
-                    weight: dirStyle.lineWeight,
-                    opacity: direction === 'outbound' ? 0.45 : 0.35,
-                    dashArray: dirStyle.lineDashArray,
-                }
-            );
-            connectionLines.addLayer(line);
         }
     });
+    attackMap.setPoints(points);
+    attackMap.setArcs(arcs);
 }
 
 function getSeverityColor(severity) {
@@ -396,31 +350,27 @@ function _shodanColor(cveCount) {
 }
 
 async function updateShodanLayer() {
-    if (!shodanMarkers) return;
+    if (!attackMap) return;
     if (!_shodanVisible) {
-        shodanMarkers.clearLayers();
+        attackMap.setOverlay([]);
         return;
     }
     try {
         const resp = await fetch('/api/shodan/hosts?days=365');
         const data = await resp.json();
-        shodanMarkers.clearLayers();
-        (data.hosts || []).forEach(h => {
-            if (h.lat == null || h.lon == null) return;
-            const color = _shodanColor(h.cve_count);
-            const radius = Math.min(4 + Math.log2((h.port_count || 0) + 1) * 2.2, 16);
-            const marker = L.circleMarker([h.lat, h.lon], {
-                radius,
-                fillColor: color,
-                color: color,
-                weight: 1.5,
-                opacity: 0.9,
-                fillOpacity: 0.55,
-                dashArray: h.cve_count ? null : '2 3',
+        _shodanPoints = (data.hosts || [])
+            .filter(h => h.lat != null && h.lon != null)
+            .map(h => {
+                const color = _shodanColor(h.cve_count);
+                return {
+                    lat: h.lat, lon: h.lon, color,
+                    size: Math.min(4 + Math.log2((h.port_count || 0) + 1) * 2.2, 16),
+                    dashArray: h.cve_count ? null : '2 3',
+                    label: `${h.ip} · ${h.port_count || 0} ports · ${h.cve_count || 0} CVEs`,
+                    popup: buildShodanPopup(h),
+                };
             });
-            marker.bindPopup(buildShodanPopup(h), {maxWidth: 360, minWidth: 240});
-            shodanMarkers.addLayer(marker);
-        });
+        attackMap.setOverlay(_shodanPoints);
     } catch (err) {
         console.error('Shodan layer update failed:', err);
     }

@@ -6,4 +6,5 @@ COPY index.html admin.html admin-integrations.html admin-ai.html admin-osint.htm
 COPY css/ /usr/share/nginx/html/css/
 COPY js/ /usr/share/nginx/html/js/
 COPY i18n/ /usr/share/nginx/html/i18n/
+COPY img/ /usr/share/nginx/html/img/
 COPY docs/ /usr/share/nginx/html/docs/

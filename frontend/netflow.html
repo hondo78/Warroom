@@ -21,10 +21,10 @@
                 <li class="nav-item"><a class="nav-link" data-lte-toggle="sidebar" href="#" role="button"><i class="bi bi-list"></i></a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
-                <select id="nfFirewall" class="form-select form-select-sm" style="width:auto">
+                <select id="nfFirewall" data-url-state="firewall" class="form-select form-select-sm" style="width:auto">
                     <option value="all" data-i18n="netflow.all_firewalls">Alle Firewalls</option>
                 </select>
-                <select id="nfDays" class="form-select form-select-sm" style="width:auto">
+                <select id="nfDays" data-url-state="days" class="form-select form-select-sm" style="width:auto">
                     <option value="1" selected data-i18n="netflow.days_1">24 Stunden</option>
                     <option value="7" data-i18n="netflow.days_7">7 Tage</option>
                     <option value="30" data-i18n="netflow.days_30">30 Tage</option>
@@ -186,7 +186,7 @@
                     <div class="card-body">
                         <div class="filter-row">
                             <input type="text" data-filter-for="nfFlowsTable" class="form-control form-control-sm" data-i18n-placeholder="netflow.filter_placeholder" placeholder="Filter (IP, Port, Service…)">
-                            <select id="nfGroupBy" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
+                            <select id="nfGroupBy" data-url-state="groupBy" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
                                 <option value="none" data-i18n="netflow.group_none">Gruppierung: keine (5-Tuple)</option>
                                 <option value="src" data-i18n="netflow.group_src">Quell-IP</option>
                                 <option value="dst" data-i18n="netflow.group_dst">Ziel-IP</option>
@@ -194,14 +194,14 @@
                                 <option value="port" data-i18n="netflow.group_port">Port + Protokoll</option>
                                 <option value="proto" data-i18n="netflow.group_proto">Protokoll</option>
                             </select>
-                            <select id="nfMinBytes" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
+                            <select id="nfMinBytes" data-url-state="minBytes" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
                                 <option value="0" selected data-i18n="netflow.minbytes_none">Min. Bytes: keine</option>
                                 <option value="1024">≥ 1 KB</option>
                                 <option value="1048576">≥ 1 MB</option>
                                 <option value="10485760">≥ 10 MB</option>
                                 <option value="1073741824">≥ 1 GB</option>
                             </select>
-                            <select id="nfFlowLimit" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
+                            <select id="nfFlowLimit" data-url-state="limit" class="form-select form-select-sm" style="width:auto" onchange="updateFlowsTable()">
                                 <option value="50" data-i18n="netflow.limit_rows">50 Zeilen</option>
                                 <option value="200" selected>200</option>
                                 <option value="500">500</option>
@@ -267,10 +267,13 @@
     <script src="/i18n/netflow.en.js"></script>
     <script src="/js/i18n.js"></script>
 <script src="/js/auth.js"></script>
+<script src="/js/common.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/admin-lte@4.0.0-beta3/dist/js/adminlte.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="/js/osint.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js"></script>
+<script src="/js/warmap.js"></script>
 <script src="/js/netflow.js"></script>
 <script src="/js/hostnames.js"></script>
 </body>

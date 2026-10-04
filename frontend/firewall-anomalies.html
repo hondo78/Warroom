@@ -28,13 +28,13 @@
                     <option value="src" selected data-i18n="fwAnomalies.role_src">Quelle</option>
                     <option value="dst" data-i18n="fwAnomalies.role_dst">Ziel</option>
                 </select>
-                <select id="anHours" class="form-select form-select-sm" style="width:auto">
+                <select id="anHours" data-url-state="hours" class="form-select form-select-sm" style="width:auto">
                     <option value="6" data-i18n="fwAnomalies.range_6h">6 Stunden</option>
                     <option value="24" selected data-i18n="fwAnomalies.range_24h">24 Stunden</option>
                     <option value="72" data-i18n="fwAnomalies.range_3d">3 Tage</option>
                     <option value="168" data-i18n="fwAnomalies.range_7d">7 Tage</option>
                 </select>
-                <select id="anMinFlows" class="form-select form-select-sm" style="width:auto" title="Mindestanzahl Flows pro IP" data-i18n-title="fwAnomalies.min_flows_title">
+                <select id="anMinFlows" data-url-state="minFlows" class="form-select form-select-sm" style="width:auto" title="Mindestanzahl Flows pro IP" data-i18n-title="fwAnomalies.min_flows_title">
                     <option value="5" selected>≥ 5 Flows</option>
                     <option value="20">≥ 20 Flows</option>
                     <option value="100">≥ 100 Flows</option>
@@ -154,13 +154,13 @@
                             <small class="text-secondary" data-i18n="fwAnomalies.conn2_sub">— C2-Beaconing &amp; untypische Uploads (pro Verbindung)</small>
                         </h3>
                         <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
-                            <select id="connAnKind" class="form-select form-select-sm" style="width:auto">
+                            <select id="connAnKind" data-url-state="connKind" class="form-select form-select-sm" style="width:auto">
                                 <option value="" data-i18n="fwAnomalies.conn2_kind_all">Alle Typen</option>
                                 <option value="c2" data-i18n="fwAnomalies.conn2_kind_c2">C2-Beaconing</option>
                                 <option value="exfil" data-i18n="fwAnomalies.conn2_kind_exfil">Untypische Uploads</option>
                                 <option value="new" data-i18n="fwAnomalies.conn2_kind_new">Neu / untypisch</option>
                             </select>
-                            <select id="connAnMinScore" class="form-select form-select-sm" style="width:auto" title="Mindest-Score" data-i18n-title="fwAnomalies.conn2_minscore_title">
+                            <select id="connAnMinScore" data-url-state="minScore" class="form-select form-select-sm" style="width:auto" title="Mindest-Score" data-i18n-title="fwAnomalies.conn2_minscore_title">
                                 <option value="0.3">Score ≥ 0.3</option>
                                 <option value="0.5" selected>Score ≥ 0.5</option>
                                 <option value="0.7">Score ≥ 0.7</option>
@@ -209,10 +209,10 @@
                             <small class="text-secondary" data-i18n="fwAnomalies.svc_sub">— auffällig im Vergleich zum eigenen Dienst</small>
                         </h3>
                         <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
-                            <select id="svcAnService" class="form-select form-select-sm" style="width:auto" title="Auf einen Dienst einschränken" data-i18n-title="fwAnomalies.svc_filter_title">
+                            <select id="svcAnService" data-url-state="service" class="form-select form-select-sm" style="width:auto" title="Auf einen Dienst einschränken" data-i18n-title="fwAnomalies.svc_filter_title">
                                 <option value="" data-i18n="fwAnomalies.svc_all">Alle Dienste</option>
                             </select>
-                            <select id="svcAnMinGroup" class="form-select form-select-sm" style="width:auto" title="Mindestgröße einer Dienst-Gruppe, damit sie bewertet wird" data-i18n-title="fwAnomalies.svc_mingroup_title">
+                            <select id="svcAnMinGroup" data-url-state="minGroup" class="form-select form-select-sm" style="width:auto" title="Mindestgröße einer Dienst-Gruppe, damit sie bewertet wird" data-i18n-title="fwAnomalies.svc_mingroup_title">
                                 <option value="10">Gruppe ≥ 10</option>
                                 <option value="15" selected>Gruppe ≥ 15</option>
                                 <option value="30">Gruppe ≥ 30</option>

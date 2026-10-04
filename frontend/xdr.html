@@ -100,7 +100,7 @@
                     <p class="d-muted" data-i18n="xdr.dlHint">SQL-Abfragen gegen die XDR-Telemetrie (xdr_data). Gespeicherte Query wählen oder eigenes SQL schreiben.</p>
                     <div class="row g-2 mb-2 align-items-center">
                         <div class="col-md-6"><select id="dlSaved" class="form-select form-select-sm"></select></div>
-                        <div class="col-md-3"><select id="dlHours" class="form-select form-select-sm"><option value="24">24h</option><option value="168">7 Tage</option><option value="720">30 Tage</option></select></div>
+                        <div class="col-md-3"><select id="dlHours" data-url-state="hours" class="form-select form-select-sm"><option value="24">24h</option><option value="168">7 Tage</option><option value="720">30 Tage</option></select></div>
                         <div class="col-md-3 text-end"><button class="btn btn-primary btn-sm" id="dlRun"><i class="bi bi-play-fill"></i> <span data-i18n="xdr.run">Ausführen</span></button></div>
                     </div>
                     <textarea id="dlSql" class="form-control xdr-sql mb-2" style="height:150px" placeholder="SELECT meta_hostname, query_name FROM xdr_data LIMIT 100"></textarea>

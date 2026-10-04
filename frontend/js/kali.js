@@ -9,7 +9,7 @@ const K_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de') ?
 
 document.addEventListener('DOMContentLoaded', () => {
     refreshKali();
-    setInterval(refreshKali, 20000);
+    poll(refreshKali, 20000);
 
     const input = document.getElementById('kInput');
     if (input) {

@@ -114,11 +114,11 @@
                             <div class="card-header"><h3 class="card-title mb-0" data-i18n="endpoints.device_inventory">Geräte-Inventar</h3></div>
                             <div class="card-body">
                                 <div class="filter-row">
-                                    <input type="text" id="epSearch" class="form-control form-control-sm" placeholder="Hostname suchen — Enter" data-i18n-placeholder="endpoints.search_hostname">
-                                    <select id="epHealth" class="form-select form-select-sm" style="max-width:160px" onchange="loadEndpoints()">
+                                    <input type="text" id="epSearch" data-url-state="epSearch" class="form-control form-control-sm" placeholder="Hostname suchen — Enter" data-i18n-placeholder="endpoints.search_hostname">
+                                    <select id="epHealth" data-url-state="health" class="form-select form-select-sm" style="max-width:160px" onchange="loadEndpoints()">
                                         <option value="" data-i18n="endpoints.all_health">Alle Health</option><option value="good">good</option><option value="suspicious">suspicious</option><option value="bad">bad</option>
                                     </select>
-                                    <select id="epIsolation" class="form-select form-select-sm" style="max-width:170px" onchange="loadEndpoints()">
+                                    <select id="epIsolation" data-url-state="isolation" class="form-select form-select-sm" style="max-width:170px" onchange="loadEndpoints()">
                                         <option value="" data-i18n="endpoints.all_isolation">Alle Isolation</option><option value="isolated" data-i18n="endpoints.isolated">isoliert</option><option value="notIsolated" data-i18n="endpoints.not_isolated">nicht isoliert</option>
                                     </select>
                                     <button class="btn btn-outline-secondary btn-sm" onclick="loadEndpoints()"><i class="bi bi-search"></i></button>

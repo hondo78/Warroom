@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setFeedUrls();
     refreshBlocked();
     window.addEventListener('warroom:blocklist-changed', refreshBlocked);
-    setInterval(refreshBlocked, 30000);
+    poll(refreshBlocked, 30000);
 });
 
 function setFeedUrls() {

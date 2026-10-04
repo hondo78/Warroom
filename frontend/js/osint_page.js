@@ -17,6 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
     input.focus();
     renderHistory();
     loadOsintHistory();
+    // ?q= deep link (quick search, shared links) runs the lookup straight away.
+    const q = new URLSearchParams(location.search).get('q');
+    if (q) { input.value = q; runOsintQuery(); }
 });
 
 // --- Persistent OSINT history (DB-backed, survives the 1h Redis cache) ---
@@ -86,6 +89,9 @@ async function runOsintQuery(forceOverride) {
 
     const label = { ip: 'IP', domain: 'Domain', url: 'URL' }[type] || 'IP';
     _osintLast = { value: raw, type };
+    const qp = new URLSearchParams(location.search);
+    qp.set('q', raw);
+    history.replaceState(history.state, '', `?${qp}`);
     document.getElementById('osintResultTitle').textContent = `${label}: ${raw}`;
     document.getElementById('osintResultCard').style.display = '';
     hideActionMsg();

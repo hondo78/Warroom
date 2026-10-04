@@ -336,7 +336,7 @@
                 <div class="card mb-3">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h3 class="card-title mb-0" data-i18n="agent.quality_title">Qualität &amp; Feedback</h3>
-                        <select id="aQualDays" class="form-select form-select-sm" style="width:auto" onchange="updateAgentQuality()">
+                        <select id="aQualDays" data-url-state="qualDays" class="form-select form-select-sm" style="width:auto" onchange="updateAgentQuality()">
                             <option value="7">7 d</option>
                             <option value="30" selected>30 d</option>
                             <option value="90">90 d</option>
@@ -374,7 +374,7 @@
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="agent.log_title">Decision-Log</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
-                            <select id="aFilterStatus" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
+                            <select id="aFilterStatus" data-url-state="status" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
                                 <option value="" data-i18n="agent.filter_all_status">Alle Status</option>
                                 <option value="pending">Pending</option>
                                 <option value="executed">Executed</option>
@@ -382,12 +382,12 @@
                                 <option value="superseded">Superseded</option>
                                 <option value="failed">Failed</option>
                             </select>
-                            <select id="aFilterActor" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
+                            <select id="aFilterActor" data-url-state="actor" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
                                 <option value="" data-i18n="agent.filter_both">Beide</option>
                                 <option value="agent" data-i18n="agent.filter_only_agent">Nur Agent</option>
                                 <option value="human" data-i18n="agent.filter_only_human">Nur Mensch</option>
                             </select>
-                            <select id="aFilterAction" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
+                            <select id="aFilterAction" data-url-state="action" class="form-select form-select-sm" style="width:auto" onchange="updateAgentList()">
                                 <option value="" data-i18n="agent.filter_all_actions">Alle Actions</option>
                                 <option value="block_ip">block_ip</option>
                                 <option value="block_subnet">block_subnet</option>

@@ -4,7 +4,7 @@ let _aTimelineChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     refreshAgentPage();
-    setInterval(refreshAgentPage, 30000);
+    poll(refreshAgentPage, 30000);
 });
 
 async function refreshAgentPage() {

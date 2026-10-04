@@ -22,7 +22,7 @@
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 <span class="topbar-status-dot" id="statusDot"></span>
-                <select id="timeRange" class="form-select form-select-sm" style="width:auto">
+                <select id="timeRange" data-url-state="days" class="form-select form-select-sm" style="width:auto">
                     <option value="1" data-i18n="dashboard.range_24h">24 Stunden</option>
                     <option value="7" selected data-i18n="dashboard.range_7d">7 Tage</option>
                     <option value="30" data-i18n="dashboard.range_30d">30 Tage</option>
@@ -156,7 +156,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h3 class="card-title mb-0" data-i18n="dash.agent_card_title">🤖 KI-Agent — Empfehlungen</h3>
                         <div class="d-flex gap-2 align-items-center">
-                            <select id="agentFilter" class="form-select form-select-sm" style="width:auto" onchange="updateAgentDecisions()">
+                            <select id="agentFilter" data-url-state="agent" class="form-select form-select-sm" style="width:auto" onchange="updateAgentDecisions()">
                                 <option value="pending" selected data-i18n="dash.agent_status_pending">Pending</option>
                                 <option value="" data-i18n="dash.agent_status_all">Alle</option>
                                 <option value="approved" data-i18n="dash.agent_status_approved">Approved</option>
@@ -356,14 +356,14 @@
                     <div class="card-header"><h3 class="card-title mb-0" data-i18n="dash.endpoints_title">Endpoints (Sophos Central)</h3></div>
                     <div class="card-body">
                         <div class="filter-row">
-                            <input type="text" id="deviceSearch" class="form-control form-control-sm" data-i18n-placeholder="dash.search_hostname" placeholder="Hostname suchen…" oninput="debouncedReloadDevices()">
-                            <select id="deviceHealth" class="form-select form-select-sm" style="width:auto" onchange="updateDevicesTable()">
+                            <input type="text" id="deviceSearch" data-url-state="deviceSearch" class="form-control form-control-sm" data-i18n-placeholder="dash.search_hostname" placeholder="Hostname suchen…" oninput="debouncedReloadDevices()">
+                            <select id="deviceHealth" data-url-state="deviceHealth" class="form-select form-select-sm" style="width:auto" onchange="updateDevicesTable()">
                                 <option value="" data-i18n="dash.all_health_states">Alle Health-States</option>
                                 <option value="good">good</option>
                                 <option value="suspicious">suspicious</option>
                                 <option value="bad">bad</option>
                             </select>
-                            <select id="deviceIsolation" class="form-select form-select-sm" style="width:auto" onchange="updateDevicesTable()">
+                            <select id="deviceIsolation" data-url-state="deviceIsolation" class="form-select form-select-sm" style="width:auto" onchange="updateDevicesTable()">
                                 <option value="" data-i18n="dash.all_isolation_states">Alle Isolation-States</option>
                                 <option value="notIsolated">notIsolated</option>
                                 <option value="isolated">isolated</option>
@@ -462,6 +462,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="/js/common.js"></script>
 <script src="/js/osint.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/dist/globe.gl.min.js"></script>
+<script src="/js/warmap.js"></script>
 <script src="/js/map.js"></script>
 <script src="/js/charts.js"></script>
 <script src="/js/app.js"></script>

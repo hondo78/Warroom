@@ -11,8 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     loadNmapEnabled().then(refreshHosts);
     loadPortChanges();
-    setInterval(refreshHosts, 60000);
-    setInterval(loadPortChanges, 60000);
+    poll(refreshHosts, 60000);
+    poll(loadPortChanges, 60000);
     document.getElementById('hostModal').addEventListener('click', e => {
         if (e.target.id === 'hostModal') closeHostModal();
     });

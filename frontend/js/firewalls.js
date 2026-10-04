@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshFirewalls();
     // 120s matches the /api/firewalls/extended cache TTL — refreshing more often
     // just re-fetches the same cached payload.
-    setInterval(refreshFirewalls, 120000);
+    poll(refreshFirewalls, 120000);
 });
 
 // --- Live device view: the firewall reporting on itself via the XML API -------

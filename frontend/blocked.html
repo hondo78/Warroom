@@ -376,7 +376,7 @@
                                 <div class="col-md-3 d-grid"><button class="btn btn-outline-warning btn-sm" onclick="burnedBackfill()"><i class="bi bi-clock-history"></i> <span data-i18n="blocked.btn_burned_backfill">Aus Historie lernen</span></button></div>
                             </div>
                             <div class="filter-row">
-                                <select id="burnedStatusFilter" class="form-select form-select-sm" style="width:auto" onchange="renderBurnedTable()">
+                                <select id="burnedStatusFilter" data-url-state="burnedStatus" class="form-select form-select-sm" style="width:auto" onchange="renderBurnedTable()">
                                     <option value="" data-i18n="blocked.burned_f_all">Alle</option>
                                     <option value="active" data-i18n="blocked.burned_f_active">Sperrt sofort</option>
                                     <option value="ignored" data-i18n="blocked.burned_f_ignored">Stillgelegt</option>

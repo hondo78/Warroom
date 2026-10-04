@@ -10,8 +10,8 @@ const _o365Filters = {};
 document.addEventListener('DOMContentLoaded', () => {
     refreshO365();
     refreshLoginWatch();
-    setInterval(refreshO365, 60000);
-    setInterval(refreshLoginWatch, 60000);
+    poll(refreshO365, 60000);
+    poll(refreshLoginWatch, 60000);
 
     // Column sort: click header toggles asc/desc
     document.querySelectorAll('#o365SortRow th[data-sort]').forEach(th => {

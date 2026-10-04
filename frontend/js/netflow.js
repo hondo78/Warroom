@@ -1,5 +1,5 @@
-let nfMap;
-let nfMapMarkers = [];
+let nfMap;            // WarMap instance (globe + 2D), see warmap.js
+let nfHubs = null;    // firewall locations from /api/firewalls, loaded once
 let nfTimelineChart, nfTalkersChart, nfDestsChart, nfPortsChart, nfProtoChart, nfIfaceChart;
 
 const PALETTE = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#eab308', '#a78bfa'];
@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await netflowRefresh();
     document.getElementById('nfDays').addEventListener('change', netflowRefresh);
     document.getElementById('nfFirewall').addEventListener('change', netflowRefresh);
-    setInterval(netflowRefresh, 60000);
+    poll(netflowRefresh, 60000);
 });
 
 function initFilters() {
@@ -214,34 +214,58 @@ async function updateProtocols() {
 }
 
 function initNfMap() {
-    nfMap = L.map('nfMap', {worldCopyJump: true}).setView([20, 0], 2);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors © CARTO',
-    }).addTo(nfMap);
+    nfMap = createWarMap(document.getElementById('nfMap'), { storageKey: 'netflow' });
+}
+
+async function loadNfHubs() {
+    if (nfHubs) return nfHubs;
+    try {
+        const r = await fetch('/api/firewalls');
+        nfHubs = (await r.json())
+            .filter(f => f.lat != null && f.lon != null)
+            .map(f => ({
+                lat: f.lat, lon: f.lon, ip: f.ip, label: f.name,
+                popup: `<strong>${escapeHtml(f.name)}</strong><br>${escapeHtml(f.ip || '')}`,
+            }));
+    } catch (e) {
+        nfHubs = [];
+    }
+    return nfHubs;
 }
 
 async function updateGeo() {
-    nfMapMarkers.forEach(m => nfMap.removeLayer(m));
-    nfMapMarkers = [];
-    const r = await fetch(`/api/netflow/geo?${qs()}&limit=200`);
+    const [r, allHubs] = await Promise.all([
+        fetch(`/api/netflow/geo?${qs()}&limit=200`),
+        loadNfHubs(),
+    ]);
     const d = await r.json();
-    if (!d.length) return;
+    // With one exporter selected, every flow starts at that firewall (if its
+    // location is known); otherwise each destination links to the nearest one.
+    const fw = getFirewall();
+    const picked = fw !== 'all' ? allHubs.filter(h => h.ip === fw) : [];
+    const hubs = picked.length ? picked : allHubs;
+    nfMap.setHubs(hubs);
+    if (!d.length) { nfMap.setPoints([]); nfMap.setArcs([]); return; }
+
     const maxBytes = Math.max(...d.map(x => x.bytes));
+    const color = '#38bdf8';
+    const points = [], arcs = [];
     d.forEach(p => {
-        const radius = 4 + Math.sqrt(p.bytes / maxBytes) * 18;
-        const m = L.circleMarker([p.lat, p.lon], {
-            radius,
-            fillColor: '#3b82f6',
-            color: '#3b82f6',
-            weight: 1,
-            fillOpacity: 0.55,
-        }).bindPopup(`
-            <strong>${p.ip}</strong><br>
-            ${p.city || ''} ${p.country ? '(' + p.country + ')' : ''}<br>
-            ${fmtBytes(p.bytes)} · ${fmtNum(p.flows)} ${t('netflow.tile_flows')}
-        `).addTo(nfMap);
-        nfMapMarkers.push(m);
+        const share = Math.sqrt(p.bytes / maxBytes);
+        const where = [p.city, p.country].filter(Boolean).join(', ');
+        points.push({
+            lat: p.lat, lon: p.lon, color,
+            size: 3 + share * 9,
+            label: `${p.ip} · ${where || '?'} · ${fmtBytes(p.bytes)}`,
+            popup: `<strong>${escapeHtml(p.ip)}</strong><br>`
+                 + `${escapeHtml(p.city || '')} ${p.country ? '(' + escapeHtml(p.country) + ')' : ''}<br>`
+                 + `${fmtBytes(p.bytes)} · ${fmtNum(p.flows)} ${escapeHtml(t('netflow.tile_flows'))}`,
+        });
+        const hub = nearestHub(hubs, p.lat, p.lon);
+        if (hub) arcs.push({ from: [hub.lat, hub.lon], to: [p.lat, p.lon], color, weight: 0.5 + share * 3.5 });
     });
+    nfMap.setPoints(points);
+    nfMap.setArcs(arcs);
 }
 
 async function updateInterfaces() {

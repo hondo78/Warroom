@@ -124,7 +124,7 @@
                         <h3 class="card-title mb-0" data-i18n="honeypot.events_title">Zugriffe (Alarme)</h3>
                         <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
                             <div class="form-check form-switch mb-0">
-                                <input class="form-check-input" type="checkbox" id="hpHideAcked" onchange="renderSources()">
+                                <input class="form-check-input" type="checkbox" id="hpHideAcked" data-url-state="hideAcked" onchange="renderSources()">
                                 <label class="form-check-label small" for="hpHideAcked" data-i18n="honeypot.hide_acked">Nur offene</label>
                             </div>
                             <button class="btn btn-outline-secondary btn-sm" onclick="ackAllSources(this)" title="Alle Alarme als gesehen markieren" data-i18n-title="honeypot.ack_all_title"><i class="bi bi-check2-all"></i> <span data-i18n="honeypot.ack_all">Alle bestätigen</span></button>
@@ -156,7 +156,7 @@
                     <div class="card-header d-flex flex-wrap align-items-center gap-2">
                         <h3 class="card-title mb-0" data-i18n="honeypot.creds_title">🔑 Köder-Login: erbeutete Zugangsdaten</h3>
                         <div class="ms-auto d-flex gap-2 flex-wrap align-items-center">
-                            <input type="text" id="credSearch" class="form-control form-control-sm" style="width:190px" data-i18n-placeholder="honeypot.creds_search" placeholder="Suche (Benutzer, Passwort, IP)" onkeydown="if(event.key==='Enter')loadCredentials()">
+                            <input type="text" id="credSearch" data-url-state="credSearch" class="form-control form-control-sm" style="width:190px" data-i18n-placeholder="honeypot.creds_search" placeholder="Suche (Benutzer, Passwort, IP)" onkeydown="if(event.key==='Enter')loadCredentials()">
                             <button class="btn btn-outline-secondary btn-sm" onclick="loadCredentials()"><i class="bi bi-arrow-clockwise"></i></button>
                             <div class="form-check form-switch d-inline-flex align-items-center gap-1 mb-0 me-2" style="font-size:.82rem">
                                 <input class="form-check-input mt-0" type="checkbox" id="credOsint" onchange="toggleCredOsint(this)">

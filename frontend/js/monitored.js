@@ -6,7 +6,7 @@ const MON_LOCALE = (typeof currentLang === 'function' && currentLang() === 'de')
 document.addEventListener('DOMContentLoaded', () => {
     initFilters();
     refreshMonitored();
-    setInterval(refreshMonitored, 30000);
+    poll(refreshMonitored, 30000);
     document.getElementById('connModal').addEventListener('click', e => {
         if (e.target.id === 'connModal') closeConnModal();
     });
