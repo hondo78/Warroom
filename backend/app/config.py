@@ -174,6 +174,13 @@ class Settings(BaseSettings):
     # make Shodan strictly human-only.
     shodan_auto_on_malicious: bool = True
     shodan_auto_abuse_threshold: int = 80   # AbuseIPDB confidence % that counts as "malicious"
+    # Weekly OSINT re-check of agent blocks that were made on OSINT evidence
+    # (blocklist_recheck.py). A block whose providers are all clean now is
+    # lifted and moved to the released_ips history.
+    blocklist_recheck_enabled: bool = True
+    blocklist_recheck_interval_days: int = 7
+    blocklist_recheck_sources: str = "triage,anomaly"   # blocked_ips.source values
+    blocklist_recheck_batch_size: int = 25              # IPs per hourly run
 
     collector_interval: int = 300
 

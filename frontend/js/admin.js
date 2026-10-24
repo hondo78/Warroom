@@ -16,6 +16,7 @@ const SECTIONS = {
         'osint_intelix_daily_limit', 'osint_intelix_monthly_limit',
         'osint_ipinfo_daily_limit', 'osint_ipinfo_monthly_limit',
     ],
+    blocklistRecheck: ['blocklist_recheck_enabled', 'blocklist_recheck_interval_days', 'blocklist_recheck_sources', 'blocklist_recheck_batch_size'],
     firewallFeed: ['firewall_threat_feed_enabled', 'firewall_mdr_feed_enabled', 'firewall_mdr_feed_firewall_ids', 'firewall_mdr_feed_sync_interval_seconds'],
     general: ['collector_interval', 'log_level', 'dashboard_title'],
     firewallRetention: ['firewall_log_retention_enabled', 'firewall_log_connection_retention_days', 'firewall_log_retention_days'],

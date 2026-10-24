@@ -905,6 +905,31 @@ _MIGRATIONS = [
     # alarm was. NULL on the ordinary rows, which are plain guessing.
     "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS monitored_password_id BIGINT",
     "ALTER TABLE honeypot_logins ADD COLUMN IF NOT EXISTS credential_alarm VARCHAR(20)",
+    # Weekly OSINT re-check of OSINT-based agent blocks (blocklist_recheck.py):
+    # when it last ran for this IP and what it found if the block stayed.
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS recheck_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS recheck_status VARCHAR(20)",
+    "ALTER TABLE blocked_ips ADD COLUMN IF NOT EXISTS recheck_note TEXT",
+    # Blocks the re-check lifted. Pure history: nothing reads it to make a
+    # decision, it records that there was a problem and what it was.
+    """
+    CREATE TABLE IF NOT EXISTS released_ips (
+        id BIGSERIAL PRIMARY KEY,
+        ip VARCHAR(45) NOT NULL,
+        blocked_at TIMESTAMP WITH TIME ZONE,
+        blocked_by VARCHAR(20),
+        source VARCHAR(40),
+        block_comment TEXT,
+        decision_id INTEGER,
+        released_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        released_by VARCHAR(20) NOT NULL DEFAULT 'recheck',
+        release_note TEXT,
+        osint_before JSONB,
+        osint_after JSONB
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_released_ips_ip ON released_ips (ip)",
+    "CREATE INDEX IF NOT EXISTS idx_released_ips_released ON released_ips (released_at DESC)",
 ]
 
 

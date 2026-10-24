@@ -162,6 +162,11 @@
                                     <i class="bi bi-fire"></i> <span data-i18n="blocked.tab_burned">Angreifer-Benutzernamen</span> <span class="badge bg-danger ms-1" id="tabCountBurned">0</span>
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-tab="released" role="tab" onclick="switchBlockedTab('released')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> <span data-i18n="blocked.tab_released">Released</span> <span class="badge bg-secondary ms-1" id="tabCountReleased">0</span>
+                                </button>
+                            </li>
                         </ul>
                     </div>
                     <div class="card-body">
@@ -396,6 +401,37 @@
                                         <th data-i18n="common.action">Aktion</th>
                                     </tr></thead>
                                     <tbody id="burnedTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Released: blocks the weekly OSINT re-check lifted (history only) -->
+                        <div class="blocked-pane" data-pane="released">
+                            <p class="admin-hint" data-i18n-html="blocked.hint_released">
+                                Agent blocks made on OSINT evidence are re-checked against the same providers once a week.
+                                When <strong>no provider flags the IP any more</strong> (e.g. the vulnerability was patched,
+                                the host was cleaned up), the block is lifted and the IP lands here.
+                                This list blocks nothing — it records that there was a problem and what it was.
+                            </p>
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                <div id="releasedStatus" class="flex-grow-1" style="font-size:.85rem"></div>
+                                <button class="btn btn-outline-primary btn-sm" id="releasedRunBtn" onclick="runBlocklistRecheck()"><i class="bi bi-arrow-repeat"></i> <span data-i18n="blocked.btn_recheck_now">Re-check now</span></button>
+                                <a class="btn btn-outline-secondary btn-sm" href="/admin-osint.html#blocklistRecheck"><i class="bi bi-gear"></i> <span data-i18n="blocked.btn_recheck_settings">Settings</span></a>
+                            </div>
+                            <div class="mb-2">
+                                <input type="text" data-filter-for="releasedTable" class="form-control form-control-sm" data-i18n-placeholder="blocked.filter_released" placeholder="Filter (IP, problem, provider…)">
+                            </div>
+                            <div class="table-scroll">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead><tr>
+                                        <th>IP</th>
+                                        <th data-i18n="blocked.col_problem">Original problem</th>
+                                        <th data-i18n="blocked.col_then_now">OSINT then → now</th>
+                                        <th data-i18n="blocked.col_blocked">Geblockt</th>
+                                        <th data-i18n="blocked.col_released">Released</th>
+                                        <th data-i18n="common.action">Aktion</th>
+                                    </tr></thead>
+                                    <tbody id="releasedTable"></tbody>
                                 </table>
                             </div>
                         </div>

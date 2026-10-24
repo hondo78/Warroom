@@ -172,6 +172,33 @@
                     </div>
                 </div>
 
+                <!-- Weekly OSINT re-check of OSINT-based blocks -->
+                <div class="card mb-3" id="blocklistRecheck">
+                    <div class="card-header"><h3 class="card-title mb-0" data-i18n="admin.recheckTitle">Blocklist — weekly OSINT re-check</h3></div>
+                    <div class="card-body">
+                        <p class="admin-hint" data-i18n-html="admin.recheckHint">Agent blocks from the sources below are re-checked against AbuseIPDB, VirusTotal, GreyNoise and Intelix with the same thresholds that blocked them (Shodan only when the block rested on High/Critical CVEs and everything else is clean). If no provider flags the IP any more, the block is lifted and the IP moves to <a href="/blocked.html">Blocklist → Released</a>. Missing answers or an exhausted quota keep the block. Monitored IPs and human blocks are never touched. Which providers run is set in the matrix above (row <code>recheck</code>).</p>
+                        <div class="row g-3">
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.recheckEnabled">Re-check active</label></div>
+                            <div class="col-md-8"><input type="checkbox" data-key="blocklist_recheck_enabled" data-bool="1"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.recheckInterval">Re-check every (days)</label></div>
+                            <div class="col-md-8"><input type="number" min="1" max="365" class="form-control form-control-sm" data-key="blocklist_recheck_interval_days"></div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.recheckSources">Block sources to re-check</label></div>
+                            <div class="col-md-8">
+                                <input type="text" class="form-control form-control-sm" data-key="blocklist_recheck_sources">
+                                <small class="admin-hint" data-i18n="admin.recheckSourcesHint">Comma-separated. triage = OSINT triage, anomaly = FW anomalies (OSINT verdict). WAF, IPS and login blocks are based on attacks seen here, not on OSINT — a clean OSINT result says nothing about them.</small>
+                            </div>
+                            <div class="col-md-4"><label class="form-label" data-i18n="admin.recheckBatch">IPs per hourly run</label></div>
+                            <div class="col-md-8">
+                                <input type="number" min="1" max="500" class="form-control form-control-sm" data-key="blocklist_recheck_batch_size">
+                                <small class="admin-hint" data-i18n="admin.recheckBatchHint">The weekly pass is spread over hourly batches so the providers' daily quotas hold. 25/h covers about 4,000 blocks per week.</small>
+                            </div>
+                        </div>
+                        <div class="text-end mt-3">
+                            <button class="btn btn-primary btn-sm" onclick="saveSection('blocklistRecheck')" data-i18n="common.save">Speichern</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- OSINT-Provider Quota Limits -->
 
                 <!-- OSINT-Provider Quota Limits -->

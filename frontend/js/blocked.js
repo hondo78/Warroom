@@ -32,6 +32,7 @@ function switchBlockedTab(tab) {
     // here that is pure history and needs no periodic refresh.
     if (tab === 'knownusers') updateKnownUserDecisions();
     if (tab === 'burned') updateBurnedTable();
+    if (tab === 'released') updateReleasedTable();
 }
 
 const _filterInputs = {};
@@ -69,6 +70,7 @@ async function refreshBlocked() {
         // fills is the summary of the instant-block trigger list and read 0 on
         // every page load until someone clicked the tab.
         updateBurnedTable(),
+        updateReleasedTable(),
     ]);
 }
 
@@ -276,7 +278,7 @@ async function updateBlockedIpsTable() {
                 <td><code>${escapeHtml(b.ip)}</code>${typeof osintButton === 'function' ? osintButton(b.ip, 'osint-btn', 'ip') : ''}</td>
                 <td>${escapeHtml(b.comment || '-')}</td>
                 <td>${formatTime(b.blocked_at)}</td>
-                <td>${blockOriginCell(b)}</td>
+                <td>${blockOriginCell(b)}${recheckBadge(b)}</td>
                 <td>${monitorToggleCell(b.ip, b.monitored)}</td>
                 <td><button class="restore-btn" onclick="unblockIp('${escapeJsAttr(b.ip)}', this)">${t('blocked.btn_unblock')}</button></td>
             </tr>`).join('');
@@ -938,5 +940,137 @@ async function updateKnownUserDecisions() {
         }).join('');
     } catch (err) {
         console.error('Known-user decisions failed:', err);
+    }
+}
+
+
+// === Released: blocks the weekly OSINT re-check lifted ===
+
+// Small hint under the origin badge of a blocklist row that the re-check has
+// looked at: when, and why the block stayed.
+function recheckBadge(b) {
+    if (!b.recheck_at) return '';
+    const cls = b.recheck_status === 'malicious' ? 'text-bg-danger' : 'text-bg-warning';
+    const label = b.recheck_status === 'malicious' ? t('blocked.recheck_still_bad') : t('blocked.recheck_unclear');
+    const title = `${t('blocked.recheck_at', {when: formatTime(b.recheck_at)})}\n${b.recheck_note || ''}`;
+    return `<div><span class="badge ${cls} mt-1" style="font-size:.68rem" title="${escapeAttr(title)}"><i class="bi bi-arrow-repeat"></i> ${escapeHtml(label)}</span></div>`;
+}
+
+// One line per OSINT signal, "then → now", so a reader sees at a glance what
+// the problem was and that it is gone.
+const RELEASE_SIGNALS = [
+    ['abuse_score', 'AbuseIPDB', v => v + '%'],
+    ['vt_malicious', 'VirusTotal', v => v + '×'],
+    ['greynoise', 'GreyNoise', v => v],
+    ['intelix_category', 'Intelix', v => v],
+    ['shodan_high_critical', 'Shodan High/Crit', v => v],
+];
+function releaseDiff(before, after) {
+    const fmt = (f, v) => (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(f(v)));
+    const lines = RELEASE_SIGNALS
+        .filter(([k]) => (before[k] ?? null) !== null || (after[k] ?? null) !== null)
+        .map(([k, name, f]) => `<div style="white-space:nowrap"><span class="text-secondary">${name}</span> <span class="text-danger">${fmt(f, before[k])}</span> → <span class="text-success">${fmt(f, after[k])}</span></div>`);
+    return lines.length ? `<div style="font-size:.75rem">${lines.join('')}</div>` : '—';
+}
+
+let _releasedLoading = false;
+async function updateReleasedTable() {
+    if (_releasedLoading) return;
+    _releasedLoading = true;
+    try {
+        const resp = await fetch('/api/firewall/released-ips');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const d = await resp.json();
+        const items = d.items || [];
+        setCount('tabCountReleased', items.length);
+        renderReleasedStatus(d.status || {});
+        const tbody = document.getElementById('releasedTable');
+        if (!tbody) return;
+        if (!items.length) {
+            tbody.innerHTML = emptyRow(6, t('blocked.empty_released'));
+            return;
+        }
+        tbody.innerHTML = items.map(r => {
+            const problem = r.block_comment || '-';
+            const again = r.blocked_again
+                ? `<div><span class="badge text-bg-danger mt-1">${t('blocked.released_blocked_again')}</span></div>` : '';
+            const action = r.blocked_again ? ''
+                : `<button class="restore-btn" onclick="reblockReleased('${escapeJsAttr(r.ip)}', ${r.id}, this)">${t('blocked.btn_block_again')}</button>`;
+            return `
+            <tr>
+                <td><code>${escapeHtml(r.ip)}</code>${typeof osintButton === 'function' ? osintButton(r.ip, 'osint-btn', 'ip') : ''}</td>
+                <td style="max-width:28rem"><div style="font-size:.8rem" title="${escapeAttr(problem)}">${escapeHtml(problem.length > 220 ? problem.slice(0, 220) + '…' : problem)}</div>
+                    <div class="mt-1">${blockOriginCell(r)}${r.decision_id ? ` <span class="text-secondary" style="font-size:.72rem">${t('blocked.released_decision', {id: r.decision_id})}</span>` : ''}</div></td>
+                <td title="${escapeAttr(r.release_note || '')}">${releaseDiff(r.osint_before || {}, r.osint_after || {})}</td>
+                <td>${formatTime(r.blocked_at)}</td>
+                <td>${formatTime(r.released_at)}${again}</td>
+                <td>${action}</td>
+            </tr>`;
+        }).join('');
+        _releasedById = Object.fromEntries(items.map(r => [r.id, r]));
+    } catch (err) {
+        console.error('Released IPs update failed:', err);
+    } finally {
+        _releasedLoading = false;
+    }
+}
+let _releasedById = {};
+
+function renderReleasedStatus(st) {
+    const el = document.getElementById('releasedStatus');
+    if (!el) return;
+    const state = st.enabled
+        ? `<span class="badge text-bg-success">${t('blocked.recheck_on')}</span>`
+        : `<span class="badge text-bg-secondary">${t('blocked.recheck_off')}</span>`;
+    const scope = t('blocked.recheck_scope', {
+        n: (st.in_scope || 0).toLocaleString(BLK_LOCALE),
+        due: (st.due || 0).toLocaleString(BLK_LOCALE),
+        days: st.interval_days || 7,
+        sources: (st.sources || []).map(blockSourceLabel).join(', ') || '—',
+    });
+    let last = '';
+    const lr = st.last_run;
+    if (lr && lr.finished_at) {
+        last = '<br>' + t('blocked.recheck_last', {
+            when: formatTime(lr.finished_at), checked: lr.checked || 0,
+            released: lr.released || 0, malicious: lr.malicious || 0, unclear: lr.inconclusive || 0,
+        }) + (lr.stopped ? ` · <span class="text-warning">${escapeHtml(lr.stopped)}</span>` : '');
+    }
+    el.innerHTML = `${state} ${escapeHtml(scope)}${last}`;
+}
+
+async function runBlocklistRecheck() {
+    const btn = document.getElementById('releasedRunBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/released-ips/run', { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        alert(t('blocked.recheck_started'));
+    } catch (err) {
+        alert(t('blocked.err_recheck_failed') + err.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function reblockReleased(ip, id, btn) {
+    if (!confirm(t('blocked.confirm_block_again', { ip }))) return;
+    const prev = (_releasedById[id] || {}).block_comment || '';
+    const comment = (t('blocked.reblock_comment') + ' ' + prev).slice(0, 500);
+    btn.disabled = true;
+    try {
+        const r = await fetch('/api/firewall/block-ip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip, comment }),
+        });
+        if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            throw new Error(e.detail || `HTTP ${r.status}`);
+        }
+        await refreshBlocked();
+    } catch (err) {
+        alert(t('blocked.err_recheck_failed') + err.message);
+        btn.disabled = false;
     }
 }

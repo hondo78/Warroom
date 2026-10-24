@@ -220,6 +220,31 @@ class BlockedIp(Base):
     # 'waf' | 'ips' | 'failed_login' | 'event' | 'triage' | …).
     blocked_by = Column(String(20), nullable=False, default="human")
     source = Column(String(40), nullable=False, default="manual")
+    # Weekly OSINT re-check (blocklist_recheck.py): last run for this IP and
+    # why the block stayed ('malicious' | 'inconclusive').
+    recheck_at = Column(DateTime(timezone=True))
+    recheck_status = Column(String(20))
+    recheck_note = Column(Text)
+
+
+class ReleasedIp(Base):
+    """A block the weekly OSINT re-check lifted because every provider came
+    back clean. History only — it keeps the original problem (the block's
+    comment and the OSINT evidence at the time) next to the clean result."""
+    __tablename__ = "released_ips"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    ip = Column(String(45), nullable=False, index=True)
+    blocked_at = Column(DateTime(timezone=True))
+    blocked_by = Column(String(20))
+    source = Column(String(40))
+    block_comment = Column(Text)
+    decision_id = Column(Integer)
+    released_at = Column(DateTime(timezone=True), server_default=func.now())
+    released_by = Column(String(20), nullable=False, default="recheck")
+    release_note = Column(Text)
+    osint_before = Column(JSONB)
+    osint_after = Column(JSONB)
 
 
 class WatchlistIp(Base):

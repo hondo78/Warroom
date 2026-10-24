@@ -740,6 +740,7 @@ CONTEXTS = {
     "honeypot": "Decoy login captures",
     "mcp":      "MCP tools (LLM clients)",
     "command":  "Teams / Telegram commands",
+    "recheck":  "Weekly re-check of OSINT-based blocks",
 }
 
 # Defaults chosen by cost per context, not by taste:
@@ -757,6 +758,11 @@ _DEFAULT_MATRIX: dict[str, dict[str, bool]] = {
     "honeypot": {p: False for p in PAID_PROVIDERS},
     "mcp":      {"abuseipdb": True, "virustotal": True, "greynoise": True,
                  "ipinfo": True, "intelix": False, "shodan": False},
+    # The re-check needs the providers that can make an IP count as malicious.
+    # Shodan stays off here: the re-check queries it itself, and only for IPs
+    # whose block rested on Shodan CVEs.
+    "recheck":  {"abuseipdb": True, "virustotal": True, "greynoise": True,
+                 "ipinfo": False, "intelix": True, "shodan": False},
 }
 
 
@@ -1015,13 +1021,16 @@ async def _persist_osint(value: str, itype: str, payload: dict[str, Any]) -> Non
         # stored row erased real enrichment: an IP AbuseIPDB scored 100 read back
         # as unrated after a single honeypot lookup, which runs with the paid
         # providers off. A provider that did not run does not get to overwrite
-        # what the last one that did found.
+        # what the last one that did found. The same goes for one that failed
+        # (HTTP 429, timeout): GreyNoise's community API rate-limits often, and
+        # each 429 turned a stored "malicious" into NULL.
         skipped_cols = {
             c
             for prov, provider_cols in _PERSIST_PROVIDER_COLS.items()
             for c in provider_cols
             if isinstance(payload.get(prov), dict)
-            and payload[prov].get("reason") == "disabled_by_matrix"
+            and (payload[prov].get("reason") == "disabled_by_matrix"
+                 or payload[prov].get("available") is False)
         }
         async with async_session() as db:
             stmt = pg_insert(OsintResult).values(lookup_count=1, **cols)

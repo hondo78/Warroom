@@ -22,7 +22,7 @@ from app.database import async_session, ensure_schema, get_db, request_session
 from app.geoip_service import get_redis, close_redis
 from fastapi.responses import PlainTextResponse
 
-from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, KnownUserOverride, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, Honeypot, HoneypotEvent, HoneypotLogin, HoneypotProcessWhitelist, M365LoginProfile, MonitoredConnection, MonitoredEvent, MonitoredPassword, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
+from app.models import AgentApprovalPattern, AgentDecision, Alert, AnomalyVerdict, AppSetting, KnownUserOverride, BlockedDomain, BlockedIp, BlockedUrl, Detection, Endpoint, Event, FirewallLocation, FirewallLog, GeoIPCache, ReleasedIp, Honeypot, HoneypotEvent, HoneypotLogin, HoneypotProcessWhitelist, M365LoginProfile, MonitoredConnection, MonitoredEvent, MonitoredPassword, NetflowBucket, NetflowIfaceBucket, O365AuditLog, OsintResult, ShodanHost, WatchlistIp, WhitelistedIp
 from app.o365_client import app_display_name, o365_client
 from app import services as service_catalog
 from app.sophos_client import sophos_client
@@ -302,6 +302,14 @@ async def lifespan(app: FastAPI):
         monitor_scan, "interval",
         seconds=max(15, settings.ip_monitor_interval_seconds),
         id="ip_monitor_scan",
+    )
+    # Weekly OSINT re-check of OSINT-based agent blocks; lifts the ones every
+    # provider now calls clean. Hourly small batches spread the weekly pass
+    # over the providers' daily quotas. No-op while disabled.
+    from app.blocklist_recheck import blocklist_recheck_job
+    scheduler.add_job(
+        blocklist_recheck_job, "interval", hours=1,
+        id="blocklist_recheck", max_instances=1, coalesce=True,
     )
     scheduler.start()
     # Run initial collection after short delay
@@ -3627,6 +3635,9 @@ async def list_blocked_ips(db: AsyncSession = Depends(get_db)):
                 "monitored": bool(b.monitored),
                 "blocked_by": b.blocked_by or "human",
                 "source": b.source or "manual",
+                "recheck_at": b.recheck_at.isoformat() if b.recheck_at else None,
+                "recheck_status": b.recheck_status,
+                "recheck_note": b.recheck_note,
             }
             for b in rows
         ],
@@ -3731,6 +3742,63 @@ async def unblock_ip(body: BlockIpIn, db: AsyncSession = Depends(get_db)):
     await db.delete(entry)
     await db.commit()
     return {"ok": True}
+
+
+@app.get("/api/firewall/released-ips")
+async def list_released_ips(limit: int = Query(500, ge=1, le=5000), db: AsyncSession = Depends(get_db)):
+    """Blocks the weekly OSINT re-check lifted, newest first, plus the job's
+    state. History only: each row keeps the original problem next to the
+    clean result that released it."""
+    from app import blocklist_recheck as rc
+    rows = (await db.execute(
+        select(ReleasedIp).order_by(ReleasedIp.released_at.desc()).limit(limit)
+    )).scalars().all()
+    reblocked = set((await db.execute(
+        select(BlockedIp.ip).where(BlockedIp.ip.in_({r.ip for r in rows}))
+    )).scalars().all()) if rows else set()
+    due = (await db.execute(
+        select(func.count()).select_from(rc.due_query().subquery())
+    )).scalar() or 0
+    in_scope = (await db.execute(
+        select(func.count()).select_from(BlockedIp)
+        .where(BlockedIp.blocked_by == "agent", BlockedIp.source.in_(rc._sources()),
+               BlockedIp.monitored.is_(False))
+    )).scalar() or 0
+    return {
+        "items": [
+            {
+                "id": r.id, "ip": r.ip,
+                "blocked_at": r.blocked_at.isoformat() if r.blocked_at else None,
+                "blocked_by": r.blocked_by, "source": r.source,
+                "block_comment": r.block_comment, "decision_id": r.decision_id,
+                "released_at": r.released_at.isoformat() if r.released_at else None,
+                "released_by": r.released_by, "release_note": r.release_note,
+                "osint_before": r.osint_before or {}, "osint_after": r.osint_after or {},
+                "blocked_again": r.ip in reblocked,
+            }
+            for r in rows
+        ],
+        "status": {
+            "enabled": bool(settings.blocklist_recheck_enabled),
+            "interval_days": settings.blocklist_recheck_interval_days,
+            "sources": rc._sources(),
+            "batch_size": settings.blocklist_recheck_batch_size,
+            "in_scope": in_scope,
+            "due": due,
+            "last_run": await rc.last_run(),
+        },
+    }
+
+
+@app.post("/api/firewall/released-ips/run")
+async def run_blocklist_recheck():
+    """Start one re-check batch now (also while the weekly job is switched
+    off). Runs in the background — a batch pauses between IPs for the
+    providers' rate limits and takes minutes."""
+    from app.blocklist_recheck import blocklist_recheck_job
+    scheduler.add_job(blocklist_recheck_job, "date", kwargs={"force": True},
+                      id="blocklist_recheck_manual", replace_existing=True)
+    return {"ok": True, "scheduled": True}
 
 
 @app.get("/ioc_IP", response_class=PlainTextResponse)
@@ -7235,6 +7303,10 @@ class AdminSettingsIn(BaseModel):
     sophos_client_secret: str | None = None
     sophos_tenant_id: str | None = None
     firewall_threat_feed_enabled: bool | None = None
+    blocklist_recheck_enabled: bool | None = None
+    blocklist_recheck_interval_days: int | None = Field(default=None, ge=1, le=365)
+    blocklist_recheck_sources: str | None = Field(default=None, max_length=500)
+    blocklist_recheck_batch_size: int | None = Field(default=None, ge=1, le=500)
     firewall_mdr_feed_enabled: bool | None = None
     firewall_mdr_feed_firewall_ids: str | None = Field(default=None, max_length=4000)
     firewall_mdr_feed_sync_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
