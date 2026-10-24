@@ -6,6 +6,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+from typing import Literal
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Body, FastAPI, Depends, Header, HTTPException, Query, Request, status
@@ -7910,6 +7911,58 @@ async def approve_all_pending(body: BulkApproveIn | None = None, db: AsyncSessio
         "approved": len(approved),
         "failed": len(errors),
         "ids": approved,
+        "errors": errors,
+    }
+
+
+class BulkDecisionIn(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=500)
+    decision: Literal["approve", "reject"]
+    comment: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/agent/decisions/bulk")
+async def bulk_decide(body: BulkDecisionIn, db: AsyncSession = Depends(get_db)):
+    """Approve or reject an explicit selection of decisions. Only rows that are
+    still pending are touched — anything decided in the meantime (by another
+    user, Telegram or auto-approval) is reported as skipped. Approvals run
+    through execute_decision one by one, so whitelist guards apply per row."""
+    ids = list(dict.fromkeys(body.ids))
+    rows = (await db.execute(
+        select(AgentDecision).where(AgentDecision.id.in_(ids)).order_by(AgentDecision.id.asc())
+    )).scalars().all()
+    pending = [r for r in rows if r.status == "pending"]
+    pending_ids = {r.id for r in pending}
+    skipped = [i for i in ids if i not in pending_ids]
+
+    now = datetime.now(timezone.utc)
+    for rec in pending:
+        if body.comment:
+            rec.human_comment = body.comment
+        if body.decision == "reject":
+            rec.status = "rejected"
+            rec.decided_at = now
+    await db.commit()
+
+    from app.agent import execute_decision, record_feedback_by_id
+    done: list[int] = []
+    errors: list[dict[str, str | int]] = []
+    for rec in pending:
+        try:
+            if body.decision == "approve":
+                await execute_decision(rec.id)
+            done.append(rec.id)
+            await record_feedback_by_id(rec.id, approved=body.decision == "approve")
+        except Exception as e:
+            errors.append({"id": rec.id, "error": str(e)[:200]})
+            logger.warning(f"bulk-{body.decision}: decision {rec.id} failed: {e}")
+    return {
+        "ok": True,
+        "decision": body.decision,
+        "done": len(done),
+        "failed": len(errors),
+        "skipped": len(skipped),
+        "ids": done,
         "errors": errors,
     }
 

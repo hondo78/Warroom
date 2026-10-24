@@ -185,6 +185,16 @@ window.I18N.en.agent = {
     running: "… running",
     bulk_executed: "{n} executed",
     bulk_failed: ", {n} failed (see console)",
+    bulk_selected: "{n} selected",
+    bulk_comment_placeholder: "Comment for all selected (optional)",
+    bulk_approve_selected: "Approve selected",
+    bulk_reject_selected: "Reject selected",
+    bulk_clear: "Clear selection",
+    bulk_select_all_title: "Select all visible pending decisions",
+    bulk_approve_confirm: "Approve and execute {n} selected decision(s)?\n\nWhitelist and security checks still apply per decision.",
+    bulk_reject_confirm: "Reject {n} selected decision(s)?",
+    bulk_rejected: "{n} rejected",
+    bulk_skipped: ", {n} skipped (no longer pending)",
 
     // auto-approval provenance + post-hoc decline
     auto_approved_title: "Auto-approved (learned pattern)",

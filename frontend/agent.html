@@ -400,9 +400,17 @@
                                 <i class="bi bi-check2-all"></i> <span data-i18n="agent.approve_all">Alle Pending genehmigen</span>
                             </button>
                         </div>
+                        <div id="aBulkBar" class="agent-bulk-bar d-none">
+                            <strong id="aBulkCount"></strong>
+                            <input type="text" id="aBulkComment" class="form-control form-control-sm" maxlength="2000" data-i18n-placeholder="agent.bulk_comment_placeholder" placeholder="Comment for all selected (optional)">
+                            <button type="button" id="aBulkApprove" class="btn btn-success btn-sm" onclick="bulkDecide('approve')"><i class="bi bi-check2"></i> <span data-i18n="agent.bulk_approve_selected">Approve selected</span></button>
+                            <button type="button" id="aBulkReject" class="btn btn-outline-danger btn-sm" onclick="bulkDecide('reject')"><i class="bi bi-x"></i> <span data-i18n="agent.bulk_reject_selected">Reject selected</span></button>
+                            <button type="button" class="btn btn-link btn-sm" onclick="clearAgentSelection()" data-i18n="agent.bulk_clear">Clear selection</button>
+                        </div>
                         <div class="table-scroll" style="max-height:560px">
                             <table class="table table-sm table-hover align-middle">
                                 <thead><tr>
+                                    <th style="width:1.8rem"><input type="checkbox" id="aSelectAll" class="form-check-input" onclick="toggleAgentSelectAll(this.checked)" data-i18n-title="agent.bulk_select_all_title" title="Select all visible pending decisions"></th>
                                     <th data-i18n="common.time">Zeit</th><th data-i18n="agent.col_source">Quelle</th><th data-i18n="common.action">Action</th>
                                     <th data-i18n="agent.col_reasoning">Begründung</th><th data-i18n="agent.col_alarm">Alarm</th><th data-i18n="common.status">Status</th><th></th>
                                 </tr></thead>

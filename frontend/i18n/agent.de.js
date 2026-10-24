@@ -185,6 +185,16 @@ window.I18N.de.agent = {
     running: "… läuft",
     bulk_executed: "{n} ausgeführt",
     bulk_failed: ", {n} fehlgeschlagen (siehe Konsole)",
+    bulk_selected: "{n} ausgewählt",
+    bulk_comment_placeholder: "Kommentar für alle ausgewählten (optional)",
+    bulk_approve_selected: "Ausgewählte genehmigen",
+    bulk_reject_selected: "Ausgewählte ablehnen",
+    bulk_clear: "Auswahl aufheben",
+    bulk_select_all_title: "Alle sichtbaren pending Decisions auswählen",
+    bulk_approve_confirm: "{n} ausgewählte Decision(s) genehmigen und ausführen?\n\nWhitelist- und Sicherheits-Checks greifen weiterhin pro Decision.",
+    bulk_reject_confirm: "{n} ausgewählte Decision(s) ablehnen?",
+    bulk_rejected: "{n} abgelehnt",
+    bulk_skipped: ", {n} übersprungen (nicht mehr pending)",
 
     // Auto-Freigabe-Herkunft + nachträgliches Declinen
     auto_approved_title: "Auto-freigegeben (gelerntes Muster)",

@@ -135,6 +135,8 @@ async function updateAgentList() {
         const tbody = document.getElementById('aDecisionsTable');
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1.5rem">${t('agent.no_decisions')}</td></tr>`;
+            _aSelected.clear();
+            syncAgentBulkBar();
             return;
         }
         tbody.innerHTML = items.map(d => {
@@ -197,7 +199,12 @@ async function updateAgentList() {
             }
             const statusCls = ({executed: 'health-good', rejected: 'health-unknown', superseded: 'health-unknown', failed: 'health-bad', pending: 'health-suspicious'}[d.status] || 'health-unknown');
             return `
-                <tr style="cursor:pointer" onclick="showAgentDetail(${d.id})">
+                <tr style="cursor:pointer" onclick="showAgentDetail(${d.id})"${d.status === 'pending' ? ` data-pending-id="${d.id}"` : ''}>
+                    <td onclick="event.stopPropagation()">${
+                        d.status === 'pending'
+                            ? `<input type="checkbox" class="form-check-input agent-sel" value="${d.id}"${_aSelected.has(d.id) ? ' checked' : ''} onchange="toggleAgentSelection(${d.id}, this.checked)">`
+                            : ''
+                    }</td>
                     <td>${formatTime(d.created_at)}</td>
                     <td>${actor}</td>
                     <td>${actionBadge}</td>
@@ -211,7 +218,105 @@ async function updateAgentList() {
                     }</td>
                 </tr>`;
         }).join('');
+        // A poll refresh re-renders the table: keep only selections that are
+        // still pending and on screen, so a decision Telegram or the
+        // auto-approver handled meanwhile can't be bulk-decided twice.
+        const stillPending = new Set(items.filter(x => x.status === 'pending').map(x => x.id));
+        for (const id of [..._aSelected]) if (!stillPending.has(id)) _aSelected.delete(id);
+        applyAgentTextFilter();
+        syncAgentBulkBar();
     } catch (err) { console.error(err); }
+}
+
+// === Bulk selection ===
+const _aSelected = new Set();
+
+function visiblePendingCheckboxes() {
+    return [...document.querySelectorAll('#aDecisionsTable input.agent-sel')]
+        .filter(cb => cb.closest('tr').style.display !== 'none');
+}
+
+function toggleAgentSelection(id, on) {
+    if (on) _aSelected.add(id); else _aSelected.delete(id);
+    syncAgentBulkBar();
+}
+
+function toggleAgentSelectAll(on) {
+    visiblePendingCheckboxes().forEach(cb => {
+        cb.checked = on;
+        const id = Number(cb.value);
+        if (on) _aSelected.add(id); else _aSelected.delete(id);
+    });
+    syncAgentBulkBar();
+}
+
+function clearAgentSelection() {
+    _aSelected.clear();
+    document.querySelectorAll('#aDecisionsTable input.agent-sel').forEach(cb => { cb.checked = false; });
+    syncAgentBulkBar();
+}
+
+function syncAgentBulkBar() {
+    const bar = document.getElementById('aBulkBar');
+    const n = _aSelected.size;
+    if (bar) {
+        bar.classList.toggle('d-none', n === 0);
+        document.getElementById('aBulkCount').textContent = t('agent.bulk_selected', {n});
+    }
+    const all = document.getElementById('aSelectAll');
+    if (all) {
+        const vis = visiblePendingCheckboxes();
+        const checked = vis.filter(cb => cb.checked).length;
+        all.disabled = vis.length === 0;
+        all.checked = vis.length > 0 && checked === vis.length;
+        all.indeterminate = checked > 0 && checked < vis.length;
+    }
+}
+
+// The search box above the table: plain substring filter over the row text.
+function applyAgentTextFilter() {
+    const input = document.querySelector('input[data-filter-for="aDecisionsTable"]');
+    const q = (input?.value || '').toLowerCase().trim();
+    document.querySelectorAll('#aDecisionsTable > tr').forEach(tr => {
+        tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelector('input[data-filter-for="aDecisionsTable"]')
+        ?.addEventListener('input', () => { applyAgentTextFilter(); syncAgentBulkBar(); });
+});
+
+async function bulkDecide(decision) {
+    const ids = [..._aSelected];
+    if (!ids.length) return;
+    const confirmKey = decision === 'approve' ? 'agent.bulk_approve_confirm' : 'agent.bulk_reject_confirm';
+    if (!confirm(t(confirmKey, {n: ids.length}))) return;
+    const comment = document.getElementById('aBulkComment')?.value.trim() || null;
+    const btns = ['aBulkApprove', 'aBulkReject'].map(id => document.getElementById(id));
+    btns.forEach(b => { if (b) b.disabled = true; });
+    try {
+        const r = await fetch('/api/agent/decisions/bulk', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ids, decision, comment}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+        let msg = t(decision === 'approve' ? 'agent.bulk_executed' : 'agent.bulk_rejected', {n: d.done});
+        if (d.failed) msg += t('agent.bulk_failed', {n: d.failed});
+        if (d.skipped) msg += t('agent.bulk_skipped', {n: d.skipped});
+        if (d.errors?.length) console.warn(`bulk-${decision} errors:`, d.errors);
+        alert(msg);
+        _aSelected.clear();
+        const c = document.getElementById('aBulkComment'); if (c) c.value = '';
+        await refreshAgentPage();
+    } catch (err) {
+        alert(t('agent.error') + ': ' + err.message);
+    } finally {
+        btns.forEach(b => { if (b) b.disabled = false; });
+        syncAgentBulkBar();
+    }
 }
 
 async function showAgentDetail(id) {
